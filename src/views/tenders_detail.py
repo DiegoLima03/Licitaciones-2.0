@@ -594,40 +594,46 @@ def render_formulario_alta_entrega(client, lic_id, data, items_db):
     opciones_select = sorted(list(mapa_presu_ids.keys())) + ["➕ Gasto NO Presupuestado / Extra"]
 
     with st.container(border=True):
-        c1, c2 = st.columns(2)
-        # APLICAMOS FORMATO EUROPEO AL WIDGET
-        fecha = c1.date_input("Fecha Documento", datetime.now(), format="DD/MM/YYYY")
-        alb = c2.text_input("Nº Albarán / Referencia / Parte")
-        notas = st.text_area("Notas Globales", height=60, placeholder="Comentarios generales...")
-        
-        st.divider()
-        st.markdown("**Detalle de Líneas (Indica el proveedor en cada línea):**")
-        
-        if 'df_entrega_temp' not in st.session_state:
-            st.session_state['df_entrega_temp'] = pd.DataFrame(
-                [{"Concepto / Partida": "", "Proveedor": "", "Cantidad": 0.0, "Coste Unit.": 0.0}] * 3
-            )
+        # Usamos st.form para evitar recargas constantes al editar la tabla
+        with st.form("frm_alta_entrega", clear_on_submit=False):
+            c1, c2 = st.columns(2)
+            # APLICAMOS FORMATO EUROPEO AL WIDGET
+            fecha = c1.date_input("Fecha Documento", datetime.now(), format="DD/MM/YYYY")
+            alb = c2.text_input("Nº Albarán / Referencia / Parte")
+            notas = st.text_area("Notas Globales", height=60, placeholder="Comentarios generales...")
+            
+            st.divider()
+            st.markdown("**Detalle de Líneas (Indica el proveedor en cada línea):**")
+            
+            if 'df_entrega_temp' not in st.session_state:
+                st.session_state['df_entrega_temp'] = pd.DataFrame(
+                    [{"Concepto / Partida": "", "Proveedor": "", "Cantidad": 0.0, "Coste Unit.": 0.0}] * 3
+                )
 
-        col_cfg = {
-            "Concepto / Partida": st.column_config.SelectboxColumn(
-                "Partida Presupuesto", options=opciones_select, width="large", required=True
-            ),
-            "Proveedor": st.column_config.TextColumn("Proveedor", width="medium", required=True),
-            "Cantidad": st.column_config.NumberColumn("Cant.", min_value=0.0, step=0.1, format="%.2f"),
-            "Coste Unit.": st.column_config.NumberColumn("Coste (€)", min_value=0.0, step=0.01, format="%.2f €")
-        }
+            col_cfg = {
+                "Concepto / Partida": st.column_config.SelectboxColumn(
+                    "Partida Presupuesto", options=opciones_select, width="large", required=True
+                ),
+                "Proveedor": st.column_config.TextColumn("Proveedor", width="medium", required=True),
+                "Cantidad": st.column_config.NumberColumn("Cant.", min_value=0.0, step=0.1, format="%.2f"),
+                "Coste Unit.": st.column_config.NumberColumn("Coste (€)", min_value=0.0, step=0.01, format="%.2f €")
+            }
+            
+            edited_df = st.data_editor(
+                st.session_state['df_entrega_temp'],
+                column_config=col_cfg,
+                num_rows="dynamic",
+                use_container_width=True,
+                key="editor_nueva_entrega_full"
+            )
+            
+            st.write("")
+            submitted = st.form_submit_button("💾 Guardar Documento y Finalizar", type="primary", use_container_width=True)
         
-        edited_df = st.data_editor(
-            st.session_state['df_entrega_temp'],
-            column_config=col_cfg,
-            num_rows="dynamic",
-            use_container_width=True,
-            key="editor_nueva_entrega_full"
-        )
-        
-        st.write("")
-        
-        if st.button("💾 Guardar Documento y Finalizar", type="primary", use_container_width=True):
+        if submitted:
+            # Guardamos estado temporal por si falla la validación y se recarga
+            st.session_state['df_entrega_temp'] = edited_df
+            
             if not alb:
                 st.error("⚠️ Falta el Nº de Referencia.")
             else:
