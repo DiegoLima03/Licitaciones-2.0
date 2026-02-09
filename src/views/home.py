@@ -38,3 +38,19 @@ def render_menu():
             st.warning("🔒 Gestión de Licitaciones")
             st.write("Acceso restringido a Administradores.")
             st.button("🚫 Acceso Denegado", disabled=True, use_container_width=True)
+
+    st.write("")
+    col3, col4 = st.columns(2)
+
+    # --- OPCIÓN 3: KPI (SOLO ADMIN) ---
+    with col3:
+        if rol == 'ADMIN':
+            st.error("📊 KPIs y Estadísticas")
+            st.write("Cuadro de mando general.")
+            if st.button("Ver KPIs ➡", use_container_width=True):
+                st.session_state['app_mode'] = 'KPI'
+                st.rerun()
+        else:
+            st.warning("🔒 KPIs")
+            st.write("Acceso restringido.")
+            st.button("🚫", disabled=True, use_container_width=True, key="btn_kpi_disabled")
