@@ -154,10 +154,11 @@ def render_nueva(client, maestros):
             nombre = c1.text_input("Nombre del Proyecto")
             exp = c2.text_input("Nº Expediente")
             
-            c_f1, c_f2 = st.columns(2)
+            c_f1, c_f2, c_f3 = st.columns(3)
             # APLICAMOS FORMATO EUROPEO AQUI
             f_pres = c_f1.date_input("F. Presentación", value=datetime.now(), format="DD/MM/YYYY") 
             f_adj = c_f2.date_input("F. Adjudicación", value=datetime.now(), format="DD/MM/YYYY")
+            f_fin = c_f3.date_input("F. Finalización", value=datetime.now(), format="DD/MM/YYYY")
 
             c3, c4, c5 = st.columns(3)
             pres = c3.number_input("Presupuesto Max (€)", step=100.0)
@@ -189,7 +190,8 @@ def render_nueva(client, maestros):
                     "id_estado": maestros['estados_name_map'][est],
                     "tipo_de_licitacion": maestros['tipos_name_map'].get(tip),
                     "fecha_presentacion": str(f_pres), 
-                    "fecha_adjudicacion": str(f_adj)
+                    "fecha_adjudicacion": str(f_adj),
+                    "fecha_finalizacion": str(f_fin)
                 }
                 
                 res = client.table("tbl_licitaciones").insert(obj).execute()

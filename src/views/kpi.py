@@ -1,4 +1,5 @@
 import streamlit as st
+import altair as alt
 from src.utils import fmt_num, boton_volver
 from src.logic.dashboard_analytics import calcular_kpis_generales
 
@@ -61,3 +62,19 @@ def render_kpi_dashboard(client, maestros):
                 st.bar_chart(kpis['df_tipos'], horizontal=True, color="#C9302C") # Rojo más oscuro
             else:
                 st.info("No hay datos de tipos suficientes.")
+
+        st.divider()
+        st.markdown("### 🗓️ Cronograma de Contratos (Timeline)")
+        
+        if not kpis['df_timeline'].empty:
+            chart = alt.Chart(kpis['df_timeline']).mark_bar().encode(
+                x=alt.X('fecha_inicio_dt', title='Inicio'),
+                x2='fecha_fin_dt',
+                y=alt.Y('nombre', sort=None, title='Proyecto'),
+                color=alt.Color('estado_nombre', title='Estado'),
+                tooltip=['nombre', 'fecha_inicio_dt', 'fecha_fin_dt', 'pres_maximo', 'estado_nombre']
+            ).interactive()
+            
+            st.altair_chart(chart, use_container_width=True)
+        else:
+            st.info("No hay suficientes licitaciones con fechas de inicio y fin definidas para generar el cronograma.")

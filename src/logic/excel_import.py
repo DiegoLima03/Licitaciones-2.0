@@ -68,36 +68,48 @@ def analizar_excel_licitacion(uploaded_file, tipo_id: int):
     except Exception as e:
         return False, f"Error leyendo archivo: {str(e)}"
 
-def guardar_datos_importados(df, lic_id: int, client):
+def guardar_datos_importados(df, lic_id: int, client, tipo_id: int, dto_global: float):
     """
     PASO 2: Recibe el DataFrame ya validado e inserta en Supabase.
+    Para licitaciones Tipo 2, recalcula el PVU aplicando el descuento global.
     """
     try:
         count = 0
         total_rows = len(df)
         
-        progress_text = "Guardando en base de datos..."
+        progress_text = f"Procesando y guardando {total_rows} líneas..."
         my_bar = st.progress(0, text=progress_text)
 
         # Convertimos a lista de diccionarios para iterar
         records = df.to_dict('records')
+        to_insert = []
         
         for index, row in enumerate(records):
-            # Insertamos fila a fila (o podrías hacer upsert masivo si prefieres)
-            client.table("tbl_licitaciones_detalle").insert({
+            val_pmax = row.get('pmaxu')
+            val_pvu = row.get('pvu')
+
+            # Para Tipo 2, recalculamos el PVU ignorando el del Excel
+            if tipo_id == 2 and val_pmax is not None:
+                val_pvu = float(val_pmax) * (1 - (dto_global / 100))
+
+            to_insert.append({
                 "id_licitacion": lic_id,
                 "lote": row['lote'],
                 "producto": row['producto'],
                 "unidades": row['unidades'],
-                "pvu": row['pvu'],
-                "pcu": row['pcu'],
-                "pmaxu": row['pmaxu'],
+                "pvu": val_pvu,
+                "pcu": row.get('pcu'),
+                "pmaxu": val_pmax,
                 "activo": row['activo']
-            }).execute()
+            })
             
             count += 1
-            if index % 5 == 0:
-                my_bar.progress(min((index + 1) / total_rows, 1.0))
+            if index % 5 == 0 or index == total_rows - 1:
+                my_bar.progress(min((index + 1) / total_rows, 1.0), text=f"Procesando {index+1}/{total_rows}")
+
+        # Inserción masiva para mayor eficiencia
+        if to_insert:
+            client.table("tbl_licitaciones_detalle").insert(to_insert).execute()
         
         my_bar.empty()
         return True, f"✅ Se han importado correctamente {count} partidas."

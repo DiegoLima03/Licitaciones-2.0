@@ -7,7 +7,7 @@ def calcular_kpis_generales(client, maestros):
     """
     # 1. Obtener datos mínimos necesarios (ID, Presupuesto, Estado)
     try:
-        response = client.table("tbl_licitaciones").select("id_licitacion, pres_maximo, id_estado, tipo_de_licitacion, fecha_presentacion").execute()
+        response = client.table("tbl_licitaciones").select("id_licitacion, nombre, pres_maximo, id_estado, tipo_de_licitacion, fecha_presentacion, fecha_adjudicacion, fecha_finalizacion").execute()
         data = response.data
     except Exception as e:
         print(f"Error calculando KPIs: {e}")
@@ -22,7 +22,8 @@ def calcular_kpis_generales(client, maestros):
             "win_rate": 0.0,
             "total_monto_historico": 0.0,
             "df_mensual": pd.Series(dtype=float),
-            "df_tipos": pd.Series(dtype=float)
+            "df_tipos": pd.Series(dtype=float),
+            "df_timeline": pd.DataFrame()
         }
 
     df = pd.DataFrame(data)
@@ -71,6 +72,20 @@ def calcular_kpis_generales(client, maestros):
     # B) Distribución por Tipo
     df_tipos = df.groupby('tipo_nombre')['pres_maximo'].sum().sort_values(ascending=False)
 
+    # C) Timeline (Cronograma)
+    # Usamos Fecha Adjudicación como inicio, si no existe, usamos Presentación
+    df['fecha_inicio_dt'] = pd.to_datetime(df['fecha_adjudicacion'], errors='coerce').fillna(df['fecha_dt'])
+    
+    if 'fecha_finalizacion' in df.columns:
+        df['fecha_fin_dt'] = pd.to_datetime(df['fecha_finalizacion'], errors='coerce')
+    else:
+        df['fecha_fin_dt'] = pd.NaT
+    
+    # Filtramos solo las que tengan fechas válidas para el gráfico
+    df_timeline = df.dropna(subset=['fecha_inicio_dt', 'fecha_fin_dt']).copy()
+    # Aseguramos que fin >= inicio
+    df_timeline = df_timeline[df_timeline['fecha_fin_dt'] >= df_timeline['fecha_inicio_dt']]
+
     return {
         "total_count": total_count,
         "pipeline_monto": pipeline_monto,
@@ -78,5 +93,6 @@ def calcular_kpis_generales(client, maestros):
         "win_rate": win_rate,
         "total_monto_historico": total_monto_historico,
         "df_mensual": df_mensual,
-        "df_tipos": df_tipos
+        "df_tipos": df_tipos,
+        "df_timeline": df_timeline
     }

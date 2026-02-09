@@ -119,29 +119,31 @@ def render_configuracion_cabecera(client, lic_id, data, maestros):
     c1, c2, c3 = st.columns(3)
     n_exp = c1.text_input("Expediente", value=data.get('numero_expediente', ''))
     n_pres = c2.number_input("Presupuesto", value=float(data.get('pres_maximo', 0) or 0))
-    n_dto = c3.number_input("Baja Global (%)", value=float(data.get('descuento_global', 0) or 0))
+    n_dto = c3.number_input("Baja Global (%)", value=float(data.get('descuento_global') or 0))
     
-    c4, c5, c6 = st.columns(3)
+    c4, c5, c6, c7 = st.columns(4)
     def to_date(s): return datetime.strptime(s, "%Y-%m-%d").date() if s else datetime.now().date()
     
     # APLICAMOS FORMATO EUROPEO AL WIDGET
     n_fp = c4.date_input("F. Presentación", value=to_date(data.get('fecha_presentacion')), format="DD/MM/YYYY")
     n_fa = c5.date_input("F. Adjudicación", value=to_date(data.get('fecha_adjudicacion')), format="DD/MM/YYYY")
+    n_ff = c6.date_input("F. Finalización", value=to_date(data.get('fecha_finalizacion')), format="DD/MM/YYYY")
     
     curr_id = data.get('id_estado')
     curr_st_name = maestros['estados_id_map'].get(curr_id, "")
     idx_st = maestros['estados_list'].index(curr_st_name) if curr_st_name in maestros['estados_list'] else 0
-    n_st = c6.selectbox("Estado", maestros['estados_list'], index=idx_st)
+    n_st = c7.selectbox("Estado", maestros['estados_list'], index=idx_st)
 
     if st.button("💾 Actualizar Cabecera"):
         client.table("tbl_licitaciones").update({
             "numero_expediente": n_exp, "pres_maximo": n_pres, "descuento_global": n_dto,
             "id_estado": maestros['estados_name_map'][n_st],
-            "fecha_presentacion": str(n_fp), "fecha_adjudicacion": str(n_fa)
+            "fecha_presentacion": str(n_fp), "fecha_adjudicacion": str(n_fa), "fecha_finalizacion": str(n_ff)
         }).eq("id_licitacion", lic_id).execute()
         
         if data.get('tipo_de_licitacion') == 2:
             recalcular_tipo_2(client, lic_id, n_dto)
+            st.toast("✅ PVU de todas las líneas recalculado correctamente.")
         
         st.success("Datos actualizados.")
         st.rerun()
@@ -214,7 +216,7 @@ def render_dashboard_completo(client, lic_id, data_lic, items_db):
 def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
     tipo_id = data.get('tipo_de_licitacion')
     nombre_tipo = maestros['tipos_id_map'].get(tipo_id, "Estándar")
-    dto_global = float(data.get('descuento_global', 0) or 0)
+    dto_global = float(data.get('descuento_global') or 0)
     
     st.info(f"Modo: **{nombre_tipo}**")
 
@@ -257,7 +259,7 @@ def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
             
             # 4. Botón FINAL de Importar
             if col_ok.button("🚀 Confirmar e Importar a Base de Datos", type="primary", key="btn_confirmar_import"):
-                ok, msg = guardar_datos_importados(df_prev, lic_id, client)
+                ok, msg = guardar_datos_importados(df_prev, lic_id, client, tipo_id, dto_global)
                 if ok:
                     st.success(msg)
                     del st.session_state['preview_import'] # Limpiamos memoria
@@ -351,7 +353,10 @@ def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
     if items_db:
         df = pd.DataFrame(items_db)
         
-        column_order = ["lote", "producto", "unidades", "pmaxu", "pvu", "pcu", "beneficio_u"]
+        if tipo_id == 2:
+            column_order = ["lote", "producto", "pmaxu", "pvu", "pcu", "beneficio_u"]
+        else:
+            column_order = ["lote", "producto", "unidades", "pmaxu", "pvu", "pcu", "beneficio_u"]
         
         df["pvu"] = df["pvu"].fillna(0).astype(float)
         df["pcu"] = df["pcu"].fillna(0).astype(float)
@@ -566,16 +571,16 @@ def render_remaining(client, lic_id, items_db):
         st.info("No hay partidas en el presupuesto para calcular pendientes.")
 
 def recalcular_tipo_2(client, lic_id, nuevo_dto):
-    items = client.table("tbl_licitaciones_detalle").select("id_detalle, pmaxu").eq("id_licitacion", lic_id).execute().data
+    # Optimización: Leemos todo para hacer upsert masivo (más rápido y seguro que ir una a una)
+    items = client.table("tbl_licitaciones_detalle").select("*").eq("id_licitacion", lic_id).execute().data
     if items:
-        to_update = []
         for i in items:
             pmax = float(i.get('pmaxu', 0) or 0)
             nuevo_pvu = pmax * (1 - (nuevo_dto / 100))
-            to_update.append({"id_detalle": i['id_detalle'], "pvu": nuevo_pvu})
+            i['pvu'] = nuevo_pvu
         
-        for item in to_update:
-            client.table("tbl_licitaciones_detalle").update({"pvu": item['pvu']}).eq("id_detalle", item['id_detalle']).execute()
+        # Enviamos todos los cambios de una sola vez
+        client.table("tbl_licitaciones_detalle").upsert(items).execute()
 
             # ==============================================================================
 # 📝 VISTA 2: MODO ENFOQUE (Solo Formulario de Alta)
