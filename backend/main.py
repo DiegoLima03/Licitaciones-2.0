@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import auth, analytics
+from backend.routers import auth, analytics, tenders, excel_import, deliveries, search
 
 
 app = FastAPI(
@@ -33,6 +33,10 @@ app.add_middleware(
 # Registro de routers bajo /api para que el frontend llame a /api/auth/login, etc.
 app.include_router(auth.router, prefix="/api")
 app.include_router(analytics.router, prefix="/api")
+app.include_router(tenders.router, prefix="/api")
+app.include_router(excel_import.router, prefix="/api")
+app.include_router(deliveries.router, prefix="/api")
+app.include_router(search.router, prefix="/api")
 
 
 @app.get("/")
