@@ -31,12 +31,28 @@ def guardar_entrega_completa(client, lic_id, datos_cabecera, df_lineas, mapa_ids
             
             qty = float(r.get('Cantidad', 0) or 0)
             cost = float(r.get('Coste Unit.', 0) or 0)
-            id_detalle = mapa_ids.get(nombre_prod)
             
+            # Limpieza del nombre desacoplada
             articulo_final = nombre_prod
-            if id_detalle and " - " in nombre_prod:
+            if " - " in nombre_prod:
                 articulo_final = nombre_prod.split(" - ", 1)[1]
             
+            id_detalle = mapa_ids.get(nombre_prod)
+
+            # --- FALLBACK DE BÚSQUEDA ROBUSTA (Fix espacios fantasmas) ---
+            if id_detalle is None and " - " in nombre_prod:
+                try:
+                    # Extraemos la parte del producto limpia
+                    prod_clean = nombre_prod.split(" - ", 1)[1].strip().lower()
+                    # Buscamos coincidencias parciales en el mapa
+                    for k, v in mapa_ids.items():
+                        if " - " in k:
+                            k_prod = k.split(" - ", 1)[1].strip().lower()
+                            if k_prod == prod_clean:
+                                id_detalle = v
+                                break
+                except Exception: pass
+
             # --- CAMBIO: LEEMOS EL PROVEEDOR DE LA LÍNEA ---
             prov_linea = str(r.get('Proveedor', '')).strip()
             
@@ -102,11 +118,13 @@ def actualizar_entrega_completa(client, id_entrega, lic_id, datos_cabecera, df_l
             
             qty = float(r.get('Cantidad', 0) or 0)
             cost = float(r.get('Coste Unit.', 0) or 0)
-            id_detalle = mapa_ids.get(nombre_prod)
             
+            # Limpieza del nombre desacoplada
             articulo_final = nombre_prod
-            if id_detalle and " - " in nombre_prod:
+            if " - " in nombre_prod:
                 articulo_final = nombre_prod.split(" - ", 1)[1]
+            
+            id_detalle = mapa_ids.get(nombre_prod)
             
             prov_linea = str(r.get('Proveedor', '')).strip()
             

@@ -477,7 +477,7 @@ def render_ejecucion_completa(client, lic_id, items_db):
     
     # 1. PREPARACIÓN DE DATOS
     items_activos = [i for i in items_db if i.get('activo', True)]
-    mapa_presu_ids = {f"{i.get('lote','Gen')} - {i['producto']}": i['id_detalle'] for i in items_activos}
+    mapa_presu_ids = {f"{(i.get('lote') or 'General')} - {i['producto']}": i['id_detalle'] for i in items_activos}
 
     # 2. BOTÓN ACTIVADOR (NUEVA ENTREGA)
     if not st.session_state.get('creando_entrega', False):
@@ -639,12 +639,12 @@ def render_fragmento_entrega(client, ent, lic_id, items_db):
     
     # 1. Preparar Mapeos (Rápidos, en memoria)
     items_activos = [i for i in items_db if i.get('activo', True)]
-    opciones_select = [f"{i.get('lote','Gen')} - {i['producto']}" for i in items_activos]
+    opciones_select = [f"{(i.get('lote') or 'General')} - {i['producto']}" for i in items_activos]
     opciones_select.sort()
     opciones_select.append("➕ Gasto NO Presupuestado / Extra")
     
-    mapa_visual = {i['producto']: f"{i.get('lote','Gen')} - {i['producto']}" for i in items_activos}
-    mapa_reverso_ids = {f"{i.get('lote','Gen')} - {i['producto']}": i['id_detalle'] for i in items_activos}
+    mapa_visual = {i['producto']: f"{(i.get('lote') or 'General')} - {i['producto']}" for i in items_activos}
+    mapa_reverso_ids = {f"{(i.get('lote') or 'General')} - {i['producto']}": i['id_detalle'] for i in items_activos}
 
     # 2. GESTIÓN DE CACHÉ (La magia de la velocidad)
     cache_key = f"cache_lines_{id_e}"
@@ -844,7 +844,7 @@ def render_formulario_alta_entrega(client, lic_id, data, items_db):
     st.info("Rellena los datos y guarda para volver al dashboard.")
 
     items_activos = [i for i in items_db if i.get('activo', True)]
-    mapa_presu_ids = {f"{i.get('lote','Gen')} - {i['producto']}": i['id_detalle'] for i in items_activos}
+    mapa_presu_ids = {f"{(i.get('lote') or 'General')} - {i['producto']}": i['id_detalle'] for i in items_activos}
     opciones_select = sorted(list(mapa_presu_ids.keys())) + ["➕ Gasto NO Presupuestado / Extra"]
 
     with st.container(border=True):
