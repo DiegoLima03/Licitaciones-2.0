@@ -159,98 +159,94 @@ def render_configuracion_cabecera(client, lic_id, data, maestros):
             st.rerun()
 
 def render_dashboard_completo(client, lic_id, data_lic, items_db):
-    """Dashboard filtrando solo por items ACTIVO=True."""
-    # Filtramos items activos
+    """
+    Dashboard filtrando solo por items ACTIVO=True.
+    Calcula Rentabilidad Real cruzando ejecución con precios de venta del presupuesto.
+    """
+    # 1. PREPARACIÓN DATOS PRESUPUESTO
     items_activos = [i for i in items_db if i.get('activo', True) is True]
-    
     pres_maximo_pliego = float(data_lic.get('pres_maximo', 0) or 0)
-    tipo_lic = data_lic.get('tipo_de_licitacion')
     
     t_venta_prevista = 0
     t_coste_previsto = 0
     mapa_precios_venta = {} 
     
-    # 1. Construimos mapa de precios (necesario para cálculos reales posteriores)
     for i in items_activos:
-        mapa_precios_venta[i['id_detalle']] = float(i.get('pvu', 0) or 0)
-
-    # 2. Lógica diferenciada por Tipo de Licitación
-    if tipo_lic == 2:
-        # --- TIPO 2: BAJA SOBRE PRESUPUESTO ---
-        # Venta = Presupuesto Base - Descuento Global
-        dto_global = float(data_lic.get('descuento_global', 0) or 0)
-        t_venta_prevista = pres_maximo_pliego * (1 - (dto_global / 100))
+        id_det = i['id_detalle']
+        u = float(i.get('unidades', 0) or 0)
+        v = float(i.get('pvu', 0) or 0)
+        c = float(i.get('pcu', 0) or 0)
         
-        # Coste = Estimación basada en el margen medio de los precios unitarios
-        suma_pvu_unitarios = 0
-        suma_pcu_unitarios = 0
-        for i in items_activos:
-            suma_pvu_unitarios += float(i.get('pvu', 0) or 0)
-            suma_pcu_unitarios += float(i.get('pcu', 0) or 0)
-            
-        # Ratio de coste medio (cuánto coste hay por cada euro de venta unitaria)
-        ratio_coste = (suma_pcu_unitarios / suma_pvu_unitarios) if suma_pvu_unitarios > 0 else 0
-        t_coste_previsto = t_venta_prevista * ratio_coste
-        
-    else:
-        # --- TIPO ESTÁNDAR / OTROS ---
-        # Suma directa de (Unidades * Precio)
-        for i in items_activos:
-            u = float(i.get('unidades', 0) or 0)
-            v = float(i.get('pvu', 0) or 0)
-            c = float(i.get('pcu', 0) or 0)
-            
-            t_venta_prevista += (u * v)
-            t_coste_previsto += (u * c)
+        t_venta_prevista += (u * v)
+        t_coste_previsto += (u * c)
+        mapa_precios_venta[id_det] = v
     
     t_beneficio_previsto = t_venta_prevista - t_coste_previsto
-    t_margen_previsto_pct = (t_beneficio_previsto / t_venta_prevista * 100) if t_venta_prevista > 0 else 0
     
-    # Datos Reales
+    # 2. CÁLCULO DE REAL (Ejecución)
     items_real = client.table("tbl_licitaciones_real").select("*").eq("id_licitacion", lic_id).execute().data
-    real_coste_total = 0
-    real_facturado = 0
-    real_cobrado = 0
-    real_produccion = 0
+    
+    real_coste_total = 0.0
+    real_venta_ejecutada = 0.0 # Valor de lo producido (Sale Price)
+    
+    real_facturado = 0.0
+    real_cobrado = 0.0
     
     if items_real:
         for ir in items_real:
             qty_r = float(ir.get('cantidad', 0) or 0)
             coste_unit_r = float(ir.get('pcu', 0) or 0)
+            
+            # Coste Real Directo
+            real_coste_total += (qty_r * coste_unit_r)
+            
+            # Valor Venta (Buscamos el PVU del presupuesto original)
             id_link = ir.get('id_detalle')
+            # Si es un extra (id_link None) o no se encuentra, asumimos venta 0 o coste (según criterio). 
+            # Aquí asumimos 0 si no está en presupuesto, para resaltar que es un coste sin ingreso previsto.
+            precio_venta_ref = mapa_precios_venta.get(id_link, 0.0)
+            
+            valor_venta_linea = qty_r * precio_venta_ref
+            real_venta_ejecutada += valor_venta_linea
+            
+            # KPIs Financieros
             estado_r = ir.get('estado', 'EN ESPERA')
             es_cobrado = ir.get('cobrado', False)
             
-            real_coste_total += (qty_r * coste_unit_r)
-            
-            # Usamos el precio del mapa (0 si el lote está inactivo)
-            precio_venta_ref = mapa_precios_venta.get(id_link, 0.0)
-            valor_venta_linea = qty_r * precio_venta_ref
-            real_produccion += valor_venta_linea
-            
             if estado_r == 'FACTURADO':
                 real_facturado += valor_venta_linea
+            
             if es_cobrado:
                 real_cobrado += valor_venta_linea
 
-    real_beneficio = real_produccion - real_coste_total
-    real_margen_pct = (real_beneficio / real_produccion * 100) if real_produccion > 0 else 0
+    # 3. RESULTADOS REALES
+    real_beneficio = real_venta_ejecutada - real_coste_total
+    
+    if real_venta_ejecutada > 0:
+        real_margen_pct = (real_beneficio / real_venta_ejecutada) * 100
+    else:
+        real_margen_pct = 0.0
 
+    # 4. RENDERIZADO
     with st.expander("📊 Estadísticas y Rentabilidad", expanded=True):
-        c1, c2, c3, c4, c5 = st.columns(5)
+        # Fila 1: Presupuesto
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Presupuesto Base", f"{fmt_num(pres_maximo_pliego)} €")
-        c2.metric("Ofertado (Ganado)", f"{fmt_num(t_venta_prevista)} €", help="Suma de partidas activas/ganadas")
+        c2.metric("Ofertado (Ganado)", f"{fmt_num(t_venta_prevista)} €", help="Suma de partidas activas")
         c3.metric("Coste Estimado", f"{fmt_num(t_coste_previsto)} €")
         c4.metric("Beneficio Previsto", f"{fmt_num(t_beneficio_previsto)} €")
-        c5.metric("Margen Previsto", f"{fmt_num(t_margen_previsto_pct)} %")
 
         st.divider()
-        r1, r2, r3, r4, r5 = st.columns(5)
-        r1.metric("Producción (Valor)", f"{fmt_num(real_produccion)} €", help="Valor de venta de lo ejecutado (Albaranes)")
-        r2.metric("Coste Real", f"{fmt_num(real_coste_total)} €")
-        r3.metric("Beneficio Real", f"{fmt_num(real_beneficio)} €", delta=f"{fmt_num(real_margen_pct)}% Margen")
-        r4.metric("Facturado", f"{fmt_num(real_facturado)} €")
-        r5.metric("Cobrado", f"{fmt_num(real_cobrado)} €")
+        
+        # Fila 2: Realidad (Nuevos KPIs)
+        r1, r2, r3, r4 = st.columns(4)
+        r1.metric("Importe Facturado", f"{fmt_num(real_facturado)} €", help="Suma PVU de líneas en estado FACTURADO")
+        r2.metric("Importe Cobrado", f"{fmt_num(real_cobrado)} €", help="Suma PVU de líneas COBRADAS")
+        r3.metric("Margen Real", f"{fmt_num(real_margen_pct)} %", help="Margen sobre lo ejecutado (Producción - Coste)")
+        
+        # Color dinámico para beneficio
+        delta_color = "normal" if real_beneficio >= 0 else "inverse"
+        r4.metric("Beneficio Real", f"{fmt_num(real_beneficio)} €", delta="Sobre Producción", delta_color=delta_color)
 
 def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
     tipo_id = data.get('tipo_de_licitacion')
@@ -469,144 +465,260 @@ def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
 # 🔥 NUEVA LÓGICA DE EJECUCIÓN POR ENTREGAS (Cabecera + Líneas)
 # ==============================================================================
 def render_ejecucion_completa(client, lic_id, items_db):
+    """
+    Vista principal de la pestaña 'Real (Ejecución)'.
+    Estructura el layout y delega la renderización reactiva a fragmentos.
+    """
     st.subheader("📦 Gestión de Albaranes y Partes de Trabajo")
     
     # 1. PREPARACIÓN DE DATOS
     items_activos = [i for i in items_db if i.get('activo', True)]
     mapa_presu_ids = {f"{i.get('lote','Gen')} - {i['producto']}": i['id_detalle'] for i in items_activos}
-    opciones_select = sorted(list(mapa_presu_ids.keys())) + ["➕ Gasto NO Presupuestado / Extra"]
 
-    # 2. BOTÓN ACTIVADOR
+    # 2. BOTÓN ACTIVADOR (NUEVA ENTREGA)
     if not st.session_state.get('creando_entrega', False):
         if st.button("➕ Registrar Nuevo Documento / Albarán", type="primary", use_container_width=True):
             st.session_state['creando_entrega'] = True
             st.rerun()
         
-    # 3. FORMULARIO DE CREACIÓN (IN-LINE, aunque ahora usamos más el modo enfoque)
-    if st.session_state.get('creando_entrega', False):
-        # Esta lógica está duplicada visualmente en render_formulario_alta_entrega, 
-        # pero por si acaso se usa in-line, actualizamos el date_input.
-        pass 
+    # 3. MODO CREACIÓN (Si aplica)
+    # (La lógica de render_formulario_alta_entrega se maneja en el router principal, 
+    # pero si se quisiera inline, iría aquí).
 
     # 4. LISTADO DE ENTREGAS (HISTÓRICO EDITABLE)
     st.divider()
     st.markdown("### 📜 Histórico de Documentos")
     
     try:
+        # Traemos las entregas (cabeceras)
         entregas = client.table("tbl_entregas").select("*").eq("id_licitacion", lic_id).order("fecha_entrega", desc=True).execute().data
     except Exception as e:
+        st.error(f"Error conexión: {e}")
         entregas = []
     
     if entregas:
         for ent in entregas:
-            id_e = ent['id_entrega']
-            # USO DE FMT_DATE PARA TÍTULO EXPANDER
-            fecha_fmt = fmt_date(ent['fecha_entrega'])
-            titulo = f"📦 {fecha_fmt} | Ref: **{ent['codigo_albaran']}**"
-            
-            # Lógica para mantener el expander abierto tras recargar
-            is_expanded = (st.session_state.get('expander_activo') == id_e)
-            
-            with st.expander(titulo, expanded=is_expanded):
-                c_head, c_edit, c_del = st.columns([5, 1, 1])
-                c_head.caption(f"📝 Notas: {ent.get('observaciones','')}")
-                
-                # --- BOTÓN EDITAR ---
-                if c_edit.button("✏️", key=f"edit_ent_{id_e}"):
-                    # 1. Guardamos ID y Datos de Cabecera
-                    st.session_state['id_entrega_en_edicion'] = id_e
-                    st.session_state['datos_entrega_edit'] = {
-                        "fecha": ent['fecha_entrega'],
-                        "albaran": ent['codigo_albaran'],
-                        "notas": ent.get('observaciones', '')
-                    }
-                    
-                    # 2. Recuperamos líneas para pre-cargar el DataFrame
-                    lineas_edit = client.table("tbl_licitaciones_real").select("*").eq("id_entrega", id_e).execute().data
-                    
-                    # 3. Reconstruimos el formato para el Editor (Mapeo Inverso ID -> Nombre Combo)
-                    rev_map = {v: k for k, v in mapa_presu_ids.items()}
-                    data_edit = []
-                    
-                    for l in lineas_edit:
-                        idd = l.get('id_detalle')
-                        # Si tiene ID, usamos el nombre del combo, si no, el nombre guardado (Extra)
-                        concepto = rev_map.get(idd, l.get('articulo', ''))
-                        
-                        data_edit.append({
-                            "Concepto / Partida": concepto,
-                            "Proveedor": l.get('proveedor', ''),
-                            "Cantidad": float(l.get('cantidad', 0)),
-                            "Coste Unit.": float(l.get('pcu', 0))
-                        })
-                    
-                    if not data_edit:
-                        st.session_state['df_entrega_temp'] = pd.DataFrame(columns=["Concepto / Partida", "Proveedor", "Cantidad", "Coste Unit."])
-                    else:
-                        st.session_state['df_entrega_temp'] = pd.DataFrame(data_edit)
-                        
-                    st.session_state['creando_entrega'] = True
-                    st.rerun()
-
-                # --- BOTÓN ELIMINAR ---
-                if c_del.button("🗑️", key=f"del_ent_{id_e}"):
-                    if eliminar_entrega_completa(client, id_e):
-                        # Limpiamos el estado si borramos el activo
-                        if st.session_state.get('expander_activo') == id_e:
-                            st.session_state['expander_activo'] = None
-                        st.success("Eliminado"); st.rerun()
-                
-                # Cargamos líneas
-                lineas = client.table("tbl_licitaciones_real").select("*").eq("id_entrega", id_e).order("id_real").execute().data
-                
-                # Inicializamos DataFrame siempre (vacío o con datos) para permitir añadir filas
-                if lineas:
-                    df_l = pd.DataFrame(lineas)
-                else:
-                    df_l = pd.DataFrame(columns=["id_real", "articulo", "proveedor", "cantidad", "pcu", "estado", "cobrado", "fecha_entrega"])
-
-                # Handler local para cambios silenciosos
-                def on_change_lines(k, df_orig):
-                    changes = st.session_state[k]
-                    sincronizar_cambios_lineas(client, changes, df_orig)
-
-                editor_key = f"editor_lines_{id_e}"
-
-                # --- EDICIÓN COMPLETA ---
-                edited_lines = st.data_editor(
-                    df_l,
-                    column_config={
-                        "id_real": None, "id_licitacion": None, "id_entrega": None, "id_detalle": None, "fecha_entrega": None, "created_at": None,
-                        "articulo": st.column_config.TextColumn("Concepto", width="large"), # Habilitado
-                        "proveedor": st.column_config.TextColumn("Proveedor", width="medium"), # Habilitado
-                        "cantidad": st.column_config.NumberColumn("Cant", format="%.2f"), # Habilitado
-                        "pcu": st.column_config.NumberColumn("Coste", format="%.2f €"), # Habilitado
-                        "estado": st.column_config.SelectboxColumn("Estado", options=["EN ESPERA", "ENTREGADO", "FACTURADO"], required=True),
-                        "cobrado": st.column_config.CheckboxColumn("Cobrado")
-                    },
-                    column_order=["articulo", "proveedor", "cantidad", "pcu", "estado", "cobrado"],
-                    use_container_width=True,
-                    hide_index=True,
-                    num_rows="dynamic", # Permite añadir/borrar filas
-                    key=editor_key,
-                    on_change=on_change_lines,
-                    kwargs={"k": editor_key, "df_orig": df_l}
-                )
+            # LLAMADA AL FRAGMENTO AISLADO
+            # Pasamos 'ent' y 'client' para que cada albarán se gestione independientemente
+            render_fragmento_entrega(client, ent, lic_id, items_db)
     else:
         st.info("No hay documentos registrados.")
 
     # 5. SOPORTE LEGADO
+    _render_huerfanas(client, lic_id)
+
+
+# 1. NUEVO CALLBACK (Poner antes de las funciones de renderizado o junto a los helpers)
+def callback_actualizar_lineas(key_editor, cache_key, client, lic_id, entrega_id, mapa_reverso_ids):
+    """
+    Callback Optimista: Guarda en BD y actualiza la caché local simultáneamente.
+    """
+    state = st.session_state.get(key_editor)
+    if not state: return
+    
+    # Referencia al DF en caché (para actualizarlo localmente sin re-query)
+    df_cache = st.session_state[cache_key]
+    cambios_locales = False
+
+    # 1. DELETE
+    if "deleted_rows" in state and state["deleted_rows"]:
+        indices = state["deleted_rows"]
+        ids_to_delete = []
+        indices_to_drop = []
+        
+        for idx in indices:
+            try:
+                # Obtenemos ID Real
+                id_real = df_cache.iloc[idx]['id_real']
+                ids_to_delete.append(int(id_real))
+                indices_to_drop.append(df_cache.index[idx])
+            except: pass
+        
+        if ids_to_delete:
+            # BD Update
+            client.table("tbl_licitaciones_real").delete().in_("id_real", ids_to_delete).execute()
+            # Local Cache Update
+            df_cache = df_cache.drop(indices_to_drop).reset_index(drop=True)
+            cambios_locales = True
+            st.toast(f"🗑️ Eliminado")
+
+    # 2. INSERT
+    if "added_rows" in state and state["added_rows"]:
+        new_rows = state["added_rows"]
+        to_insert_bd = []
+        rows_visual = []
+
+        for row in new_rows:
+            nombre_articulo = row.get("articulo", "")
+            resolved_id_detalle = mapa_reverso_ids.get(nombre_articulo)
+            
+            # Objeto para BD
+            obj_bd = {
+                "id_licitacion": lic_id,
+                "id_entrega": entrega_id,
+                "id_detalle": resolved_id_detalle,
+                "articulo": nombre_articulo, # Guardamos el nombre "Lote - Prod" o "Prod" según lógica
+                "proveedor": row.get("proveedor", ""),
+                "cantidad": float(row.get("cantidad", 0) or 0),
+                "pcu": float(row.get("pcu", 0) or 0),
+                "estado": row.get("estado", "EN ESPERA"),
+                "cobrado": row.get("cobrado", False)
+            }
+            
+            # Insertamos y RECUPERAMOS el ID generado (importante para futuras ediciones)
+            res = client.table("tbl_licitaciones_real").insert(obj_bd).execute()
+            if res.data:
+                # Añadimos a la caché local el registro completo que devolvió la BD
+                rows_visual.append(res.data[0])
+
+        if rows_visual:
+            new_df = pd.DataFrame(rows_visual)
+            # Asegurar compatibilidad de columnas si el DF original estaba vacío
+            df_cache = pd.concat([df_cache, new_df], ignore_index=True)
+            cambios_locales = True
+            st.toast("✨ Nueva línea")
+
+    # 3. UPDATE
+    if "edited_rows" in state and state["edited_rows"]:
+        edited_rows = state["edited_rows"]
+        for idx, changes in edited_rows.items():
+            try:
+                # Índice y ID real
+                row_idx = int(idx)
+                id_real = df_cache.iloc[row_idx]['id_real']
+                
+                payload = {}
+                # Actualizar Payload BD y Caché Local
+                if "articulo" in changes: 
+                    payload["articulo"] = changes["articulo"]
+                    payload["id_detalle"] = mapa_reverso_ids.get(changes["articulo"])
+                    df_cache.at[row_idx, 'articulo'] = changes["articulo"]
+                    # id_detalle no suele estar en el DF visual, pero si estuviera, se actualiza
+                
+                if "proveedor" in changes: 
+                    payload["proveedor"] = changes["proveedor"]
+                    df_cache.at[row_idx, 'proveedor'] = changes["proveedor"]
+                    
+                if "cantidad" in changes: 
+                    payload["cantidad"] = changes["cantidad"]
+                    df_cache.at[row_idx, 'cantidad'] = changes["cantidad"]
+                    
+                if "pcu" in changes: 
+                    payload["pcu"] = changes["pcu"]
+                    df_cache.at[row_idx, 'pcu'] = changes["pcu"]
+                    
+                if "estado" in changes: 
+                    payload["estado"] = changes["estado"]
+                    df_cache.at[row_idx, 'estado'] = changes["estado"]
+                    
+                if "cobrado" in changes: 
+                    payload["cobrado"] = changes["cobrado"]
+                    df_cache.at[row_idx, 'cobrado'] = changes["cobrado"]
+
+                if payload:
+                    client.table("tbl_licitaciones_real").update(payload).eq("id_real", int(id_real)).execute()
+                    cambios_locales = True
+            except Exception as e:
+                print(f"Error update: {e}")
+        
+        if cambios_locales:
+             st.toast("💾 Guardado")
+
+    # FINAL: Actualizamos la sesión con el DF modificado para que el renderizado sea instantáneo
+    if cambios_locales:
+        st.session_state[cache_key] = df_cache
+
+@st.fragment
+def render_fragmento_entrega(client, ent, lic_id, items_db):
+    id_e = ent['id_entrega']
+    
+    # 1. Preparar Mapeos (Rápidos, en memoria)
+    items_activos = [i for i in items_db if i.get('activo', True)]
+    opciones_select = [f"{i.get('lote','Gen')} - {i['producto']}" for i in items_activos]
+    opciones_select.sort()
+    opciones_select.append("➕ Gasto NO Presupuestado / Extra")
+    
+    mapa_visual = {i['producto']: f"{i.get('lote','Gen')} - {i['producto']}" for i in items_activos}
+    mapa_reverso_ids = {f"{i.get('lote','Gen')} - {i['producto']}": i['id_detalle'] for i in items_activos}
+
+    # 2. GESTIÓN DE CACHÉ (La magia de la velocidad)
+    cache_key = f"cache_lines_{id_e}"
+    
+    # Solo consultamos a Supabase si NO tenemos los datos en memoria
+    if cache_key not in st.session_state:
+        data_bd = client.table("tbl_licitaciones_real").select("*").eq("id_entrega", id_e).order("id_real").execute().data
+        df_init = pd.DataFrame(data_bd)
+        
+        # Si está vacío, inicializamos columnas
+        if df_init.empty:
+            df_init = pd.DataFrame(columns=["id_real", "articulo", "proveedor", "cantidad", "pcu", "estado", "cobrado"])
+        else:
+            # Aplicamos corrección visual una sola vez al cargar
+            df_init['articulo'] = df_init['articulo'].apply(lambda x: mapa_visual.get(x, x))
+            
+        st.session_state[cache_key] = df_init
+
+    # Usamos el DF de la caché para renderizar
+    df_l = st.session_state[cache_key].reset_index(drop=True)
+
+    # 3. RENDERIZADO VISUAL
+    fecha_dt = datetime.strptime(ent['fecha_entrega'], "%Y-%m-%d").date() if ent['fecha_entrega'] else datetime.now().date()
+    titulo = f"📦 {ent['fecha_entrega']} | {ent['codigo_albaran']}"
+    
+    with st.expander(titulo, expanded=False):
+        c1, c2, c3 = st.columns([2, 2, 1])
+        new_date = c1.date_input("Fecha", value=fecha_dt, key=f"d_{id_e}", format="DD/MM/YYYY")
+        new_alb = c2.text_input("Ref. Albarán", value=ent['codigo_albaran'], key=f"a_{id_e}")
+        
+        if c3.button("💾 Cabecera", key=f"btn_save_head_{id_e}"):
+            client.table("tbl_entregas").update({
+                "fecha_entrega": str(new_date), "codigo_albaran": new_alb
+            }).eq("id_entrega", id_e).execute()
+            st.rerun()
+            
+        st.divider()
+        if st.button("🗑️ Borrar Doc", key=f"del_ent_{id_e}", type="secondary"):
+             if eliminar_entrega_completa(client, id_e):
+                # Limpiamos caché si borramos
+                if cache_key in st.session_state: del st.session_state[cache_key]
+                st.rerun()
+
+        # 4. EDITOR CONECTADO A CACHÉ
+        key_editor = f"editor_lines_{id_e}"
+        st.data_editor(
+            df_l,
+            column_config={
+                "id_real": None, "id_licitacion": None, "id_entrega": None, "id_detalle": None, 
+                "fecha_entrega": None, "created_at": None,
+                "articulo": st.column_config.SelectboxColumn("Concepto", options=opciones_select, width="large", required=True),
+                "proveedor": st.column_config.TextColumn("Proveedor", width="medium"),
+                "cantidad": st.column_config.NumberColumn("Cant", format="%.2f"),
+                "pcu": st.column_config.NumberColumn("Coste", format="%.2f €"),
+                "estado": st.column_config.SelectboxColumn("Estado", options=["EN ESPERA", "ENTREGADO", "FACTURADO"], required=True),
+                "cobrado": st.column_config.CheckboxColumn("Cobrado", default=False)
+            },
+            column_order=["articulo", "proveedor", "cantidad", "pcu", "estado", "cobrado"],
+            use_container_width=True,
+            hide_index=True,
+            num_rows="dynamic",
+            key=key_editor,
+            on_change=callback_actualizar_lineas,
+            # Pasamos cache_key en lugar de df_l para que el callback actualice la fuente de verdad
+            args=(key_editor, cache_key, client, lic_id, id_e, mapa_reverso_ids)
+        )
+
+
+def _render_huerfanas(client, lic_id):
+    """Helper para renderizar líneas antiguas fuera de la lógica principal."""
     lineas_huerfanas = client.table("tbl_licitaciones_real").select("*").eq("id_licitacion", lic_id).is_("id_entrega", "null").execute().data
     if lineas_huerfanas:
         st.divider()
         with st.expander("⚠️ Movimientos Antiguos (Sin Agrupar)", expanded=False):
-            # Aquí también podríamos formatear la columna fecha si quisiéramos ser exhaustivos
             df_huerfanas = pd.DataFrame(lineas_huerfanas)
             if 'fecha_entrega' in df_huerfanas.columns:
-                 # Aplicamos formato solo visual
                  df_huerfanas['fecha_entrega'] = df_huerfanas['fecha_entrega'].apply(fmt_date)
-            
-            st.dataframe(df_huerfanas[['fecha_entrega', 'articulo', 'cantidad', 'pcu']], use_container_width=True)                               
+            st.dataframe(df_huerfanas[['fecha_entrega', 'articulo', 'cantidad', 'pcu']], use_container_width=True)
+
 def render_remaining(client, lic_id, items_db):
     st.subheader("Control de Pendientes (Remaining)")
     st.markdown("Comparativa entre **Unidades Presupuestadas** vs **Unidades Ejecutadas**.")
