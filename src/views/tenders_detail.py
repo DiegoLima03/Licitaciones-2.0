@@ -116,37 +116,47 @@ def render_detalle(client, maestros):
 
 def render_configuracion_cabecera(client, lic_id, data, maestros):
     """Formulario para editar la cabecera de la licitación."""
-    c1, c2, c3 = st.columns(3)
-    n_exp = c1.text_input("Expediente", value=data.get('numero_expediente', ''))
-    n_pres = c2.number_input("Presupuesto", value=float(data.get('pres_maximo', 0) or 0))
-    n_dto = c3.number_input("Baja Global (%)", value=float(data.get('descuento_global') or 0))
-    
-    c4, c5, c6, c7 = st.columns(4)
-    def to_date(s): return datetime.strptime(s, "%Y-%m-%d").date() if s else datetime.now().date()
-    
-    # APLICAMOS FORMATO EUROPEO AL WIDGET
-    n_fp = c4.date_input("F. Presentación", value=to_date(data.get('fecha_presentacion')), format="DD/MM/YYYY")
-    n_fa = c5.date_input("F. Adjudicación", value=to_date(data.get('fecha_adjudicacion')), format="DD/MM/YYYY")
-    n_ff = c6.date_input("F. Finalización", value=to_date(data.get('fecha_finalizacion')), format="DD/MM/YYYY")
-    
-    curr_id = data.get('id_estado')
-    curr_st_name = maestros['estados_id_map'].get(curr_id, "")
-    idx_st = maestros['estados_list'].index(curr_st_name) if curr_st_name in maestros['estados_list'] else 0
-    n_st = c7.selectbox("Estado", maestros['estados_list'], index=idx_st)
+    with st.form(key=f"form_cabecera_{lic_id}"):
+        tipo_lic = data.get('tipo_de_licitacion')
 
-    if st.button("💾 Actualizar Cabecera"):
-        client.table("tbl_licitaciones").update({
-            "numero_expediente": n_exp, "pres_maximo": n_pres, "descuento_global": n_dto,
-            "id_estado": maestros['estados_name_map'][n_st],
-            "fecha_presentacion": str(n_fp), "fecha_adjudicacion": str(n_fa), "fecha_finalizacion": str(n_ff)
-        }).eq("id_licitacion", lic_id).execute()
+        if tipo_lic == 1:
+            c1, c2 = st.columns(2)
+            n_exp = c1.text_input("Expediente", value=data.get('numero_expediente', ''))
+            n_pres = c2.number_input("Presupuesto", value=float(data.get('pres_maximo', 0) or 0))
+            # El descuento no se muestra, pero mantenemos su valor para la actualización
+            n_dto = float(data.get('descuento_global', 0) or 0)
+        else:
+            c1, c2, c3 = st.columns(3)
+            n_exp = c1.text_input("Expediente", value=data.get('numero_expediente', ''))
+            n_pres = c2.number_input("Presupuesto", value=float(data.get('pres_maximo', 0) or 0))
+            n_dto = c3.number_input("Baja Global (%)", value=float(data.get('descuento_global', 0) or 0))
+
+        c4, c5, c6, c7 = st.columns(4)
+        def to_date(s): return datetime.strptime(s, "%Y-%m-%d").date() if s else datetime.now().date()
         
-        if data.get('tipo_de_licitacion') == 2:
-            recalcular_tipo_2(client, lic_id, n_dto)
-            st.toast("✅ PVU de todas las líneas recalculado correctamente.")
+        # APLICAMOS FORMATO EUROPEO AL WIDGET
+        n_fp = c4.date_input("F. Presentación", value=to_date(data.get('fecha_presentacion')), format="DD/MM/YYYY")
+        n_fa = c5.date_input("F. Adjudicación", value=to_date(data.get('fecha_adjudicacion')), format="DD/MM/YYYY")
+        n_ff = c6.date_input("F. Finalización", value=to_date(data.get('fecha_finalizacion')), format="DD/MM/YYYY")
         
-        st.success("Datos actualizados.")
-        st.rerun()
+        curr_id = data.get('id_estado')
+        curr_st_name = maestros['estados_id_map'].get(curr_id, "")
+        idx_st = maestros['estados_list'].index(curr_st_name) if curr_st_name in maestros['estados_list'] else 0
+        n_st = c7.selectbox("Estado", maestros['estados_list'], index=idx_st)
+
+        if st.form_submit_button("💾 Actualizar Cabecera"):
+            client.table("tbl_licitaciones").update({
+                "numero_expediente": n_exp, "pres_maximo": n_pres, "descuento_global": n_dto,
+                "id_estado": maestros['estados_name_map'][n_st],
+                "fecha_presentacion": str(n_fp), "fecha_adjudicacion": str(n_fa), "fecha_finalizacion": str(n_ff)
+            }).eq("id_licitacion", lic_id).execute()
+            
+            if data.get('tipo_de_licitacion') == 2:
+                recalcular_tipo_2(client, lic_id, n_dto)
+                st.toast("✅ PVU de todas las líneas recalculado correctamente.")
+            
+            st.success("Datos actualizados.")
+            st.rerun()
 
 def render_dashboard_completo(client, lic_id, data_lic, items_db):
     """Dashboard filtrando solo por items ACTIVO=True."""
@@ -154,28 +164,54 @@ def render_dashboard_completo(client, lic_id, data_lic, items_db):
     items_activos = [i for i in items_db if i.get('activo', True) is True]
     
     pres_maximo_pliego = float(data_lic.get('pres_maximo', 0) or 0)
+    tipo_lic = data_lic.get('tipo_de_licitacion')
     
     t_venta_prevista = 0
     t_coste_previsto = 0
     mapa_precios_venta = {} 
     
+    # 1. Construimos mapa de precios (necesario para cálculos reales posteriores)
     for i in items_activos:
-        id_det = i['id_detalle']
-        u = float(i.get('unidades', 0) or 0)
-        v = float(i.get('pvu', 0) or 0)
-        c = float(i.get('pcu', 0) or 0)
+        mapa_precios_venta[i['id_detalle']] = float(i.get('pvu', 0) or 0)
+
+    # 2. Lógica diferenciada por Tipo de Licitación
+    if tipo_lic == 2:
+        # --- TIPO 2: BAJA SOBRE PRESUPUESTO ---
+        # Venta = Presupuesto Base - Descuento Global
+        dto_global = float(data_lic.get('descuento_global', 0) or 0)
+        t_venta_prevista = pres_maximo_pliego * (1 - (dto_global / 100))
         
-        t_venta_prevista += (u * v)
-        t_coste_previsto += (u * c)
-        mapa_precios_venta[id_det] = v
+        # Coste = Estimación basada en el margen medio de los precios unitarios
+        suma_pvu_unitarios = 0
+        suma_pcu_unitarios = 0
+        for i in items_activos:
+            suma_pvu_unitarios += float(i.get('pvu', 0) or 0)
+            suma_pcu_unitarios += float(i.get('pcu', 0) or 0)
+            
+        # Ratio de coste medio (cuánto coste hay por cada euro de venta unitaria)
+        ratio_coste = (suma_pcu_unitarios / suma_pvu_unitarios) if suma_pvu_unitarios > 0 else 0
+        t_coste_previsto = t_venta_prevista * ratio_coste
+        
+    else:
+        # --- TIPO ESTÁNDAR / OTROS ---
+        # Suma directa de (Unidades * Precio)
+        for i in items_activos:
+            u = float(i.get('unidades', 0) or 0)
+            v = float(i.get('pvu', 0) or 0)
+            c = float(i.get('pcu', 0) or 0)
+            
+            t_venta_prevista += (u * v)
+            t_coste_previsto += (u * c)
     
     t_beneficio_previsto = t_venta_prevista - t_coste_previsto
+    t_margen_previsto_pct = (t_beneficio_previsto / t_venta_prevista * 100) if t_venta_prevista > 0 else 0
     
     # Datos Reales
     items_real = client.table("tbl_licitaciones_real").select("*").eq("id_licitacion", lic_id).execute().data
     real_coste_total = 0
     real_facturado = 0
     real_cobrado = 0
+    real_produccion = 0
     
     if items_real:
         for ir in items_real:
@@ -190,28 +226,31 @@ def render_dashboard_completo(client, lic_id, data_lic, items_db):
             # Usamos el precio del mapa (0 si el lote está inactivo)
             precio_venta_ref = mapa_precios_venta.get(id_link, 0.0)
             valor_venta_linea = qty_r * precio_venta_ref
+            real_produccion += valor_venta_linea
             
             if estado_r == 'FACTURADO':
                 real_facturado += valor_venta_linea
             if es_cobrado:
                 real_cobrado += valor_venta_linea
 
-    real_rdo = real_facturado - real_coste_total
-    real_margen_pct = (real_rdo / real_facturado * 100) if real_facturado > 0 else 0
+    real_beneficio = real_produccion - real_coste_total
+    real_margen_pct = (real_beneficio / real_produccion * 100) if real_produccion > 0 else 0
 
     with st.expander("📊 Estadísticas y Rentabilidad", expanded=True):
-        c1, c2, c3, c4 = st.columns(4)
+        c1, c2, c3, c4, c5 = st.columns(5)
         c1.metric("Presupuesto Base", f"{fmt_num(pres_maximo_pliego)} €")
         c2.metric("Ofertado (Ganado)", f"{fmt_num(t_venta_prevista)} €", help="Suma de partidas activas/ganadas")
         c3.metric("Coste Estimado", f"{fmt_num(t_coste_previsto)} €")
         c4.metric("Beneficio Previsto", f"{fmt_num(t_beneficio_previsto)} €")
+        c5.metric("Margen Previsto", f"{fmt_num(t_margen_previsto_pct)} %")
 
         st.divider()
-        r1, r2, r3, r4 = st.columns(4)
-        r1.metric("Facturado Real", f"{fmt_num(real_facturado)} €")
-        r2.metric("Cobrado Real", f"{fmt_num(real_cobrado)} €")
-        r3.metric("Coste Real", f"{fmt_num(real_coste_total)} €")
-        r4.metric("RDO Real", f"{fmt_num(real_rdo)} €", delta=f"{fmt_num(real_margen_pct)}% Margen")
+        r1, r2, r3, r4, r5 = st.columns(5)
+        r1.metric("Producción (Valor)", f"{fmt_num(real_produccion)} €", help="Valor de venta de lo ejecutado (Albaranes)")
+        r2.metric("Coste Real", f"{fmt_num(real_coste_total)} €")
+        r3.metric("Beneficio Real", f"{fmt_num(real_beneficio)} €", delta=f"{fmt_num(real_margen_pct)}% Margen")
+        r4.metric("Facturado", f"{fmt_num(real_facturado)} €")
+        r5.metric("Cobrado", f"{fmt_num(real_cobrado)} €")
 
 def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
     tipo_id = data.get('tipo_de_licitacion')
@@ -353,16 +392,22 @@ def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
     if items_db:
         df = pd.DataFrame(items_db)
         
-        if tipo_id == 2:
-            column_order = ["lote", "producto", "pmaxu", "pvu", "pcu", "beneficio_u"]
-        else:
-            column_order = ["lote", "producto", "unidades", "pmaxu", "pvu", "pcu", "beneficio_u"]
-        
         df["pvu"] = df["pvu"].fillna(0).astype(float)
         df["pcu"] = df["pcu"].fillna(0).astype(float)
         df["beneficio_u"] = df["pvu"] - df["pcu"]
 
+        # --- SOLUCIÓN VISUAL: SEMÁFORO ---
+        # Creamos una columna visual para ver el estado sin salir del editor
+        df["semaforo"] = df["beneficio_u"].apply(lambda x: "🟢" if x >= 0 else "🔴")
+        
+        # Definimos el orden poniendo el semáforo justo antes del beneficio
+        if tipo_id == 2:
+            column_order = ["lote", "producto", "pmaxu", "pvu", "pcu", "semaforo", "beneficio_u"]
+        else:
+            column_order = ["lote", "producto", "unidades", "pmaxu", "pvu", "pcu", "semaforo", "beneficio_u"]
+
         cfg_base = {
+            "semaforo": st.column_config.TextColumn("Est.", width=15, disabled=True, help="Verde: Beneficio Positivo | Rojo: Pérdidas"),
             "lote": st.column_config.TextColumn("Lote", width="small"),
             "producto": st.column_config.TextColumn("Producto", width="large", required=True),
             "unidades": st.column_config.NumberColumn("Uds"),
@@ -473,6 +518,7 @@ def render_ejecucion_completa(client, lic_id, items_db):
                 if lineas:
                     df_l = pd.DataFrame(lineas)
                     
+                    # --- EDICIÓN DIRECTA (AUTO-SAVE) ---
                     edited_lines = st.data_editor(
                         df_l,
                         column_config={
@@ -490,15 +536,24 @@ def render_ejecucion_completa(client, lic_id, items_db):
                         key=f"editor_lines_{id_e}"
                     )
                     
-                    if st.button("💾 Actualizar Estados", key=f"btn_save_lines_{id_e}"):
-                        records = edited_lines.to_dict('records')
-                        for r in records:
-                            client.table("tbl_licitaciones_real").update({
-                                "estado": r['estado'],
-                                "cobrado": r['cobrado']
-                            }).eq("id_real", r['id_real']).execute()
-                        st.toast("✅ Cambios guardados correctamente")
-                        st.rerun()
+                    # Detectamos cambios comparando con el original (df_l)
+                    if not df_l.empty:
+                        original_map = df_l.set_index('id_real')[['estado', 'cobrado']].to_dict('index')
+                        edited_records = edited_lines.to_dict('records')
+                        to_upsert = []
+                        
+                        for row in edited_records:
+                            id_r = row['id_real']
+                            orig = original_map.get(id_r)
+                            if orig and (row['estado'] != orig['estado'] or row['cobrado'] != orig['cobrado']):
+                                to_upsert.append(row)
+                        
+                        if to_upsert:
+                            try:
+                                client.table("tbl_licitaciones_real").upsert(to_upsert).execute()
+                                st.toast("✅ Cambios guardados")
+                            except Exception as e:
+                                st.error(f"Error guardando: {e}")
                         
                 else:
                     st.warning("Documento vacío.")
