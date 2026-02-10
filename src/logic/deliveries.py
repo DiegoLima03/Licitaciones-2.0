@@ -200,3 +200,43 @@ def sincronizar_lineas_entrega(client, id_licitacion, id_entrega, df_edited):
         
     except Exception as e:
         return False, f"Error al sincronizar: {e}"
+
+def sincronizar_cambios_lineas(client, changes, df_original):
+    """
+    Sincroniza cambios puntuales (edited_rows, deleted_rows) detectados en el data_editor.
+    Se usa en callbacks para actualizaciones silenciosas (ej: checks, estados).
+    """
+    # 1. Updates (edited_rows)
+    edited_rows = changes.get("edited_rows", {})
+    
+    for idx, row_changes in edited_rows.items():
+        # idx es el índice de la fila en el DF original
+        if idx < len(df_original):
+            # Obtenemos el ID real de la base de datos
+            record_id = df_original.iloc[idx]['id_real']
+            
+            # Filtramos solo las columnas que existen en BD
+            valid_cols = ["articulo", "proveedor", "cantidad", "pcu", "estado", "cobrado"]
+            payload = {k: v for k, v in row_changes.items() if k in valid_cols}
+            
+            if payload:
+                try:
+                    client.table("tbl_licitaciones_real").update(payload).eq("id_real", int(record_id)).execute()
+                except Exception as e:
+                    print(f"Error actualizando línea {record_id}: {e}")
+
+    # 2. Deletes (deleted_rows)
+    deleted_rows = changes.get("deleted_rows", [])
+    if deleted_rows:
+        ids_to_delete = []
+        for idx in deleted_rows:
+            if idx < len(df_original):
+                ids_to_delete.append(int(df_original.iloc[idx]['id_real']))
+        
+        if ids_to_delete:
+            try:
+                client.table("tbl_licitaciones_real").delete().in_("id_real", ids_to_delete).execute()
+            except Exception as e:
+                print(f"Error eliminando líneas: {e}")
+
+    return True

@@ -4,7 +4,7 @@ from datetime import datetime
 from src.utils import fmt_num, fmt_date 
 from src.logic.excel_import import analizar_excel_licitacion, guardar_datos_importados
 # AÑADIDO: Importamos la lógica de entregas
-from src.logic.deliveries import guardar_entrega_completa, eliminar_entrega_completa, actualizar_entrega_completa, sincronizar_lineas_entrega
+from src.logic.deliveries import guardar_entrega_completa, eliminar_entrega_completa, actualizar_entrega_completa, sincronizar_lineas_entrega, sincronizar_cambios_lineas
 
 def render_detalle(client, maestros):
     # Recuperamos datos de sesión
@@ -565,6 +565,13 @@ def render_ejecucion_completa(client, lic_id, items_db):
                 else:
                     df_l = pd.DataFrame(columns=["id_real", "articulo", "proveedor", "cantidad", "pcu", "estado", "cobrado", "fecha_entrega"])
 
+                # Handler local para cambios silenciosos
+                def on_change_lines(k, df_orig):
+                    changes = st.session_state[k]
+                    sincronizar_cambios_lineas(client, changes, df_orig)
+
+                editor_key = f"editor_lines_{id_e}"
+
                 # --- EDICIÓN COMPLETA ---
                 edited_lines = st.data_editor(
                     df_l,
@@ -581,18 +588,10 @@ def render_ejecucion_completa(client, lic_id, items_db):
                     use_container_width=True,
                     hide_index=True,
                     num_rows="dynamic", # Permite añadir/borrar filas
-                    key=f"editor_lines_{id_e}"
+                    key=editor_key,
+                    on_change=on_change_lines,
+                    kwargs={"k": editor_key, "df_orig": df_l}
                 )
-                
-                # Botón explícito para guardar cambios (Insert/Update/Delete)
-                if st.button("💾 Guardar Cambios", key=f"btn_save_lines_{id_e}"):
-                    ok, msg = sincronizar_lineas_entrega(client, lic_id, id_e, edited_lines)
-                    if ok:
-                        st.session_state['expander_activo'] = id_e # Mantenemos abierto este expander
-                        st.success(msg)
-                        st.rerun()
-                    else:
-                        st.error(msg)
     else:
         st.info("No hay documentos registrados.")
 
