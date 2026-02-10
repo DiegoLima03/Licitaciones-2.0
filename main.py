@@ -3,7 +3,7 @@ import streamlit as st
 import time 
 from src.config import init_connection, get_maestros
 from src.styles import cargar_estilo_veraleza
-from src.views import home, search, tenders_list, tenders_detail, login, kpi
+from src.views import home, search, tenders_list, tenders_detail, login 
 
 # 1. Configuración Pagina
 st.set_page_config(page_title="Veraleza", page_icon="Imagenes/Icono.png", layout="wide")
@@ -44,9 +44,6 @@ with main_container.container():
 
     elif mode == 'BUSCADOR':
         search.render_buscador(supabase)
-
-    elif mode == 'KPI':
-        kpi.render_kpi_dashboard(supabase, maestros)
 
     elif mode == 'GESTOR':
         # Seguridad de Rol

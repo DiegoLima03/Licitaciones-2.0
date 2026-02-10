@@ -1,4 +1,27 @@
+# Entorno y secretos (no subir credenciales)
 .env
+.env.local
+.env.*.local
+frontend/.env.local
+
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.eggs/
+
+# Next.js / frontend
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+.next/
+
+# IDE y sistema
+.DS_Store
+*.log
+.idea/
 .vscode/

@@ -1,98 +1,76 @@
+### src/logic/dashboard_analytics.py
 import pandas as pd
+from typing import Dict, Any, List
 
-def calcular_kpis_generales(client, maestros):
+def calcular_kpis_generales(client, maestros: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Calcula los KPIs principales basándose en todas las licitaciones registradas.
-    Retorna un diccionario con métricas listas para visualizar.
+    Obtiene todas las licitaciones y calcula métricas de alto nivel.
+    Retorna un diccionario con los valores calculados.
     """
-    # 1. Obtener datos mínimos necesarios (ID, Presupuesto, Estado)
     try:
-        response = client.table("tbl_licitaciones").select("id_licitacion, nombre, pres_maximo, id_estado, tipo_de_licitacion, fecha_presentacion, fecha_adjudicacion, fecha_finalizacion").execute()
-        data = response.data
-    except Exception as e:
-        print(f"Error calculando KPIs: {e}")
-        data = []
+        # 1. Traer todas las licitaciones (solo columnas necesarias para ser eficiente)
+        res = client.table("tbl_licitaciones").select("id_licitacion, pres_maximo, id_estado").execute()
+        data = res.data
+        
+        if not data:
+            return {
+                "total_count": 0,
+                "pipeline_monto": 0.0,
+                "adjudicado_monto": 0.0,
+                "win_rate": 0.0,
+                "desglose_estados": {}
+            }
 
-    # Estructura por defecto si no hay datos
-    if not data:
+        df = pd.DataFrame(data)
+        
+        # Asegurar tipos numéricos
+        df['pres_maximo'] = df['pres_maximo'].fillna(0).astype(float)
+
+        # 2. Identificar IDs de estados clave usando el diccionario de maestros
+        # Buscamos variaciones comunes de nombres por si acaso, o usamos exactos
+        map_nombres = maestros.get('estados_name_map', {})
+        
+        # Identificamos IDs (asumiendo nombres estándar, ajusta según tu DB real)
+        id_adjudicada = map_nombres.get('Adjudicada') or map_nombres.get('ADJUDICADA')
+        id_estudio = map_nombres.get('En Estudio') or map_nombres.get('EN ESTUDIO')
+        id_presentada = map_nombres.get('Presentada') or map_nombres.get('PRESENTADA')
+        
+        # 3. Cálculos
+        
+        # A) Total expedientes
+        total_count = len(df)
+        
+        # B) Pipeline (Dinero en juego: Estudio + Presentada)
+        ids_pipeline = [i for i in [id_estudio, id_presentada] if i is not None]
+        monto_pipeline = df[df['id_estado'].isin(ids_pipeline)]['pres_maximo'].sum()
+        
+        # C) Adjudicado (Dinero ganado)
+        monto_adjudicado = 0.0
+        conteo_ganadas = 0
+        if id_adjudicada:
+            ganadas_df = df[df['id_estado'] == id_adjudicada]
+            monto_adjudicado = ganadas_df['pres_maximo'].sum()
+            conteo_ganadas = len(ganadas_df)
+            
+        # D) Tasa de Éxito (Win Rate)
+        # Definimos éxito como: Ganadas / Total. 
+        # (Opcional: Podría ser Ganadas / (Ganadas + Perdidas) si tuviéramos estado 'Rechazada')
+        win_rate = (conteo_ganadas / total_count * 100) if total_count > 0 else 0.0
+
         return {
-            "total_count": 0,
-            "pipeline_monto": 0.0,
-            "adjudicado_monto": 0.0,
-            "win_rate": 0.0,
-            "total_monto_historico": 0.0,
-            "df_mensual": pd.Series(dtype=float),
-            "df_tipos": pd.Series(dtype=float),
-            "df_timeline": pd.DataFrame()
+            "total_count": total_count,
+            "pipeline_monto": monto_pipeline,
+            "adjudicado_monto": monto_adjudicado,
+            "win_rate": win_rate,
+            "total_monto_historico": df['pres_maximo'].sum() # Volumen histórico total
         }
 
-    df = pd.DataFrame(data)
-
-    # 2. Enriquecer con nombres de estados
-    # Usamos el mapa de IDs cargado en maestros
-    mapa_estados = maestros.get('estados_id_map', {})
-    mapa_tipos = maestros.get('tipos_id_map', {})
-    df['estado_nombre'] = df['id_estado'].map(mapa_estados).fillna('Desconocido')
-    df['tipo_nombre'] = df['tipo_de_licitacion'].map(mapa_tipos).fillna('Sin Clasificar')
-    
-    # Limpieza de valores numéricos
-    df['pres_maximo'] = df['pres_maximo'].fillna(0.0)
-
-    # 3. Cálculos de Métricas
-    total_count = len(df)
-    total_monto_historico = df['pres_maximo'].sum()
-
-    # Definición de Grupos de Estado (Ajustar según los nombres reales en tu BD)
-    # Pipeline: Lo que está vivo pero no cerrado
-    estados_pipeline = ['En Estudio', 'Presentada', 'Pendiente de Fallo', 'Pendiente']
-    # Adjudicado: Lo ganado
-    estado_ganado = 'Adjudicada'
-
-    # Filtrado y Sumas
-    pipeline_df = df[df['estado_nombre'].isin(estados_pipeline)]
-    pipeline_monto = pipeline_df['pres_maximo'].sum()
-
-    adjudicado_df = df[df['estado_nombre'] == estado_ganado]
-    adjudicado_monto = adjudicado_df['pres_maximo'].sum()
-
-    # Tasa de Éxito (Win Rate)
-    # Fórmula simple: Ganadas / Total * 100
-    win_rate = (len(adjudicado_df) / total_count * 100) if total_count > 0 else 0.0
-
-    # 4. Preparación de Datos para Gráficos
-    # A) Evolución Mensual
-    df['fecha_dt'] = pd.to_datetime(df['fecha_presentacion'], errors='coerce')
-    df_dates = df.dropna(subset=['fecha_dt']).copy()
-    if not df_dates.empty:
-        df_dates['mes_anio'] = df_dates['fecha_dt'].dt.strftime('%Y-%m')
-        df_mensual = df_dates.groupby('mes_anio')['pres_maximo'].sum().sort_index()
-    else:
-        df_mensual = pd.Series(dtype=float)
-
-    # B) Distribución por Tipo
-    df_tipos = df.groupby('tipo_nombre')['pres_maximo'].sum().sort_values(ascending=False)
-
-    # C) Timeline (Cronograma)
-    # Usamos Fecha Adjudicación como inicio, si no existe, usamos Presentación
-    df['fecha_inicio_dt'] = pd.to_datetime(df['fecha_adjudicacion'], errors='coerce').fillna(df['fecha_dt'])
-    
-    if 'fecha_finalizacion' in df.columns:
-        df['fecha_fin_dt'] = pd.to_datetime(df['fecha_finalizacion'], errors='coerce')
-    else:
-        df['fecha_fin_dt'] = pd.NaT
-    
-    # Filtramos solo las que tengan fechas válidas para el gráfico
-    df_timeline = df.dropna(subset=['fecha_inicio_dt', 'fecha_fin_dt']).copy()
-    # Aseguramos que fin >= inicio
-    df_timeline = df_timeline[df_timeline['fecha_fin_dt'] >= df_timeline['fecha_inicio_dt']]
-
-    return {
-        "total_count": total_count,
-        "pipeline_monto": pipeline_monto,
-        "adjudicado_monto": adjudicado_monto,
-        "win_rate": win_rate,
-        "total_monto_historico": total_monto_historico,
-        "df_mensual": df_mensual,
-        "df_tipos": df_tipos,
-        "df_timeline": df_timeline
-    }
+    except Exception as e:
+        print(f"Error calculando KPIs: {e}")
+        return {
+            "total_count": 0,
+            "pipeline_monto": 0,
+            "adjudicado_monto": 0,
+            "win_rate": 0,
+            "total_monto_historico": 0
+        }

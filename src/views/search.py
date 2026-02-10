@@ -36,7 +36,8 @@ def render_buscador(client):
                         "PVU": f"{fmt_num(item['pvu'])} €",
                         "PCU": f"{fmt_num(item['pcu'])} €",
                         "Uds": item['unidades'],
-                        "Licitación": lic.get('nombre', 'Desc')
+                        "Licitación": lic.get('nombre', 'Desc'),
+                        "Expediente": lic.get('numero_expediente', '-')
                     })
                 st.dataframe(pd.DataFrame(rows), use_container_width=True)
             else:
