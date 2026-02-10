@@ -96,6 +96,10 @@ class DeliveryLineCreate(BaseModel):
     coste_unit: float = Field(0.0, ge=0, description="Coste unitario (€).")
 
 
+# Alias para validación de items en POST /deliveries
+DeliveryItem = DeliveryLineCreate
+
+
 class DeliveryCreate(BaseModel):
     """Payload para crear una entrega (cabecera + líneas)."""
 

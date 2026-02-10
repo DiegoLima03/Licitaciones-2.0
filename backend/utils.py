@@ -1,8 +1,11 @@
 """
 Utilidades compartidas para el backend.
 Migrado desde src/utils.py (sin dependencias de Streamlit).
+
+Incluye ayudas de limpieza vitales para parsear precios y números desde Excel.
 """
 
+from datetime import date, datetime
 from typing import Any, List, Union
 
 
@@ -13,9 +16,9 @@ def get_clean_number(
 ) -> float:
     """
     Extrae un número de una fila de DataFrame de forma segura.
+    Vital para parsear precios y cantidades en importación Excel.
 
     Soporta formatos europeos/americanos y cadenas con símbolo €.
-    Usado en la importación de Excel (backend/routers/import.py).
     """
     if col_name not in df_columns:
         return 0.0
@@ -38,3 +41,38 @@ def get_clean_number(
         return float(s_val)
     except (ValueError, TypeError):
         return 0.0
+
+
+def normalize_excel_columns(columns: Any) -> List[str]:
+    """
+    Normaliza nombres de columnas de un Excel (strip, string).
+    Usado antes de buscar columnas por nombre en importación.
+    """
+    return [str(c).strip() for c in columns]
+
+
+def fmt_num(valor: Any) -> str:
+    """Convierte un valor numérico a formato español (punto miles, coma decimal)."""
+    if valor is None or str(valor).strip() == "":
+        return "0,00"
+    try:
+        val_float = float(valor)
+        return f"{val_float:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    except (ValueError, TypeError):
+        return "0,00"
+
+
+def fmt_date(valor: Union[str, date, datetime, None]) -> str:
+    """Convierte fecha (ISO o date/datetime) a formato europeo DD/MM/YYYY."""
+    if not valor:
+        return ""
+    try:
+        if isinstance(valor, (date, datetime)):
+            return valor.strftime("%d/%m/%Y")
+        if isinstance(valor, str):
+            valor_clean = valor.split("T")[0]
+            dt = datetime.strptime(valor_clean, "%Y-%m-%d")
+            return dt.strftime("%d/%m/%Y")
+        return str(valor)
+    except Exception:
+        return str(valor)

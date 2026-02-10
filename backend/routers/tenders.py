@@ -48,7 +48,8 @@ def list_tenders(
 @router.get("/{tender_id}", response_model=dict)
 def get_tender(tender_id: int) -> dict:
     """
-    Obtiene el detalle de una licitación por ID.
+    Obtiene el detalle completo de una licitación por ID, con sus partidas
+    (join con tbl_licitaciones_detalle), según lógica de src/views/tenders_detail.py.
 
     GET /tenders/{id}
     """
@@ -65,7 +66,22 @@ def get_tender(tender_id: int) -> dict:
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Licitación no encontrada.",
             )
-        return response.data
+        licitacion: dict = response.data
+
+        partidas_resp = (
+            supabase_client.table("tbl_licitaciones_detalle")
+            .select("*")
+            .eq("id_licitacion", tender_id)
+            .order("lote")
+            .order("id_detalle")
+            .execute()
+        )
+        partidas: List[dict] = partidas_resp.data or []
+
+        return {
+            **licitacion,
+            "partidas": partidas,
+        }
     except HTTPException:
         raise
     except Exception as e:
