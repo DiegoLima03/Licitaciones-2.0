@@ -4,7 +4,7 @@ from datetime import datetime
 from src.utils import fmt_num, fmt_date 
 from src.logic.excel_import import analizar_excel_licitacion, guardar_datos_importados
 # AÑADIDO: Importamos la lógica de entregas
-from src.logic.deliveries import guardar_entrega_completa, eliminar_entrega_completa, actualizar_entrega_completa
+from src.logic.deliveries import guardar_entrega_completa, eliminar_entrega_completa, actualizar_entrega_completa, sincronizar_lineas_entrega
 
 def render_detalle(client, maestros):
     # Recuperamos datos de sesión
@@ -504,7 +504,10 @@ def render_ejecucion_completa(client, lic_id, items_db):
             fecha_fmt = fmt_date(ent['fecha_entrega'])
             titulo = f"📦 {fecha_fmt} | Ref: **{ent['codigo_albaran']}**"
             
-            with st.expander(titulo, expanded=False):
+            # Lógica para mantener el expander abierto tras recargar
+            is_expanded = (st.session_state.get('expander_activo') == id_e)
+            
+            with st.expander(titulo, expanded=is_expanded):
                 c_head, c_edit, c_del = st.columns([5, 1, 1])
                 c_head.caption(f"📝 Notas: {ent.get('observaciones','')}")
                 
@@ -548,53 +551,48 @@ def render_ejecucion_completa(client, lic_id, items_db):
                 # --- BOTÓN ELIMINAR ---
                 if c_del.button("🗑️", key=f"del_ent_{id_e}"):
                     if eliminar_entrega_completa(client, id_e):
+                        # Limpiamos el estado si borramos el activo
+                        if st.session_state.get('expander_activo') == id_e:
+                            st.session_state['expander_activo'] = None
                         st.success("Eliminado"); st.rerun()
                 
                 # Cargamos líneas
                 lineas = client.table("tbl_licitaciones_real").select("*").eq("id_entrega", id_e).order("id_real").execute().data
                 
+                # Inicializamos DataFrame siempre (vacío o con datos) para permitir añadir filas
                 if lineas:
                     df_l = pd.DataFrame(lineas)
-                    
-                    # --- EDICIÓN DIRECTA (AUTO-SAVE) ---
-                    edited_lines = st.data_editor(
-                        df_l,
-                        column_config={
-                            "id_real": None, "id_licitacion": None, "id_entrega": None, "id_detalle": None, "fecha_entrega": None, "created_at": None,
-                            "articulo": st.column_config.TextColumn("Concepto", width="large", disabled=True),
-                            "proveedor": st.column_config.TextColumn("Proveedor", width="medium", disabled=True),
-                            "cantidad": st.column_config.NumberColumn("Cant", format="%.2f", disabled=True),
-                            "pcu": st.column_config.NumberColumn("Coste", format="%.2f €", disabled=True),
-                            "estado": st.column_config.SelectboxColumn("Estado", options=["EN ESPERA", "ENTREGADO", "FACTURADO"], required=True),
-                            "cobrado": st.column_config.CheckboxColumn("Cobrado")
-                        },
-                        column_order=["articulo", "proveedor", "cantidad", "pcu", "estado", "cobrado"],
-                        use_container_width=True,
-                        hide_index=True,
-                        key=f"editor_lines_{id_e}"
-                    )
-                    
-                    # Detectamos cambios comparando con el original (df_l)
-                    if not df_l.empty:
-                        original_map = df_l.set_index('id_real')[['estado', 'cobrado']].to_dict('index')
-                        edited_records = edited_lines.to_dict('records')
-                        to_upsert = []
-                        
-                        for row in edited_records:
-                            id_r = row['id_real']
-                            orig = original_map.get(id_r)
-                            if orig and (row['estado'] != orig['estado'] or row['cobrado'] != orig['cobrado']):
-                                to_upsert.append(row)
-                        
-                        if to_upsert:
-                            try:
-                                client.table("tbl_licitaciones_real").upsert(to_upsert).execute()
-                                st.toast("✅ Cambios guardados")
-                            except Exception as e:
-                                st.error(f"Error guardando: {e}")
-                        
                 else:
-                    st.warning("Documento vacío.")
+                    df_l = pd.DataFrame(columns=["id_real", "articulo", "proveedor", "cantidad", "pcu", "estado", "cobrado", "fecha_entrega"])
+
+                # --- EDICIÓN COMPLETA ---
+                edited_lines = st.data_editor(
+                    df_l,
+                    column_config={
+                        "id_real": None, "id_licitacion": None, "id_entrega": None, "id_detalle": None, "fecha_entrega": None, "created_at": None,
+                        "articulo": st.column_config.TextColumn("Concepto", width="large"), # Habilitado
+                        "proveedor": st.column_config.TextColumn("Proveedor", width="medium"), # Habilitado
+                        "cantidad": st.column_config.NumberColumn("Cant", format="%.2f"), # Habilitado
+                        "pcu": st.column_config.NumberColumn("Coste", format="%.2f €"), # Habilitado
+                        "estado": st.column_config.SelectboxColumn("Estado", options=["EN ESPERA", "ENTREGADO", "FACTURADO"], required=True),
+                        "cobrado": st.column_config.CheckboxColumn("Cobrado")
+                    },
+                    column_order=["articulo", "proveedor", "cantidad", "pcu", "estado", "cobrado"],
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic", # Permite añadir/borrar filas
+                    key=f"editor_lines_{id_e}"
+                )
+                
+                # Botón explícito para guardar cambios (Insert/Update/Delete)
+                if st.button("💾 Guardar Cambios", key=f"btn_save_lines_{id_e}"):
+                    ok, msg = sincronizar_lineas_entrega(client, lic_id, id_e, edited_lines)
+                    if ok:
+                        st.session_state['expander_activo'] = id_e # Mantenemos abierto este expander
+                        st.success(msg)
+                        st.rerun()
+                    else:
+                        st.error(msg)
     else:
         st.info("No hay documentos registrados.")
 

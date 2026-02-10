@@ -1,6 +1,7 @@
 ### src/logic/deliveries.py
 import pandas as pd
 import streamlit as st
+from datetime import datetime
 
 def guardar_entrega_completa(client, lic_id, datos_cabecera, df_lineas, mapa_ids):
     """
@@ -130,3 +131,72 @@ def actualizar_entrega_completa(client, id_entrega, lic_id, datos_cabecera, df_l
 
     except Exception as e:
         return False, f"Error actualizando: {str(e)}"
+
+def sincronizar_lineas_entrega(client, id_licitacion, id_entrega, df_edited):
+    """
+    Sincroniza las líneas del editor con la BD (Insert/Update/Delete).
+    Comparando el estado actual en BD con el DataFrame editado.
+    """
+    try:
+        # 1. Obtener IDs actuales en BD para detectar borrados
+        rows_db = client.table("tbl_licitaciones_real").select("id_real").eq("id_entrega", id_entrega).execute().data
+        ids_db = {r['id_real'] for r in rows_db}
+        
+        # 2. Procesar DataFrame
+        records = df_edited.to_dict('records')
+        to_insert = []
+        to_update = []
+        ids_en_editor = set()
+        
+        # Cacheamos la fecha de entrega por si hay que insertar líneas nuevas
+        fecha_entrega = None
+        
+        for r in records:
+            # Detectar si es nuevo (ID vacío, NaN o None)
+            id_r = r.get('id_real')
+            es_nuevo = pd.isna(id_r) or id_r == "" or id_r is None
+            
+            if not es_nuevo:
+                ids_en_editor.add(int(id_r))
+            
+            # Construir objeto base
+            obj = {
+                "id_licitacion": id_licitacion,
+                "id_entrega": id_entrega,
+                "articulo": str(r.get('articulo', '')),
+                "proveedor": str(r.get('proveedor', '')),
+                "cantidad": float(r.get('cantidad', 0) or 0),
+                "pcu": float(r.get('pcu', 0) or 0),
+                "estado": r.get('estado', 'EN ESPERA'),
+                "cobrado": bool(r.get('cobrado', False))
+            }
+            
+            if es_nuevo:
+                if not fecha_entrega:
+                    res = client.table("tbl_entregas").select("fecha_entrega").eq("id_entrega", id_entrega).single().execute()
+                    fecha_entrega = res.data.get('fecha_entrega') if res.data else datetime.now().strftime("%Y-%m-%d")
+                obj['fecha_entrega'] = fecha_entrega
+                to_insert.append(obj)
+            else:
+                obj['id_real'] = int(id_r)
+                to_update.append(obj)
+        
+        # 3. Ejecutar Operaciones
+        
+        # DELETE: IDs que estaban en BD pero ya no están en el editor
+        ids_borrar = list(ids_db - ids_en_editor)
+        if ids_borrar:
+            client.table("tbl_licitaciones_real").delete().in_("id_real", ids_borrar).execute()
+            
+        # UPDATE: Actualizar existentes
+        if to_update:
+            client.table("tbl_licitaciones_real").upsert(to_update).execute()
+            
+        # INSERT: Crear nuevas
+        if to_insert:
+            client.table("tbl_licitaciones_real").insert(to_insert).execute()
+            
+        return True, f"Sincronizado: {len(to_insert)} nuevas, {len(to_update)} editadas, {len(ids_borrar)} borradas."
+        
+    except Exception as e:
+        return False, f"Error al sincronizar: {e}"
