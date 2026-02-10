@@ -160,93 +160,97 @@ def render_configuracion_cabecera(client, lic_id, data, maestros):
 
 def render_dashboard_completo(client, lic_id, data_lic, items_db):
     """
-    Dashboard filtrando solo por items ACTIVO=True.
-    Calcula Rentabilidad Real cruzando ejecución con precios de venta del presupuesto.
+    Dashboard de Rentabilidad Real vs Presupuesto.
+    LÓGICA CLAVE:
+    - Ingreso Real = Cantidad Real * PVU (del Presupuesto)
+    - Coste Real   = Cantidad Real * PCU (del Real)
     """
-    # 1. PREPARACIÓN DATOS PRESUPUESTO
+    # 1. DATOS DE PRESUPUESTO (Para obtener los PVU pactados)
     items_activos = [i for i in items_db if i.get('activo', True) is True]
-    pres_maximo_pliego = float(data_lic.get('pres_maximo', 0) or 0)
     
-    t_venta_prevista = 0
-    t_coste_previsto = 0
-    mapa_precios_venta = {} 
+    # Mapa para buscar rápidamente el precio de venta acordado de cada partida
+    # Key: id_detalle -> Value: pvu
+    mapa_pvu = {i['id_detalle']: float(i.get('pvu', 0) or 0) for i in items_activos}
     
-    for i in items_activos:
-        id_det = i['id_detalle']
-        u = float(i.get('unidades', 0) or 0)
-        v = float(i.get('pvu', 0) or 0)
-        c = float(i.get('pcu', 0) or 0)
-        
-        t_venta_prevista += (u * v)
-        t_coste_previsto += (u * c)
-        mapa_precios_venta[id_det] = v
+    # Cálculos del Presupuesto (Teórico)
+    pres_total_venta = sum([float(i.get('unidades',0)*i.get('pvu',0)) for i in items_activos])
+    pres_total_coste = sum([float(i.get('unidades',0)*i.get('pcu',0)) for i in items_activos])
+    pres_beneficio = pres_total_venta - pres_total_coste
     
-    t_beneficio_previsto = t_venta_prevista - t_coste_previsto
-    
-    # 2. CÁLCULO DE REAL (Ejecución)
+    # 2. DATOS REALES (Ejecución)
     items_real = client.table("tbl_licitaciones_real").select("*").eq("id_licitacion", lic_id).execute().data
     
-    real_coste_total = 0.0
-    real_venta_ejecutada = 0.0 # Valor de lo producido (Sale Price)
-    
+    # Acumuladores
+    real_venta_ejecutada = 0.0  # Valor de lo producido a precio de venta
+    real_coste_total = 0.0      # Coste real incurrido
     real_facturado = 0.0
     real_cobrado = 0.0
     
     if items_real:
         for ir in items_real:
-            qty_r = float(ir.get('cantidad', 0) or 0)
-            coste_unit_r = float(ir.get('pcu', 0) or 0)
-            
-            # Coste Real Directo
-            real_coste_total += (qty_r * coste_unit_r)
-            
-            # Valor Venta (Buscamos el PVU del presupuesto original)
+            # Datos de la línea real
+            qty_real = float(ir.get('cantidad', 0) or 0)
+            coste_unit_real = float(ir.get('pcu', 0) or 0)
             id_link = ir.get('id_detalle')
-            # Si es un extra (id_link None) o no se encuentra, asumimos venta 0 o coste (según criterio). 
-            # Aquí asumimos 0 si no está en presupuesto, para resaltar que es un coste sin ingreso previsto.
-            precio_venta_ref = mapa_precios_venta.get(id_link, 0.0)
+            estado = ir.get('estado', 'EN ESPERA')
+            cobrado = ir.get('cobrado', False)
             
-            valor_venta_linea = qty_r * precio_venta_ref
-            real_venta_ejecutada += valor_venta_linea
+            # A. CÁLCULO DE COSTE (Real * Real)
+            linea_coste = qty_real * coste_unit_real
+            real_coste_total += linea_coste
             
-            # KPIs Financieros
-            estado_r = ir.get('estado', 'EN ESPERA')
-            es_cobrado = ir.get('cobrado', False)
+            # B. CÁLCULO DE VENTA (Real * Presupuesto)
+            # Buscamos a cuánto vendimos esta partida en el presupuesto
+            pvu_pactado = mapa_pvu.get(id_link, 0.0)
             
-            if estado_r == 'FACTURADO':
-                real_facturado += valor_venta_linea
+            linea_venta = qty_real * pvu_pactado
+            real_venta_ejecutada += linea_venta
             
-            if es_cobrado:
-                real_cobrado += valor_venta_linea
+            # C. ACUMULADORES DE ESTADO
+            if estado == 'FACTURADO':
+                real_facturado += linea_venta
+            
+            if cobrado:
+                real_cobrado += linea_venta
 
-    # 3. RESULTADOS REALES
+    # 3. RESULTADOS FINANCIEROS
     real_beneficio = real_venta_ejecutada - real_coste_total
     
-    if real_venta_ejecutada > 0:
+    # Evitar división por cero en el margen
+    if real_venta_ejecutada != 0:
         real_margen_pct = (real_beneficio / real_venta_ejecutada) * 100
     else:
         real_margen_pct = 0.0
 
-    # 4. RENDERIZADO
+    # 4. VISUALIZACIÓN
     with st.expander("📊 Estadísticas y Rentabilidad", expanded=True):
-        # Fila 1: Presupuesto
+        # Fila Superior: PREVISIÓN
         c1, c2, c3, c4 = st.columns(4)
-        c1.metric("Presupuesto Base", f"{fmt_num(pres_maximo_pliego)} €")
-        c2.metric("Ofertado (Ganado)", f"{fmt_num(t_venta_prevista)} €", help="Suma de partidas activas")
-        c3.metric("Coste Estimado", f"{fmt_num(t_coste_previsto)} €")
-        c4.metric("Beneficio Previsto", f"{fmt_num(t_beneficio_previsto)} €")
+        c1.metric("Presupuesto Venta", f"{fmt_num(pres_total_venta)} €", help="Total ofertado en partidas activas")
+        c2.metric("Coste Previsto", f"{fmt_num(pres_total_coste)} €")
+        c3.metric("Beneficio Previsto", f"{fmt_num(pres_beneficio)} €")
+        margen_previsto = (pres_beneficio / pres_total_venta * 100) if pres_total_venta else 0
+        c4.metric("Margen Previsto", f"{fmt_num(margen_previsto)} %")
 
         st.divider()
         
-        # Fila 2: Realidad (Nuevos KPIs)
+        # Fila Inferior: REALIDAD
         r1, r2, r3, r4 = st.columns(4)
-        r1.metric("Importe Facturado", f"{fmt_num(real_facturado)} €", help="Suma PVU de líneas en estado FACTURADO")
-        r2.metric("Importe Cobrado", f"{fmt_num(real_cobrado)} €", help="Suma PVU de líneas COBRADAS")
-        r3.metric("Margen Real", f"{fmt_num(real_margen_pct)} %", help="Margen sobre lo ejecutado (Producción - Coste)")
         
-        # Color dinámico para beneficio
+        r1.metric("Importe Facturado", f"{fmt_num(real_facturado)} €", 
+                  help="Valor venta de partidas en estado FACTURADO")
+        
+        r2.metric("Importe Cobrado", f"{fmt_num(real_cobrado)} €", 
+                  help="Valor venta de partidas marcadas COBRADO")
+        
+        # Color del beneficio (Verde si > 0, Rojo si < 0)
         delta_color = "normal" if real_beneficio >= 0 else "inverse"
-        r4.metric("Beneficio Real", f"{fmt_num(real_beneficio)} €", delta="Sobre Producción", delta_color=delta_color)
+        
+        r3.metric("Beneficio Real", f"{fmt_num(real_beneficio)} €", 
+                  delta="Ganancia neta (Venta Ejecutada - Coste Real)", delta_color=delta_color)
+                  
+        r4.metric("Margen Real", f"{fmt_num(real_margen_pct)} %",
+                  help="Beneficio Real / Venta Ejecutada")
 
 def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
     tipo_id = data.get('tipo_de_licitacion')
@@ -509,9 +513,9 @@ def render_ejecucion_completa(client, lic_id, items_db):
 
 
 # 1. NUEVO CALLBACK (Poner antes de las funciones de renderizado o junto a los helpers)
-def callback_actualizar_lineas(key_editor, cache_key, client, lic_id, entrega_id, mapa_reverso_ids):
+def callback_actualizar_lineas(key_editor, cache_key, client, lic_id, entrega_id, mapa_reverso_ids, fecha_entrega_str):
     """
-    Callback Optimista: Guarda en BD y actualiza la caché local simultáneamente.
+    Callback Optimista: Ahora incluye fecha_entrega_str para evitar fechas NULL al insertar.
     """
     state = st.session_state.get(key_editor)
     if not state: return
@@ -557,6 +561,7 @@ def callback_actualizar_lineas(key_editor, cache_key, client, lic_id, entrega_id
                 "id_licitacion": lic_id,
                 "id_entrega": entrega_id,
                 "id_detalle": resolved_id_detalle,
+                "fecha_entrega": fecha_entrega_str, # <--- CORRECCIÓN CRÍTICA
                 "articulo": nombre_articulo, # Guardamos el nombre "Lote - Prod" o "Prod" según lógica
                 "proveedor": row.get("proveedor", ""),
                 "cantidad": float(row.get("cantidad", 0) or 0),
@@ -703,8 +708,8 @@ def render_fragmento_entrega(client, ent, lic_id, items_db):
             num_rows="dynamic",
             key=key_editor,
             on_change=callback_actualizar_lineas,
-            # Pasamos cache_key en lugar de df_l para que el callback actualice la fuente de verdad
-            args=(key_editor, cache_key, client, lic_id, id_e, mapa_reverso_ids)
+            # AÑADIDO: ent['fecha_entrega'] como argumento
+            args=(key_editor, cache_key, client, lic_id, id_e, mapa_reverso_ids, ent['fecha_entrega'])
         )
 
 
