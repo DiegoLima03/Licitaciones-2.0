@@ -155,3 +155,49 @@ def update_tender(tender_id: int, payload: TenderUpdate) -> dict:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error actualizando licitación: {e!s}",
         ) from e
+
+
+@router.delete("/{tender_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_tender(tender_id: int) -> None:
+    """
+    Borra una licitación y sus datos relacionados (cascade manual).
+    Orden: tbl_licitaciones_real -> tbl_entregas -> tbl_licitaciones_detalle -> tbl_licitaciones.
+
+    DELETE /tenders/{id}
+    """
+    try:
+        # Verificar que existe
+        check = (
+            supabase_client.table("tbl_licitaciones")
+            .select("id_licitacion")
+            .eq("id_licitacion", tender_id)
+            .execute()
+        )
+        if not check.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Licitación no encontrada.",
+            )
+        # Borrar líneas reales (por id_licitacion)
+        supabase_client.table("tbl_licitaciones_real").delete().eq(
+            "id_licitacion", tender_id
+        ).execute()
+        # Borrar cabeceras de entregas
+        supabase_client.table("tbl_entregas").delete().eq(
+            "id_licitacion", tender_id
+        ).execute()
+        # Borrar partidas del presupuesto
+        supabase_client.table("tbl_licitaciones_detalle").delete().eq(
+            "id_licitacion", tender_id
+        ).execute()
+        # Borrar licitación
+        supabase_client.table("tbl_licitaciones").delete().eq(
+            "id_licitacion", tender_id
+        ).execute()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error eliminando licitación: {e!s}",
+        ) from e

@@ -2,9 +2,9 @@
 Importación de Excel a tbl_licitaciones_detalle.
 Basado estrictamente en src/logic/excel_import.py.
 
-- Recibe UploadFile, usa Pandas para leer el Excel.
+- Recibe UploadFile, usa pandas (+ openpyxl para .xlsx) para leer el Excel.
 - Aplica la misma lógica de limpieza que analizar_excel_licitacion
-  (normalización de columnas y get_clean_number para precios/cantidades).
+  (normalización de columnas, limpieza de NaN, get_clean_number para precios).
 - Inserta los datos limpios en tbl_licitaciones_detalle vía Supabase.
 """
 
@@ -16,6 +16,8 @@ from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from backend.config import supabase_client
 from backend.utils import get_clean_number, normalize_excel_columns
+
+# Para .xlsx pandas usa openpyxl; asegurar que esté instalado: pip install openpyxl
 
 
 router = APIRouter(prefix="/import", tags=["import"])
@@ -31,7 +33,11 @@ def _analizar_excel_licitacion(
     Retorna (True, DataFrame) o (False, str error).
     """
     try:
-        df = pd.read_excel(io.BytesIO(file_content))
+        buf = io.BytesIO(file_content)
+        try:
+            df = pd.read_excel(buf, engine="openpyxl")
+        except ValueError:
+            df = pd.read_excel(io.BytesIO(file_content))
         df.columns = normalize_excel_columns(df.columns)
 
         col_prod = "Planta"

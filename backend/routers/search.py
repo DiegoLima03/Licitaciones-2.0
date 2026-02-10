@@ -1,6 +1,7 @@
 """
-Buscador histórico por producto.
+Buscador histórico.
 Migrado desde src/views/search.py.
+Busca en tbl_licitaciones_detalle (ILIKE en producto y, si existe, descripcion).
 """
 
 from typing import List
@@ -14,24 +15,33 @@ from backend.models import ProductSearchItem
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-@router.get("/products", response_model=List[ProductSearchItem])
-def search_products(
-    q: str = Query(..., min_length=1, description="Texto de búsqueda en producto."),
+def _search_detalle(q: str) -> List[dict]:
+    """
+    Busca en tbl_licitaciones_detalle con ILIKE en producto (y descripcion si existe).
+    Si la tabla no tiene columna descripcion, solo se filtra por producto.
+    """
+    base = supabase_client.table("tbl_licitaciones_detalle").select(
+        "*, tbl_licitaciones(nombre, numero_expediente)"
+    )
+    try:
+        response = base.or_(f"producto.ilike.%{q}%,descripcion.ilike.%{q}%").execute()
+    except Exception:
+        response = base.ilike("producto", f"%{q}%").execute()
+    return response.data or []
+
+
+@router.get("", response_model=List[ProductSearchItem])
+def search(
+    q: str = Query(..., min_length=1, description="Texto de búsqueda (producto o descripción)."),
 ) -> List[ProductSearchItem]:
     """
-    Busca en tbl_licitaciones_detalle por producto (ilike)
-    y devuelve cada resultado con nombre y numero_expediente de la licitación.
+    Busca en tbl_licitaciones_detalle usando ILIKE en la columna producto
+    (y descripcion si existe en la tabla).
 
-    GET /search/products?q=Planta
+    GET /search?q=Planta
     """
     try:
-        response = (
-            supabase_client.table("tbl_licitaciones_detalle")
-            .select("*, tbl_licitaciones(nombre, numero_expediente)")
-            .ilike("producto", f"%{q}%")
-            .execute()
-        )
-        data = response.data or []
+        data = _search_detalle(q)
         results: List[ProductSearchItem] = []
         for item in data:
             lic = item.get("tbl_licitaciones") or {}
@@ -53,3 +63,14 @@ def search_products(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error en búsqueda: {e!s}",
         ) from e
+
+
+@router.get("/products", response_model=List[ProductSearchItem])
+def search_products(
+    q: str = Query(..., min_length=1, description="Texto de búsqueda en producto."),
+) -> List[ProductSearchItem]:
+    """
+    Misma búsqueda por producto (compatibilidad).
+    GET /search/products?q=Planta
+    """
+    return search(q=q)

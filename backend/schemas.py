@@ -1,8 +1,34 @@
 """
-Esquemas Pydantic para la API (auth, etc.).
-Reexporta desde models para mantener compatibilidad.
+Esquemas Pydantic para la API.
+Reexporta desde backend.models para mantener un único lugar de definición.
 """
 
-from backend.models import UserLogin, UserResponse
+from backend.models import (
+    DeliveryCreate,
+    DeliveryHeaderCreate,
+    DeliveryItem,
+    DeliveryLineCreate,
+    KPIDashboard,
+    ProductSearchItem,
+    TenderCreate,
+    TenderUpdate,
+    UserLogin,
+    UserResponse,
+)
 
-__all__ = ["UserLogin", "UserResponse"]
+# Alias para documentación/consumo en endpoints de entregas
+DeliverySchema = DeliveryCreate
+
+__all__ = [
+    "DeliveryCreate",
+    "DeliveryHeaderCreate",
+    "DeliveryItem",
+    "DeliveryLineCreate",
+    "DeliverySchema",
+    "KPIDashboard",
+    "ProductSearchItem",
+    "TenderCreate",
+    "TenderUpdate",
+    "UserLogin",
+    "UserResponse",
+]
