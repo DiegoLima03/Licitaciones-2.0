@@ -25,14 +25,11 @@ def guardar_entrega_completa(client, lic_id, datos_cabecera, df_lineas, mapa_ids
         records = df_lineas.to_dict('records')
         
         for r in records:
+            nombre_prod = r.get('Concepto / Partida')
+            if not nombre_prod: continue
+            
             qty = float(r.get('Cantidad', 0) or 0)
             cost = float(r.get('Coste Unit.', 0) or 0)
-            
-            # Validamos que la línea tenga sentido
-            if qty == 0 and cost == 0:
-                continue 
-            
-            nombre_prod = r.get('Concepto / Partida')
             id_detalle = mapa_ids.get(nombre_prod)
             
             articulo_final = nombre_prod
@@ -75,3 +72,61 @@ def eliminar_entrega_completa(client, id_entrega):
     except Exception as e:
         print(e)
         return False
+
+def actualizar_entrega_completa(client, id_entrega, lic_id, datos_cabecera, df_lineas, mapa_ids):
+    """
+    Actualiza una entrega existente:
+    1. Actualiza cabecera.
+    2. Borra líneas antiguas.
+    3. Inserta líneas nuevas (reemplazo).
+    """
+    try:
+        # 1. Actualizar Cabecera
+        client.table("tbl_entregas").update({
+            "fecha_entrega": str(datos_cabecera['fecha']),
+            "codigo_albaran": datos_cabecera['albaran'],
+            "observaciones": datos_cabecera['notas']
+        }).eq("id_entrega", id_entrega).execute()
+        
+        # 2. Borrar líneas antiguas (Limpieza para evitar duplicados/inconsistencias)
+        client.table("tbl_licitaciones_real").delete().eq("id_entrega", id_entrega).execute()
+        
+        # 3. Insertar líneas nuevas (Reutilizando lógica de inserción)
+        lineas_a_insertar = []
+        records = df_lineas.to_dict('records')
+        
+        for r in records:
+            nombre_prod = r.get('Concepto / Partida')
+            if not nombre_prod: continue
+            
+            qty = float(r.get('Cantidad', 0) or 0)
+            cost = float(r.get('Coste Unit.', 0) or 0)
+            id_detalle = mapa_ids.get(nombre_prod)
+            
+            articulo_final = nombre_prod
+            if id_detalle and " - " in nombre_prod:
+                articulo_final = nombre_prod.split(" - ", 1)[1]
+            
+            prov_linea = str(r.get('Proveedor', '')).strip()
+            
+            lineas_a_insertar.append({
+                "id_licitacion": lic_id,
+                "id_entrega": id_entrega, # ID existente
+                "id_detalle": id_detalle,
+                "fecha_entrega": str(datos_cabecera['fecha']),
+                "articulo": articulo_final,
+                "cantidad": qty,
+                "pcu": cost,
+                "proveedor": prov_linea,
+                "estado": "EN ESPERA",
+                "cobrado": False
+            })
+            
+        if lineas_a_insertar:
+            client.table("tbl_licitaciones_real").insert(lineas_a_insertar).execute()
+            return True, f"Entrega actualizada con {len(lineas_a_insertar)} líneas."
+        else:
+            return True, "Entrega actualizada (sin líneas)."
+
+    except Exception as e:
+        return False, f"Error actualizando: {str(e)}"

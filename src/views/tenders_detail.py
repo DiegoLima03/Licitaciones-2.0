@@ -4,7 +4,7 @@ from datetime import datetime
 from src.utils import fmt_num, fmt_date 
 from src.logic.excel_import import analizar_excel_licitacion, guardar_datos_importados
 # AÑADIDO: Importamos la lógica de entregas
-from src.logic.deliveries import guardar_entrega_completa, eliminar_entrega_completa
+from src.logic.deliveries import guardar_entrega_completa, eliminar_entrega_completa, actualizar_entrega_completa
 
 def render_detalle(client, maestros):
     # Recuperamos datos de sesión
@@ -505,9 +505,47 @@ def render_ejecucion_completa(client, lic_id, items_db):
             titulo = f"📦 {fecha_fmt} | Ref: **{ent['codigo_albaran']}**"
             
             with st.expander(titulo, expanded=False):
-                c_head, c_del = st.columns([5, 1])
+                c_head, c_edit, c_del = st.columns([5, 1, 1])
                 c_head.caption(f"📝 Notas: {ent.get('observaciones','')}")
                 
+                # --- BOTÓN EDITAR ---
+                if c_edit.button("✏️", key=f"edit_ent_{id_e}"):
+                    # 1. Guardamos ID y Datos de Cabecera
+                    st.session_state['id_entrega_en_edicion'] = id_e
+                    st.session_state['datos_entrega_edit'] = {
+                        "fecha": ent['fecha_entrega'],
+                        "albaran": ent['codigo_albaran'],
+                        "notas": ent.get('observaciones', '')
+                    }
+                    
+                    # 2. Recuperamos líneas para pre-cargar el DataFrame
+                    lineas_edit = client.table("tbl_licitaciones_real").select("*").eq("id_entrega", id_e).execute().data
+                    
+                    # 3. Reconstruimos el formato para el Editor (Mapeo Inverso ID -> Nombre Combo)
+                    rev_map = {v: k for k, v in mapa_presu_ids.items()}
+                    data_edit = []
+                    
+                    for l in lineas_edit:
+                        idd = l.get('id_detalle')
+                        # Si tiene ID, usamos el nombre del combo, si no, el nombre guardado (Extra)
+                        concepto = rev_map.get(idd, l.get('articulo', ''))
+                        
+                        data_edit.append({
+                            "Concepto / Partida": concepto,
+                            "Proveedor": l.get('proveedor', ''),
+                            "Cantidad": float(l.get('cantidad', 0)),
+                            "Coste Unit.": float(l.get('pcu', 0))
+                        })
+                    
+                    if not data_edit:
+                        st.session_state['df_entrega_temp'] = pd.DataFrame(columns=["Concepto / Partida", "Proveedor", "Cantidad", "Coste Unit."])
+                    else:
+                        st.session_state['df_entrega_temp'] = pd.DataFrame(data_edit)
+                        
+                    st.session_state['creando_entrega'] = True
+                    st.rerun()
+
+                # --- BOTÓN ELIMINAR ---
                 if c_del.button("🗑️", key=f"del_ent_{id_e}"):
                     if eliminar_entrega_completa(client, id_e):
                         st.success("Eliminado"); st.rerun()
@@ -589,21 +627,37 @@ def render_remaining(client, lic_id, items_db):
             sumas_real[id_d] = sumas_real.get(id_d, 0) + float(r.get('cantidad', 0) or 0)
             
     # 3. Construimos la Tabla Cruzada
-    rows = []
     if budget_items:
+        # Agrupación por (Lote, Producto) para evitar duplicados visuales
+        agrupado = {}
+
         for b in budget_items:
             id_d = b['id_detalle']
+            lote = b.get('lote', 'Gen')
+            prod_raw = b.get('producto', '')
+            key = (lote, prod_raw.strip().lower())
+
             u_presu = float(b.get('unidades', 0) or 0)
             u_real = float(sumas_real.get(id_d, 0))
-            pendiente = u_presu - u_real
-            
-            progreso = min(max(u_real / u_presu, 0.0), 1.0) if u_presu > 0 else 0.0
 
+            if key not in agrupado:
+                agrupado[key] = {"Lote": lote, "Producto": prod_raw, "Presupuestado": 0.0, "Ejecutado": 0.0}
+            
+            agrupado[key]["Presupuestado"] += u_presu
+            agrupado[key]["Ejecutado"] += u_real
+
+        rows = []
+        for v in agrupado.values():
+            u_p = v["Presupuestado"]
+            u_r = v["Ejecutado"]
+            pendiente = u_p - u_r
+            progreso = (min(max(u_r / u_p, 0.0), 1.0) * 100) if u_p > 0 else 0.0
+            
             rows.append({
-                "Lote": b.get('lote', 'Gen'),
-                "Producto": b['producto'],
-                "Presupuestado": u_presu,
-                "Ejecutado": u_real,
+                "Lote": v["Lote"],
+                "Producto": v["Producto"],
+                "Presupuestado": u_p,
+                "Ejecutado": u_r,
                 "Pendiente": pendiente,
                 "Progreso": progreso
             })
@@ -619,7 +673,7 @@ def render_remaining(client, lic_id, items_db):
                 "Presupuestado": st.column_config.NumberColumn("Ud. Presu.", format="%.2f"),
                 "Ejecutado": st.column_config.NumberColumn("Ud. Real", format="%.2f"),
                 "Pendiente": st.column_config.NumberColumn("Falta por Servir", format="%.2f"),
-                "Progreso": st.column_config.ProgressColumn("Estado", format="%.0f%%", min_value=0, max_value=1)
+                "Progreso": st.column_config.ProgressColumn("Estado", format="%.0f%%", min_value=0, max_value=100)
             }
         )
     else:
@@ -644,10 +698,36 @@ def render_formulario_alta_entrega(client, lic_id, data, items_db):
     """
     Muestra SOLO el formulario de creación de entrega ocupando toda la pantalla.
     """
-    st.button("⬅ Cancelar y Volver", on_click=lambda: st.session_state.update({'creando_entrega': False}))
+    def cancelar_edicion():
+        st.session_state['creando_entrega'] = False
+        if 'id_entrega_en_edicion' in st.session_state: del st.session_state['id_entrega_en_edicion']
+        if 'datos_entrega_edit' in st.session_state: del st.session_state['datos_entrega_edit']
+        if 'df_entrega_temp' in st.session_state: del st.session_state['df_entrega_temp']
+
+    st.button("⬅ Cancelar y Volver", on_click=cancelar_edicion)
     
-    st.markdown(f"### 📦 Nueva Entrega / Albarán para: *{data['nombre']}*")
-    st.info("Estás en modo edición. Rellena los datos y guarda para volver al dashboard.")
+    # --- LÓGICA DE MODO (CREAR vs EDITAR) ---
+    id_edit = st.session_state.get('id_entrega_en_edicion')
+    datos_edit = st.session_state.get('datos_entrega_edit', {})
+    
+    if id_edit:
+        titulo_form = "✏️ Editando Entrega / Albarán"
+        try:
+            d_val = datetime.strptime(datos_edit.get('fecha'), "%Y-%m-%d").date()
+        except:
+            d_val = datetime.now()
+        val_alb = datos_edit.get('albaran', '')
+        val_notas = datos_edit.get('notas', '')
+        btn_label = "🔄 Actualizar Documento"
+    else:
+        titulo_form = f"📦 Nueva Entrega / Albarán para: *{data['nombre']}*"
+        d_val = datetime.now()
+        val_alb = ""
+        val_notas = ""
+        btn_label = "💾 Guardar Documento y Finalizar"
+
+    st.markdown(f"### {titulo_form}")
+    st.info("Rellena los datos y guarda para volver al dashboard.")
 
     items_activos = [i for i in items_db if i.get('activo', True)]
     mapa_presu_ids = {f"{i.get('lote','Gen')} - {i['producto']}": i['id_detalle'] for i in items_activos}
@@ -658,9 +738,9 @@ def render_formulario_alta_entrega(client, lic_id, data, items_db):
         with st.form("frm_alta_entrega", clear_on_submit=False):
             c1, c2 = st.columns(2)
             # APLICAMOS FORMATO EUROPEO AL WIDGET
-            fecha = c1.date_input("Fecha Documento", datetime.now(), format="DD/MM/YYYY")
-            alb = c2.text_input("Nº Albarán / Referencia / Parte")
-            notas = st.text_area("Notas Globales", height=60, placeholder="Comentarios generales...")
+            fecha = c1.date_input("Fecha Documento", value=d_val, format="DD/MM/YYYY")
+            alb = c2.text_input("Nº Albarán / Referencia / Parte", value=val_alb)
+            notas = st.text_area("Notas Globales", value=val_notas, height=60, placeholder="Comentarios generales...")
             
             st.divider()
             st.markdown("**Detalle de Líneas (Indica el proveedor en cada línea):**")
@@ -688,7 +768,7 @@ def render_formulario_alta_entrega(client, lic_id, data, items_db):
             )
             
             st.write("")
-            submitted = st.form_submit_button("💾 Guardar Documento y Finalizar", type="primary", use_container_width=True)
+            submitted = st.form_submit_button(btn_label, type="primary", use_container_width=True)
         
         if submitted:
             # Guardamos estado temporal por si falla la validación y se recarga
@@ -698,11 +778,18 @@ def render_formulario_alta_entrega(client, lic_id, data, items_db):
                 st.error("⚠️ Falta el Nº de Referencia.")
             else:
                 cabecera = {"fecha": fecha, "albaran": alb, "notas": notas}
-                ok, msg = guardar_entrega_completa(client, lic_id, cabecera, edited_df, mapa_presu_ids)
+                
+                if id_edit:
+                    # MODO EDICIÓN
+                    ok, msg = actualizar_entrega_completa(client, id_edit, lic_id, cabecera, edited_df, mapa_presu_ids)
+                else:
+                    # MODO CREACIÓN
+                    ok, msg = guardar_entrega_completa(client, lic_id, cabecera, edited_df, mapa_presu_ids)
+                
                 if ok:
                     st.success(msg)
-                    st.session_state['creando_entrega'] = False
-                    del st.session_state['df_entrega_temp']
+                    # Limpieza completa
+                    cancelar_edicion() 
                     st.rerun()
                 else:
                     st.error(msg)
