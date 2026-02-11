@@ -41,14 +41,22 @@ def list_deliveries(
             id_e = ent.get("id_entrega")
             lineas_resp = (
                 supabase_client.table("tbl_licitaciones_real")
-                .select("*")
+                .select("*, tbl_productos(nombre)")
                 .eq("id_entrega", id_e)
                 .order("id_real")
                 .execute()
             )
+            raw_lineas = lineas_resp.data or []
+            lineas: List[dict] = []
+            for lin in raw_lineas:
+                prod = lin.get("tbl_productos") or {}
+                lineas.append({
+                    **{k: v for k, v in lin.items() if k != "tbl_productos"},
+                    "product_nombre": prod.get("nombre"),
+                })
             result.append({
                 **ent,
-                "lineas": lineas_resp.data or [],
+                "lineas": lineas,
             })
         return result
     except Exception as e:
@@ -58,21 +66,20 @@ def list_deliveries(
         ) from e
 
 
-def _get_mapa_ids(licitacion_id: int) -> Dict[str, int]:
-    """Obtiene mapa 'Lote - Producto' -> id_detalle para la licitación."""
+def _get_mapa_id_detalle_by_id_producto(licitacion_id: int) -> Dict[int, int]:
+    """Obtiene mapa id_producto -> id_detalle (primera partida con ese producto) para la licitación."""
     response = (
         supabase_client.table("tbl_licitaciones_detalle")
-        .select("id_detalle, lote, producto")
+        .select("id_detalle, id_producto")
         .eq("id_licitacion", licitacion_id)
         .eq("activo", True)
         .execute()
     )
-    mapa: Dict[str, int] = {}
+    mapa: Dict[int, int] = {}
     for r in response.data or []:
-        lote = r.get("lote") or "Gen"
-        prod = r.get("producto") or ""
-        key = f"{lote} - {prod}"
-        mapa[key] = r["id_detalle"]
+        id_p = r.get("id_producto")
+        if id_p is not None and id_p not in mapa:
+            mapa[int(id_p)] = int(r["id_detalle"])
     return mapa
 
 
@@ -113,7 +120,7 @@ def create_delivery(payload: DeliveryCreate) -> dict:
             detail=f"Error creando cabecera: {e!s}",
         ) from e
 
-    mapa_ids = _get_mapa_ids(payload.id_licitacion)
+    mapa_id_detalle = _get_mapa_id_detalle_by_id_producto(payload.id_licitacion)
     lineas_a_insertar: List[dict[str, Any]] = []
 
     for line in payload.lineas:
@@ -121,18 +128,15 @@ def create_delivery(payload: DeliveryCreate) -> dict:
         cost = float(line.coste_unit)
         if qty == 0 and cost == 0:
             continue
-        nombre_prod = line.concepto_partida
-        id_detalle = mapa_ids.get(nombre_prod)
-        articulo_final = nombre_prod
-        if id_detalle and " - " in nombre_prod:
-            articulo_final = nombre_prod.split(" - ", 1)[1]
+        id_producto = int(line.id_producto)
+        id_detalle = line.id_detalle
         prov_linea = (line.proveedor or "").strip()
         lineas_a_insertar.append({
             "id_licitacion": payload.id_licitacion,
             "id_entrega": new_id_entrega,
             "id_detalle": id_detalle,
+            "id_producto": id_producto,
             "fecha_entrega": cabecera.fecha,
-            "articulo": articulo_final,
             "cantidad": qty,
             "pcu": cost,
             "proveedor": prov_linea,

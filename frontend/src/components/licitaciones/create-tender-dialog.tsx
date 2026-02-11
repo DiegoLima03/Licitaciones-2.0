@@ -67,6 +67,48 @@ export function CreateTenderDialog({
   const [estados, setEstados] = React.useState<Estado[]>([]);
   const [tipos, setTipos] = React.useState<Tipo[]>([]);
   const [loadingMaestros, setLoadingMaestros] = React.useState(false);
+  const [openDatePopover, setOpenDatePopover] = React.useState<
+    "f_presentacion" | "f_adjudicacion" | "f_finalizacion" | null
+  >(null);
+  const [dateInputValues, setDateInputValues] = React.useState<
+    Record<"f_presentacion" | "f_adjudicacion" | "f_finalizacion", string>
+  >({ f_presentacion: "", f_adjudicacion: "", f_finalizacion: "" });
+
+  React.useEffect(() => {
+    if (!open) {
+      setOpenDatePopover(null);
+      return;
+    }
+    const v = form.getValues();
+    setDateInputValues({
+      f_presentacion: v.f_presentacion ? formatDateForInput(v.f_presentacion) : "",
+      f_adjudicacion: v.f_adjudicacion ? formatDateForInput(v.f_adjudicacion) : "",
+      f_finalizacion: v.f_finalizacion ? formatDateForInput(v.f_finalizacion) : "",
+    });
+  }, [open]);
+
+  function formatDateForInput(date: Date): string {
+    const d = date.getDate();
+    const m = date.getMonth() + 1;
+    const y = date.getFullYear();
+    return `${d.toString().padStart(2, "0")}/${m.toString().padStart(2, "0")}/${y}`;
+  }
+
+  function parseDateInput(str: string): Date | null {
+    const t = str.trim().replace(/\s+/g, "");
+    if (!t) return null;
+    const parts = t.split(/[/.-]/);
+    if (parts.length !== 3) return null;
+    const d = parseInt(parts[0], 10);
+    const m = parseInt(parts[1], 10) - 1;
+    let y = parseInt(parts[2], 10);
+    if (y >= 0 && y < 100) y += 2000;
+    if (Number.isNaN(d) || Number.isNaN(m) || Number.isNaN(y)) return null;
+    const date = new Date(y, m, d);
+    if (date.getFullYear() !== y || date.getMonth() !== m || date.getDate() !== d)
+      return null;
+    return date;
+  }
 
   React.useEffect(() => {
     if (!open) return;
@@ -115,6 +157,7 @@ export function CreateTenderDialog({
       // eslint-disable-next-line no-alert
       alert("Licitación creada correctamente");
       form.reset();
+      setDateInputValues({ f_presentacion: "", f_adjudicacion: "", f_finalizacion: "" });
       setOpen(false);
       onSuccess?.();
     } catch (error) {
@@ -131,31 +174,70 @@ export function CreateTenderDialog({
       value?: Date;
       onChange: (date?: Date) => void;
     },
-    placeholder: string
+    placeholder: string,
+    popoverKey: "f_presentacion" | "f_adjudicacion" | "f_finalizacion"
   ) {
+    const isOpen = openDatePopover === popoverKey;
+    const inputValue = dateInputValues[popoverKey];
+
     return (
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full justify-start text-left font-normal"
-          >
-            <CalendarIcon className="mr-2 h-4 w-4" />
-            {field.value
-              ? field.value.toLocaleDateString("es-ES")
-              : placeholder}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="start">
-          <Calendar
-            mode="single"
-            selected={field.value}
-            onSelect={field.onChange}
-            initialFocus
-          />
-        </PopoverContent>
-      </Popover>
+      <div className="flex gap-2">
+        <Input
+          type="text"
+          placeholder="dd/mm/aaaa"
+          value={inputValue}
+          onChange={(e) =>
+            setDateInputValues((prev) => ({ ...prev, [popoverKey]: e.target.value }))
+          }
+          onBlur={() => {
+            const parsed = parseDateInput(inputValue);
+            if (parsed) {
+              field.onChange(parsed);
+              setDateInputValues((prev) => ({
+                ...prev,
+                [popoverKey]: formatDateForInput(parsed),
+              }));
+            } else if (inputValue.trim() !== "" && !field.value) {
+              setDateInputValues((prev) => ({
+                ...prev,
+                [popoverKey]: field.value ? formatDateForInput(field.value) : "",
+              }));
+            }
+          }}
+          className="flex-1 font-mono text-sm"
+          aria-label={placeholder}
+        />
+        <Popover
+          open={isOpen}
+          onOpenChange={(open) => setOpenDatePopover(open ? popoverKey : null)}
+        >
+          <PopoverTrigger asChild>
+            <Button
+              type="button"
+              variant="outline"
+              size="icon"
+              className="h-9 w-9 shrink-0"
+              aria-label="Abrir calendario"
+            >
+              <CalendarIcon className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-0" align="end">
+            <Calendar
+              mode="single"
+              selected={field.value}
+              onSelect={(date) => {
+                field.onChange(date);
+                setDateInputValues((prev) => ({
+                  ...prev,
+                  [popoverKey]: date ? formatDateForInput(date) : "",
+                }));
+                setOpenDatePopover(null);
+              }}
+            />
+          </PopoverContent>
+        </Popover>
+      </div>
     );
   }
 
@@ -239,7 +321,7 @@ export function CreateTenderDialog({
                   <FormItem className="flex flex-col">
                     <FormLabel>F. Presentación</FormLabel>
                     <FormControl>
-                      {renderDateField(field, "Selecciona la fecha")}
+                      {renderDateField(field, "Selecciona la fecha", "f_presentacion")}
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -253,7 +335,7 @@ export function CreateTenderDialog({
                   <FormItem className="flex flex-col">
                     <FormLabel>F. Adjudicación</FormLabel>
                     <FormControl>
-                      {renderDateField(field, "Selecciona la fecha")}
+                      {renderDateField(field, "Selecciona la fecha", "f_adjudicacion")}
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -267,7 +349,7 @@ export function CreateTenderDialog({
                   <FormItem className="flex flex-col">
                     <FormLabel>F. Finalización</FormLabel>
                     <FormControl>
-                      {renderDateField(field, "Selecciona la fecha")}
+                      {renderDateField(field, "Selecciona la fecha", "f_finalizacion")}
                     </FormControl>
                     <FormMessage />
                   </FormItem>

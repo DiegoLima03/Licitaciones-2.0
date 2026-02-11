@@ -4,6 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus } from "lucide-react";
 
+import { ProductCombobox } from "@/components/producto-combobox";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,11 +25,10 @@ function formatEuro(value: number) {
   }).format(value);
 }
 
-const initialForm: PrecioReferenciaCreate = {
-  producto: "",
-  pvu: null,
-  pcu: null,
-  unidades: null,
+const initialForm = {
+  pvu: null as number | null,
+  pcu: null as number | null,
+  unidades: null as number | null,
   proveedor: "",
   notas: "",
 };
@@ -38,7 +38,11 @@ export default function LineasReferenciaPage() {
   const [loading, setLoading] = React.useState(true);
   const [submitting, setSubmitting] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
-  const [form, setForm] = React.useState<PrecioReferenciaCreate>(initialForm);
+  const [selectedProduct, setSelectedProduct] = React.useState<{
+    id: number;
+    nombre: string;
+  } | null>(null);
+  const [form, setForm] = React.useState(initialForm);
 
   const fetchList = React.useCallback(async () => {
     setLoading(true);
@@ -59,7 +63,7 @@ export default function LineasReferenciaPage() {
   }, [fetchList]);
 
   function handleChange(
-    field: keyof PrecioReferenciaCreate,
+    field: keyof typeof initialForm,
     value: string | number | null
   ) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -67,25 +71,23 @@ export default function LineasReferenciaPage() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    const producto = form.producto.trim();
-    if (!producto) {
-      setError("El nombre del producto es obligatorio.");
+    if (!selectedProduct) {
+      setError("Selecciona un producto.");
       return;
     }
     setSubmitting(true);
     setError(null);
     try {
-      await PreciosReferenciaService.create({
-        producto,
-        pvu: form.pvu != null && form.pvu !== "" ? Number(form.pvu) : null,
-        pcu: form.pcu != null && form.pcu !== "" ? Number(form.pcu) : null,
-        unidades:
-          form.unidades != null && form.unidades !== ""
-            ? Number(form.unidades)
-            : null,
+      const payload: PrecioReferenciaCreate = {
+        id_producto: selectedProduct.id,
+        pvu: form.pvu != null ? Number(form.pvu) : null,
+        pcu: form.pcu != null ? Number(form.pcu) : null,
+        unidades: form.unidades != null ? Number(form.unidades) : null,
         proveedor: form.proveedor?.trim() || null,
         notas: form.notas?.trim() || null,
-      });
+      };
+      await PreciosReferenciaService.create(payload);
+      setSelectedProduct(null);
       setForm(initialForm);
       await fetchList();
     } catch (e) {
@@ -130,19 +132,13 @@ export default function LineasReferenciaPage() {
             )}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               <div className="sm:col-span-2 lg:col-span-1">
-                <label
-                  htmlFor="producto"
-                  className="mb-1 block text-xs font-medium text-slate-600"
-                >
+                <label className="mb-1 block text-xs font-medium text-slate-600">
                   Producto *
                 </label>
-                <Input
-                  id="producto"
-                  value={form.producto}
-                  onChange={(e) => handleChange("producto", e.target.value)}
-                  placeholder="Ej. Planta ornamental"
-                  className="w-full"
-                  required
+                <ProductCombobox
+                  value={selectedProduct}
+                  onSelect={(id, nombre) => setSelectedProduct({ id, nombre })}
+                  placeholder="Buscar producto…"
                 />
               </div>
               <div>
@@ -284,7 +280,7 @@ export default function LineasReferenciaPage() {
                       className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
                     >
                       <td className="max-w-xs py-2 pr-3 font-medium text-slate-900">
-                        {item.producto}
+                        {item.product_nombre ?? "—"}
                       </td>
                       <td className="py-2 pr-3 text-slate-700">
                         {item.proveedor ?? "—"}

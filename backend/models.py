@@ -105,11 +105,24 @@ class TenderUpdate(BaseModel):
     descuento_global: Optional[float] = None
 
 
+# ----- Productos (tbl_productos) -----
+
+
+class ProductoSearchResult(BaseModel):
+    """Resultado de búsqueda de productos para combobox/selectores."""
+
+    id: int = Field(..., description="ID del producto.")
+    nombre: str = Field(..., description="Nombre del producto.")
+
+
+# ----- Partidas (tbl_licitaciones_detalle) -----
+
+
 class PartidaCreate(BaseModel):
     """Payload para añadir una partida manual a tbl_licitaciones_detalle."""
 
     lote: Optional[str] = Field("General", description="Lote / zona.")
-    producto: str = Field(..., description="Descripción del producto o partida.")
+    id_producto: int = Field(..., description="ID del producto en tbl_productos.")
     unidades: Optional[float] = Field(1.0, ge=0, description="Unidades.")
     pvu: Optional[float] = Field(0.0, ge=0, description="Precio venta unitario (€).")
     pcu: Optional[float] = Field(0.0, ge=0, description="Precio coste unitario (€).")
@@ -132,7 +145,8 @@ class DeliveryHeaderCreate(BaseModel):
 class DeliveryLineCreate(BaseModel):
     """Una línea de detalle de entrega."""
 
-    concepto_partida: str = Field(..., description="Concepto / partida (o 'Lote - Producto').")
+    id_producto: int = Field(..., description="ID del producto en tbl_productos.")
+    id_detalle: Optional[int] = Field(None, description="ID partida presupuesto (tbl_licitaciones_detalle). Null = gasto extraordinario.")
     proveedor: Optional[str] = Field("", description="Proveedor de la línea.")
     cantidad: float = Field(0.0, ge=0, description="Cantidad.")
     coste_unit: float = Field(0.0, ge=0, description="Coste unitario (€).")
@@ -156,7 +170,7 @@ class DeliveryCreate(BaseModel):
 class PrecioReferenciaCreate(BaseModel):
     """Payload para crear una línea de precio de referencia (sin licitación)."""
 
-    producto: str = Field(..., description="Nombre del producto.")
+    id_producto: int = Field(..., description="ID del producto en tbl_productos.")
     pvu: Optional[float] = Field(None, description="Precio venta unitario.")
     pcu: Optional[float] = Field(None, description="Precio coste unitario.")
     unidades: Optional[float] = Field(None, description="Unidades.")
@@ -168,7 +182,8 @@ class PrecioReferencia(BaseModel):
     """Una línea de tbl_precios_referencia."""
 
     id: str = Field(..., description="UUID.")
-    producto: str = Field(..., description="Nombre del producto.")
+    id_producto: int = Field(..., description="ID del producto en tbl_productos.")
+    product_nombre: Optional[str] = Field(None, description="Nombre del producto (desde join).")
     pvu: Optional[float] = Field(None, description="Precio venta unitario.")
     pcu: Optional[float] = Field(None, description="Precio coste unitario.")
     unidades: Optional[float] = Field(None, description="Unidades.")

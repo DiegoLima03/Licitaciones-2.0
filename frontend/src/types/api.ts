@@ -71,12 +71,20 @@ export interface TenderUpdate {
   descuento_global?: number | null;
 }
 
+// ----- Productos (tbl_productos) -----
+
+export interface ProductoSearchResult {
+  id: number;
+  nombre: string;
+}
+
 // Partida de presupuesto (tbl_licitaciones_detalle)
 export interface TenderPartida {
   id_detalle: number;
   id_licitacion: number;
+  id_producto: number;
+  product_nombre?: string | null;
   lote?: string | null;
-  producto: string;
   unidades?: number | null;
   pvu?: number | null;
   pcu?: number | null;
@@ -93,7 +101,7 @@ export interface TenderDetail extends Tender {
 /** Payload para añadir una partida manual (POST /tenders/{id}/partidas). */
 export interface PartidaCreate {
   lote?: string | null;
-  producto: string;
+  id_producto: number;
   unidades?: number | null;
   pvu?: number | null;
   pcu?: number | null;
@@ -111,7 +119,9 @@ export interface DeliveryHeaderCreate {
 }
 
 export interface DeliveryItem {
-  concepto_partida: string;
+  id_producto: number;
+  /** Si es null = gasto extraordinario (no presupuestado). */
+  id_detalle?: number | null;
   proveedor?: string | null;
   cantidad: number;
   coste_unit: number;
@@ -133,7 +143,8 @@ export interface DeliveryCreateResponse {
 export interface EntregaLinea {
   id_real?: number;
   id_detalle?: number | null;
-  articulo?: string;
+  id_producto?: number | null;
+  product_nombre?: string | null;
   proveedor?: string | null;
   cantidad: number;
   pcu: number;
@@ -165,7 +176,8 @@ export interface ExcelImportResponse {
 
 export interface PrecioReferencia {
   id: string;
-  producto: string;
+  id_producto: number;
+  product_nombre?: string | null;
   pvu?: number | null;
   pcu?: number | null;
   unidades?: number | null;
@@ -176,7 +188,7 @@ export interface PrecioReferencia {
 }
 
 export interface PrecioReferenciaCreate {
-  producto: string;
+  id_producto: number;
   pvu?: number | null;
   pcu?: number | null;
   unidades?: number | null;

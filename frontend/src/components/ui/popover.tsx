@@ -12,10 +12,17 @@ const PopoverContext = React.createContext<PopoverContextValue | null>(null);
 
 export function Popover({
   children,
+  open: controlledOpen,
+  onOpenChange,
 }: {
   children: React.ReactNode;
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = React.useState(false);
+  const [internalOpen, setInternalOpen] = React.useState(false);
+  const isControlled = controlledOpen !== undefined && onOpenChange !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = isControlled ? onOpenChange : setInternalOpen;
 
   return (
     <PopoverContext.Provider value={{ open, setOpen }}>

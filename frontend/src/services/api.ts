@@ -15,6 +15,7 @@ import type {
   PartidaCreate,
   PrecioReferencia,
   PrecioReferenciaCreate,
+  ProductoSearchResult,
   SearchResult,
   Tender,
   TenderCreate,
@@ -72,6 +73,23 @@ export const TiposService = {
   async getAll(): Promise<Tipo[]> {
     try {
       const { data } = await apiClient.get<Tipo[]>("/tipos");
+      return data ?? [];
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+};
+
+// ----- ProductosService -----
+
+export const ProductosService = {
+  async search(query: string): Promise<ProductoSearchResult[]> {
+    try {
+      if (!query.trim()) return [];
+      const { data } = await apiClient.get<ProductoSearchResult[]>(
+        "/productos/search",
+        { params: { q: query.trim(), limit: 30 } }
+      );
       return data ?? [];
     } catch (error) {
       throw new Error(getMessageFromError(error));

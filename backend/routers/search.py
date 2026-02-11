@@ -15,12 +15,27 @@ from backend.models import ProductSearchItem
 router = APIRouter(prefix="/search", tags=["search"])
 
 
+def _search_producto_ids(q: str) -> List[int]:
+    """Devuelve ids de tbl_productos cuyo nombre coincide con la búsqueda."""
+    response = (
+        supabase_client.table("tbl_productos")
+        .select("id")
+        .ilike("nombre", f"%{q}%")
+        .limit(500)
+        .execute()
+    )
+    return [int(r["id"]) for r in (response.data or []) if r.get("id") is not None]
+
+
 def _search_detalle(q: str) -> List[dict]:
-    """Busca en tbl_licitaciones_detalle por ILIKE en producto (sin columna descripcion)."""
+    """Busca en tbl_licitaciones_detalle por id_producto (nombre en tbl_productos)."""
+    id_productos = _search_producto_ids(q)
+    if not id_productos:
+        return []
     response = (
         supabase_client.table("tbl_licitaciones_detalle")
-        .select("*, tbl_licitaciones(nombre, numero_expediente)")
-        .ilike("producto", f"%{q}%")
+        .select("*, tbl_licitaciones(nombre, numero_expediente), tbl_productos(nombre)")
+        .in_("id_producto", id_productos)
         .execute()
     )
     return response.data or []
@@ -54,18 +69,21 @@ def _get_pcu_and_proveedor_from_real(id_detalles: List[int]) -> Tuple[Dict[int, 
 
 
 def _search_precios_referencia(q: str) -> List[ProductSearchItem]:
-    """Busca en tbl_precios_referencia por producto (ILIKE). Son líneas sin licitación."""
+    """Busca en tbl_precios_referencia por id_producto (nombre en tbl_productos)."""
     try:
+        id_productos = _search_producto_ids(q)
+        if not id_productos:
+            return []
         response = (
             supabase_client.table("tbl_precios_referencia")
-            .select("producto, pvu, pcu, unidades, proveedor")
-            .ilike("producto", f"%{q}%")
+            .select("pvu, pcu, unidades, proveedor, tbl_productos(nombre)")
+            .in_("id_producto", id_productos)
             .execute()
         )
         rows = response.data or []
         return [
             ProductSearchItem(
-                producto=r.get("producto") or "",
+                producto=(r.get("tbl_productos") or {}).get("nombre") or "",
                 pvu=float(r["pvu"]) if r.get("pvu") is not None else None,
                 pcu=float(r["pcu"]) if r.get("pcu") is not None else None,
                 unidades=float(r["unidades"]) if r.get("unidades") is not None else None,
@@ -95,12 +113,13 @@ def search(
         results: List[ProductSearchItem] = []
         for item in data:
             lic = item.get("tbl_licitaciones") or {}
+            prod = item.get("tbl_productos") or {}
             id_d = item.get("id_detalle")
             pcu = pcu_by_id.get(id_d) if id_d is not None else None
             proveedor = proveedor_by_id.get(id_d) if id_d is not None else None
             results.append(
                 ProductSearchItem(
-                    producto=item.get("producto") or "",
+                    producto=prod.get("nombre") or "",
                     pvu=item.get("pvu"),
                     pcu=pcu,
                     unidades=item.get("unidades"),

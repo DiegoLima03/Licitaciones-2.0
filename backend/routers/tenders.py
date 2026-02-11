@@ -70,13 +70,20 @@ def get_tender(tender_id: int) -> dict:
 
         partidas_resp = (
             supabase_client.table("tbl_licitaciones_detalle")
-            .select("*")
+            .select("*, tbl_productos(nombre)")
             .eq("id_licitacion", tender_id)
             .order("lote")
             .order("id_detalle")
             .execute()
         )
-        partidas: List[dict] = partidas_resp.data or []
+        raw_partidas: List[dict] = partidas_resp.data or []
+        partidas: List[dict] = []
+        for p in raw_partidas:
+            prod = p.get("tbl_productos") or {}
+            partidas.append({
+                **{k: v for k, v in p.items() if k != "tbl_productos"},
+                "product_nombre": prod.get("nombre"),
+            })
 
         return {
             **licitacion,
@@ -113,7 +120,7 @@ def add_partida(tender_id: int, payload: PartidaCreate) -> dict:
         row: dict[str, Any] = {
             "id_licitacion": tender_id,
             "lote": payload.lote or "General",
-            "producto": payload.producto,
+            "id_producto": payload.id_producto,
             "unidades": payload.unidades if payload.unidades is not None else 1.0,
             "pvu": payload.pvu or 0.0,
             "pcu": payload.pcu or 0.0,
