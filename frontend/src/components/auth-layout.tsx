@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, FolderKanban, LogOut, Search } from "lucide-react";
+import { BarChart3, FolderKanban, ListPlus, LogOut, Search } from "lucide-react";
 
 const STORAGE_KEY = "veraleza_user";
 
@@ -104,6 +104,13 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
           >
             <Search className="h-4 w-4" />
             <span>Buscador Histórico</span>
+          </Link>
+          <Link
+            href="/lineas-referencia"
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+          >
+            <ListPlus className="h-4 w-4" />
+            <span>Añadir líneas</span>
           </Link>
           {!SKIP_LOGIN && (
             <button

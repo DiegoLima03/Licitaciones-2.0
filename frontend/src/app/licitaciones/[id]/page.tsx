@@ -1,4 +1,4 @@
- "use client";
+"use client";
 
 import * as React from "react";
 import Link from "next/link";
@@ -30,14 +30,12 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-
-type EstadoNombre =
-  | "En Estudio"
-  | "Presentada"
-  | "Pendiente de Fallo"
-  | "Pendiente"
-  | "Adjudicada"
-  | "Desierta";
+import { DeliveriesService, ImportService, TendersService } from "@/services/api";
+import type {
+  EntregaWithLines,
+  TenderDetail,
+  TenderPartida,
+} from "@/types/api";
 
 type PresupuestoItem = {
   id: number;
@@ -49,161 +47,6 @@ type PresupuestoItem = {
   activo: boolean;
 };
 
-type EntregaLinea = {
-  id: number;
-  articulo: string;
-  proveedor: string;
-  cantidad: number;
-  pcu: number;
-  estado: "EN ESPERA" | "ENTREGADO" | "FACTURADO";
-  cobrado: boolean;
-};
-
-type Entrega = {
-  id: number;
-  fecha: string;
-  codigo: string;
-  notas?: string;
-  lineas: EntregaLinea[];
-};
-
-type LicitacionDetalle = {
-  id: number;
-  nombre: string;
-  expediente: string;
-  estado: EstadoNombre;
-  tipo: string;
-  fechas: {
-    presentacion: string;
-    adjudicacion?: string;
-    fin?: string;
-  };
-  presupuestoMax: number;
-  descuentoGlobal: number;
-  itemsPresupuesto: PresupuestoItem[];
-  entregas: Entrega[];
-};
-
-const MOCK_LICITACIONES: LicitacionDetalle[] = [
-  {
-    id: 1,
-    nombre: "Suministro de material hospitalario",
-    expediente: "EXP-24-001",
-    estado: "En Estudio",
-    tipo: "Suministro",
-    fechas: {
-      presentacion: "2024-03-15",
-      adjudicacion: "2024-05-10",
-      fin: "2026-03-31",
-    },
-    presupuestoMax: 850_000,
-    descuentoGlobal: 8.5,
-    itemsPresupuesto: [
-      {
-        id: 11,
-        lote: "Lote 1: Obra Civil",
-        descripcion: "Demoliciones y movimientos de tierra",
-        unidades: 120_000,
-        pcu: 0.18,
-        pvu: 0.32,
-        activo: true,
-      },
-      {
-        id: 12,
-        lote: "Lote 1: Obra Civil",
-        descripcion: "Estructura metálica y cerramientos",
-        unidades: 80_000,
-        pcu: 0.45,
-        pvu: 0.78,
-        activo: true,
-      },
-      {
-        id: 13,
-        lote: "Lote 2: Iluminación",
-        descripcion: "Suministro de luminarias LED interiores",
-        unidades: 40_000,
-        pcu: 1.2,
-        pvu: 2.1,
-        activo: true,
-      },
-      {
-        id: 14,
-        lote: "Lote 3: Jardinería",
-        descripcion: "Mantenimiento de zonas verdes y riego",
-        unidades: 5_000,
-        pcu: 6.5,
-        pvu: 8.9,
-        activo: false,
-      },
-    ],
-    entregas: [
-      {
-        id: 101,
-        fecha: "2024-06-05",
-        codigo: "ALB-24-001",
-        notas: "Primera entrega lote 1",
-        lineas: [
-          {
-            id: 1,
-            articulo: "Lote 1 - Guantes quirúrgicos estériles",
-            proveedor: "Proveedor Salud S.A.",
-            cantidad: 30_000,
-            pcu: 0.18,
-            estado: "FACTURADO",
-            cobrado: true,
-          },
-          {
-            id: 2,
-            articulo: "Lote 1 - Mascarillas FFP2",
-            proveedor: "Proveedor Salud S.A.",
-            cantidad: 10_000,
-            pcu: 0.45,
-            estado: "ENTREGADO",
-            cobrado: false,
-          },
-        ],
-      },
-      {
-        id: 102,
-        fecha: "2024-07-20",
-        codigo: "ALB-24-019",
-        notas: "Reposición mascarillas",
-        lineas: [
-          {
-            id: 3,
-            articulo: "Lote 1 - Mascarillas FFP2",
-            proveedor: "Proveedor Salud S.A.",
-            cantidad: 15_000,
-            pcu: 0.46,
-            estado: "FACTURADO",
-            cobrado: false,
-          },
-        ],
-      },
-    ],
-  },
-  {
-    id: 2,
-    nombre: "Mantenimiento integral edificio corporativo",
-    expediente: "EXP-24-014",
-    estado: "Presentada",
-    tipo: "Servicio",
-    fechas: {
-      presentacion: "2024-02-10",
-      adjudicacion: undefined,
-      fin: undefined,
-    },
-    presupuestoMax: 430_000,
-    descuentoGlobal: 5,
-    itemsPresupuesto: [],
-    entregas: [],
-  },
-];
-
-function findLicitacion(id: number): LicitacionDetalle | undefined {
-  return MOCK_LICITACIONES.find((l) => l.id === id);
-}
-
 function formatEuro(value: number) {
   return new Intl.NumberFormat("es-ES", {
     style: "currency",
@@ -212,17 +55,151 @@ function formatEuro(value: number) {
   }).format(value);
 }
 
-function formatDate(date?: string) {
+function formatDate(date?: string | null) {
   if (!date) return "-";
   return new Date(date + "T00:00:00").toLocaleDateString("es-ES");
+}
+
+function mapPartidas(partidas: TenderPartida[]): PresupuestoItem[] {
+  return partidas.map((p) => ({
+    id: p.id_detalle,
+    lote: p.lote ?? "General",
+    descripcion: p.producto,
+    unidades: Number(p.unidades) || 0,
+    pcu: Number(p.pcu) || 0,
+    pvu: Number(p.pvu) || 0,
+    activo: p.activo ?? true,
+  }));
+}
+
+/** Agrupa partidas por (lote, descripcion), sumando unidades. Una sola fila por concepto. */
+function agregarPartidas(items: PresupuestoItem[]): PresupuestoItem[] {
+  const map = new Map<string, PresupuestoItem>();
+  for (const i of items) {
+    const key = `${i.lote}|${i.descripcion}`;
+    const exist = map.get(key);
+    if (exist) {
+      exist.unidades += i.unidades;
+    } else {
+      map.set(key, { ...i, unidades: i.unidades });
+    }
+  }
+  return Array.from(map.values());
 }
 
 export default function LicitacionDetallePage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
-  const lic = Number.isFinite(id) ? findLicitacion(id) : undefined;
+  const [lic, setLic] = React.useState<TenderDetail | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [lotesActivos, setLotesActivos] = React.useState<string[]>([]);
+  const [openPartidaManual, setOpenPartidaManual] = React.useState(false);
+  const [partidaForm, setPartidaForm] = React.useState({
+    lote: "General",
+    producto: "",
+    unidades: "1",
+    pvu: "",
+    pcu: "",
+    pmaxu: "",
+  });
+  const [submittingPartida, setSubmittingPartida] = React.useState(false);
+  const [partidaError, setPartidaError] = React.useState<string | null>(null);
+  const [entregas, setEntregas] = React.useState<EntregaWithLines[]>([]);
+  const [openAlbaran, setOpenAlbaran] = React.useState(false);
+  const [albaranForm, setAlbaranForm] = React.useState({
+    fecha: new Date().toISOString().slice(0, 10),
+    codigo_albaran: "",
+    observaciones: "",
+    lineas: [{ concepto_partida: "", proveedor: "", cantidad: "", coste_unit: "" }],
+  });
+  const [submittingAlbaran, setSubmittingAlbaran] = React.useState(false);
+  const [albaranError, setAlbaranError] = React.useState<string | null>(null);
+  const [openImportExcel, setOpenImportExcel] = React.useState(false);
+  const [importFile, setImportFile] = React.useState<File | null>(null);
+  const [importTipoId, setImportTipoId] = React.useState<1 | 2>(1);
+  const [importingExcel, setImportingExcel] = React.useState(false);
+  const [importError, setImportError] = React.useState<string | null>(null);
 
-  if (!lic) {
+  const refetchLicitacion = React.useCallback(() => {
+    if (!Number.isFinite(id)) return;
+    TendersService.getById(id).then(setLic).catch(() => {});
+  }, [id]);
+
+  React.useEffect(() => {
+    if (!Number.isFinite(id)) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    TendersService.getById(id)
+      .then((data) => {
+        if (!cancelled) setLic(data);
+      })
+      .catch((e) => {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Error al cargar");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
+
+  React.useEffect(() => {
+    if (!lic?.partidas?.length) {
+      setLotesActivos([]);
+      return;
+    }
+    const items = mapPartidas(lic.partidas);
+    const lotes = Array.from(new Set(items.map((i) => i.lote)));
+    setLotesActivos(lotes);
+  }, [lic?.id_licitacion, lic?.partidas?.length]);
+
+  const refetchEntregas = React.useCallback(() => {
+    if (!Number.isFinite(id)) return;
+    DeliveriesService.getByLicitacion(id).then(setEntregas).catch(() => setEntregas([]));
+  }, [id]);
+
+  React.useEffect(() => {
+    if (!Number.isFinite(id) || !lic) return;
+    refetchEntregas();
+  }, [id, lic?.id_licitacion, refetchEntregas]);
+
+  const opcionesPartidas = React.useMemo(() => {
+    const items = mapPartidas(lic?.partidas ?? []);
+    const agregados = agregarPartidas(items);
+    const labels = agregados.map((i) => `${i.lote} - ${i.descripcion}`);
+    return ["➕ Gasto NO Presupuestado / Extra", ...labels];
+  }, [lic?.partidas]);
+
+  /** Unidades reales ejecutadas por partida (clave: "lote|descripcion"). */
+  const ejecutadoPorPartida = React.useMemo(() => {
+    const map: Record<string, number> = {};
+    const partidas = lic?.partidas ?? [];
+    const idToPartida = new Map<number, { lote: string; descripcion: string }>();
+    for (const p of partidas) {
+      const lote = p.lote ?? "General";
+      const desc = p.producto ?? "";
+      idToPartida.set(p.id_detalle, { lote, descripcion: desc });
+    }
+    for (const ent of entregas) {
+      for (const lin of ent.lineas) {
+        const idDet = lin.id_detalle;
+        if (idDet == null) continue;
+        const partida = idToPartida.get(idDet);
+        if (!partida) continue;
+        const key = `${partida.lote}|${partida.descripcion}`;
+        map[key] = (map[key] ?? 0) + Number(lin.cantidad);
+      }
+    }
+    return map;
+  }, [entregas, lic?.partidas]);
+
+  if (!Number.isFinite(id) || loading) {
     return (
       <div className="flex flex-1 flex-col items-start gap-4">
         <Link href="/licitaciones">
@@ -232,56 +209,94 @@ export default function LicitacionDetallePage() {
           </Button>
         </Link>
         <p className="mt-6 text-sm text-slate-600">
-          No se ha encontrado la licitación solicitada (mock).
+          {loading ? "Cargando…" : "ID de licitación no válido."}
         </p>
       </div>
     );
   }
 
-  const activos = lic.itemsPresupuesto.filter((i) => i.activo);
-  const presupuestoBase = lic.presupuestoMax;
-  const ofertado = activos.reduce(
-    (acc, i) => acc + i.unidades * i.pvu,
-    0
-  );
-  const costePrevisto = activos.reduce(
-    (acc, i) => acc + i.unidades * i.pcu,
-    0
-  );
+  if (error || !lic) {
+    return (
+      <div className="flex flex-1 flex-col items-start gap-4">
+        <Link href="/licitaciones">
+          <Button variant="outline" className="mt-4 gap-2">
+            <ArrowLeft className="h-4 w-4" />
+            Volver al listado
+          </Button>
+        </Link>
+        <p className="mt-6 text-sm text-slate-600">
+          {error ?? "No se ha encontrado la licitación solicitada."}
+        </p>
+      </div>
+    );
+  }
+
+  const itemsPresupuesto = mapPartidas(lic.partidas ?? []);
+  const itemsPresupuestoAgregado = agregarPartidas(itemsPresupuesto);
+  const activos = itemsPresupuestoAgregado.filter((i) => i.activo);
+  const presupuestoBase = Number(lic.pres_maximo) || 0;
+  const ofertado = activos.reduce((acc, i) => acc + i.unidades * i.pvu, 0);
+  const costePrevisto = activos.reduce((acc, i) => acc + i.unidades * i.pcu, 0);
   const beneficioPrevisto = ofertado - costePrevisto;
 
-  // Maestro-detalle: agrupar por lote y controlar visibilidad
-  const lotesUnicos = Array.from(
-    new Set(lic.itemsPresupuesto.map((i) => i.lote))
-  );
-  const [lotesActivos, setLotesActivos] = React.useState<string[]>(lotesUnicos);
+  const lotesUnicos = Array.from(new Set(itemsPresupuestoAgregado.map((i) => i.lote)));
 
   const itemsPorLote = lotesUnicos.reduce<Record<string, PresupuestoItem[]>>(
     (acc, lote) => {
-      acc[lote] = lic.itemsPresupuesto.filter((i) => i.lote === lote);
+      acc[lote] = itemsPresupuestoAgregado.filter((i) => i.lote === lote);
       return acc;
     },
     {}
   );
 
-  // Remaining: sumas ejecutadas a partir de entregas mock
-  const ejecutadoPorArticulo = new Map<string, number>();
-  lic.entregas.forEach((e) =>
-    e.lineas.forEach((l) => {
-      ejecutadoPorArticulo.set(
-        l.articulo,
-        (ejecutadoPorArticulo.get(l.articulo) ?? 0) + l.cantidad
-      );
-    })
-  );
+  const handleSubmitAlbaran = async () => {
+    if (!lic) return;
+    setAlbaranError(null);
+    setSubmittingAlbaran(true);
+    try {
+      const lineas = albaranForm.lineas
+        .filter((l) => l.concepto_partida.trim() || l.cantidad !== "" || l.coste_unit !== "")
+        .map((l) => ({
+          concepto_partida: l.concepto_partida.trim() || opcionesPartidas[0],
+          proveedor: l.proveedor.trim() || undefined,
+          cantidad: parseFloat(String(l.cantidad)) || 0,
+          coste_unit: parseFloat(String(l.coste_unit)) || 0,
+        }));
+      if (lineas.length === 0) {
+        setAlbaranError("Añade al menos una línea.");
+        setSubmittingAlbaran(false);
+        return;
+      }
+      await DeliveriesService.create({
+        id_licitacion: lic.id_licitacion,
+        cabecera: {
+          fecha: albaranForm.fecha,
+          codigo_albaran: albaranForm.codigo_albaran.trim() || "Sin código",
+          observaciones: albaranForm.observaciones.trim() || undefined,
+        },
+        lineas,
+      });
+      refetchEntregas();
+      setOpenAlbaran(false);
+      setAlbaranForm({
+        fecha: new Date().toISOString().slice(0, 10),
+        codigo_albaran: "",
+        observaciones: "",
+        lineas: [{ concepto_partida: "", proveedor: "", cantidad: "", coste_unit: "" }],
+      });
+    } catch (e) {
+      setAlbaranError(e instanceof Error ? e.message : "Error al registrar albarán.");
+    } finally {
+      setSubmittingAlbaran(false);
+    }
+  };
 
   return (
     <div className="flex flex-1 flex-col gap-6">
-      {/* Cabecera */}
       <header className="flex items-start justify-between gap-4">
         <div className="space-y-1">
           <p className="text-xs font-medium uppercase tracking-wide text-slate-400">
-            Licitación #{lic.id}
+            Licitación #{lic.id_licitacion}
           </p>
           <h1 className="text-2xl font-semibold leading-tight text-slate-900">
             {lic.nombre}
@@ -289,13 +304,13 @@ export default function LicitacionDetallePage() {
           <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
             <span>
               <span className="font-medium text-slate-700">Expediente:</span>{" "}
-              {lic.expediente}
+              {lic.numero_expediente ?? "—"}
             </span>
             <span>
               <span className="font-medium text-slate-700">Tipo:</span>{" "}
-              {lic.tipo}
+              {lic.tipo_de_licitacion != null ? `Tipo ${lic.tipo_de_licitacion}` : "—"}
             </span>
-            <Badge variant="info">{lic.estado}</Badge>
+            <Badge variant="info">Estado {lic.id_estado}</Badge>
           </div>
         </div>
 
@@ -312,38 +327,27 @@ export default function LicitacionDetallePage() {
                 <DialogHeader>
                   <DialogTitle>Editar cabecera</DialogTitle>
                   <DialogDescription>
-                    Simulación de edición de fechas, estado y notas generales.
+                    Edición de fechas, estado y notas (conectar con PUT /tenders/{id}).
                   </DialogDescription>
                 </DialogHeader>
                 <div className="mt-2 space-y-3">
                   <div className="grid gap-3 md:grid-cols-3">
                     <div>
-                      <p className="text-xs font-medium text-slate-500">
-                        F. Presentación
-                      </p>
-                      <Input defaultValue={lic.fechas.presentacion} />
+                      <p className="text-xs font-medium text-slate-500">F. Presentación</p>
+                      <Input defaultValue={lic.fecha_presentacion ?? ""} />
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-slate-500">
-                        F. Adjudicación
-                      </p>
-                      <Input defaultValue={lic.fechas.adjudicacion ?? ""} />
+                      <p className="text-xs font-medium text-slate-500">F. Adjudicación</p>
+                      <Input defaultValue={lic.fecha_adjudicacion ?? ""} />
                     </div>
                     <div>
-                      <p className="text-xs font-medium text-slate-500">
-                        F. Finalización
-                      </p>
-                      <Input defaultValue={lic.fechas.fin ?? ""} />
+                      <p className="text-xs font-medium text-slate-500">F. Finalización</p>
+                      <Input defaultValue={lic.fecha_finalizacion ?? ""} />
                     </div>
                   </div>
                   <div>
-                    <p className="text-xs font-medium text-slate-500">
-                      Notas globales
-                    </p>
-                    <Textarea
-                      rows={3}
-                      defaultValue="Aquí irían las notas globales de la licitación."
-                    />
+                    <p className="text-xs font-medium text-slate-500">Notas globales</p>
+                    <Textarea rows={3} defaultValue={lic.descripcion ?? ""} />
                   </div>
                   <div className="flex justify-end gap-2 pt-1">
                     <Button variant="outline">Cancelar</Button>
@@ -360,13 +364,9 @@ export default function LicitacionDetallePage() {
               </Button>
             </Link>
           </div>
-          <p className="text-xs text-slate-400">
-            Mock de detalle inspirado en la vista de Streamlit.
-          </p>
         </div>
       </header>
 
-      {/* KPIs */}
       <section className="grid gap-3 md:grid-cols-4">
         <Card>
           <CardHeader>
@@ -380,7 +380,6 @@ export default function LicitacionDetallePage() {
             </p>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
             <CardTitle className="text-xs font-semibold text-slate-500">
@@ -393,7 +392,6 @@ export default function LicitacionDetallePage() {
             </p>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
             <CardTitle className="text-xs font-semibold text-slate-500">
@@ -406,7 +404,6 @@ export default function LicitacionDetallePage() {
             </p>
           </CardContent>
         </Card>
-
         <Card>
           <CardHeader>
             <CardTitle className="text-xs font-semibold text-slate-500">
@@ -425,7 +422,6 @@ export default function LicitacionDetallePage() {
         </Card>
       </section>
 
-      {/* Tabs principales */}
       <section className="mt-2">
         <Tabs defaultValue="presupuesto">
           <TabsList>
@@ -434,9 +430,7 @@ export default function LicitacionDetallePage() {
             <TabsTrigger value="remaining">Remaining</TabsTrigger>
           </TabsList>
 
-          {/* Tab Presupuesto */}
           <TabsContent value="presupuesto">
-            {/* Panel maestro: configuración de lotes */}
             <div className="mb-4 grid gap-3 lg:grid-cols-[2fr,3fr]">
               <Card>
                 <CardHeader className="pb-3">
@@ -458,9 +452,7 @@ export default function LicitacionDetallePage() {
                           key={lote}
                           className="border-b border-slate-100 last:border-0"
                         >
-                          <td className="py-2 pr-3 text-xs text-slate-900">
-                            {lote}
-                          </td>
+                          <td className="py-2 pr-3 text-xs text-slate-900">{lote}</td>
                           <td className="py-2 pr-3 text-right">
                             <Switch
                               checked={lotesActivos.includes(lote)}
@@ -479,36 +471,275 @@ export default function LicitacionDetallePage() {
                   </table>
                 </CardContent>
               </Card>
-
               <div className="flex flex-col justify-between gap-2">
                 <p className="text-sm text-slate-600">
-                  Activa o desactiva los lotes que quieres incluir en el
-                  análisis. Los lotes inactivos no se muestran en el detalle
-                  inferior.
+                  Activa o desactiva los lotes que quieres incluir en el análisis.
                 </p>
                 <div className="mt-2 flex gap-2">
-                  <Button variant="outline" size="sm">
-                    Importar Excel
-                  </Button>
-                  <Button size="sm">Añadir Partida Manual</Button>
+                  <Dialog open={openImportExcel} onOpenChange={setOpenImportExcel}>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setImportError(null);
+                        setImportFile(null);
+                        setImportTipoId(1);
+                        setOpenImportExcel(true);
+                      }}
+                    >
+                      Importar Excel
+                    </Button>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Importar partidas desde Excel</DialogTitle>
+                        <DialogDescription>
+                          Sube un archivo .xlsx o .xls con columnas Producto/Planta, opcionalmente Lote/Zona, y precios (PVU, PCU, Precio Máximo, N.º Unidades previstas).
+                        </DialogDescription>
+                      </DialogHeader>
+                      <div className="mt-3 space-y-4">
+                        <div className="grid gap-2">
+                          <label className="text-xs font-medium text-slate-600">
+                            Archivo Excel
+                          </label>
+                          <Input
+                            type="file"
+                            accept=".xlsx,.xls"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              setImportFile(f ?? null);
+                              setImportError(null);
+                            }}
+                          />
+                          {importFile && (
+                            <p className="text-xs text-slate-500">{importFile.name}</p>
+                          )}
+                        </div>
+                        <div className="grid gap-2">
+                          <label className="text-xs font-medium text-slate-600">
+                            Tipo de presupuesto
+                          </label>
+                          <select
+                            className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm"
+                            value={importTipoId}
+                            onChange={(e) =>
+                              setImportTipoId(e.target.value === "2" ? 2 : 1)
+                            }
+                          >
+                            <option value={1}>Desglose (con unidades previstas)</option>
+                            <option value={2}>Alzado (sin unidades)</option>
+                          </select>
+                        </div>
+                        {importError && (
+                          <p className="text-sm text-red-600">{importError}</p>
+                        )}
+                        <div className="flex justify-end gap-2 pt-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setOpenImportExcel(false)}
+                            disabled={importingExcel}
+                          >
+                            Cancelar
+                          </Button>
+                          <Button
+                            onClick={async () => {
+                              if (!lic || !importFile) {
+                                setImportError("Selecciona un archivo Excel.");
+                                return;
+                              }
+                              setImportError(null);
+                              setImportingExcel(true);
+                              try {
+                                const res = await ImportService.uploadExcel(
+                                  lic.id_licitacion,
+                                  importFile,
+                                  importTipoId
+                                );
+                                refetchLicitacion();
+                                setOpenImportExcel(false);
+                                setImportFile(null);
+                              } catch (e) {
+                                setImportError(
+                                  e instanceof Error ? e.message : "Error al importar."
+                                );
+                              } finally {
+                                setImportingExcel(false);
+                              }
+                            }}
+                            disabled={importingExcel || !importFile}
+                          >
+                            {importingExcel ? "Importando…" : "Importar"}
+                          </Button>
+                        </div>
+                      </div>
+                    </DialogContent>
+                  </Dialog>
+                  <Dialog open={openPartidaManual} onOpenChange={setOpenPartidaManual}>
+                    <Button
+                      size="sm"
+                      onClick={() => {
+                        setPartidaError(null);
+                        setPartidaForm({
+                          lote: "General",
+                          producto: "",
+                          unidades: "1",
+                          pvu: "",
+                          pcu: "",
+                          pmaxu: "",
+                        });
+                        setOpenPartidaManual(true);
+                      }}
+                    >
+                      Añadir Partida Manual
+                    </Button>
+                    <DialogContent className="max-w-md">
+                      <DialogHeader>
+                        <DialogTitle>Añadir partida manual</DialogTitle>
+                        <DialogDescription>
+                          Introduce los datos de la nueva partida del presupuesto.
+                        </DialogDescription>
+                      </DialogHeader>
+                      <form
+                        className="mt-3 space-y-3"
+                        onSubmit={async (e) => {
+                          e.preventDefault();
+                          if (!partidaForm.producto.trim()) {
+                            setPartidaError("El producto/descripción es obligatorio.");
+                            return;
+                          }
+                          setSubmittingPartida(true);
+                          setPartidaError(null);
+                          try {
+                            await TendersService.addPartida(lic.id_licitacion, {
+                              lote: partidaForm.lote || "General",
+                              producto: partidaForm.producto.trim(),
+                              unidades: parseFloat(partidaForm.unidades) || 0,
+                              pvu: parseFloat(partidaForm.pvu) || 0,
+                              pcu: parseFloat(partidaForm.pcu) || 0,
+                              pmaxu: parseFloat(partidaForm.pmaxu) || 0,
+                            });
+                            refetchLicitacion();
+                            setOpenPartidaManual(false);
+                          } catch (err) {
+                            setPartidaError(
+                              err instanceof Error ? err.message : "Error al guardar la partida"
+                            );
+                          } finally {
+                            setSubmittingPartida(false);
+                          }
+                        }}
+                      >
+                        <div className="grid gap-2">
+                          <label className="text-xs font-medium text-slate-600">
+                            Lote / Zona
+                          </label>
+                          <Input
+                            value={partidaForm.lote}
+                            onChange={(e) =>
+                              setPartidaForm((p) => ({ ...p, lote: e.target.value }))
+                            }
+                            placeholder="General"
+                          />
+                        </div>
+                        <div className="grid gap-2">
+                          <label className="text-xs font-medium text-slate-600">
+                            Producto / Descripción *
+                          </label>
+                          <Input
+                            value={partidaForm.producto}
+                            onChange={(e) =>
+                              setPartidaForm((p) => ({ ...p, producto: e.target.value }))
+                            }
+                            placeholder="Ej. Suministro de material"
+                            required
+                          />
+                        </div>
+                        <div className="grid grid-cols-3 gap-2">
+                          <div className="grid gap-2">
+                            <label className="text-xs font-medium text-slate-600">Unidades</label>
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              placeholder="0"
+                              value={partidaForm.unidades}
+                              onChange={(e) =>
+                                setPartidaForm((p) => ({ ...p, unidades: e.target.value }))
+                              }
+                            />
+                          </div>
+                          <div className="grid gap-2">
+                            <label className="text-xs font-medium text-slate-600">PVU (€)</label>
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              placeholder="0"
+                              value={partidaForm.pvu}
+                              onChange={(e) =>
+                                setPartidaForm((p) => ({ ...p, pvu: e.target.value }))
+                              }
+                            />
+                          </div>
+                          <div className="grid gap-2">
+                            <label className="text-xs font-medium text-slate-600">PCU (€)</label>
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.01}
+                              placeholder="0"
+                              value={partidaForm.pcu}
+                              onChange={(e) =>
+                                setPartidaForm((p) => ({ ...p, pcu: e.target.value }))
+                              }
+                            />
+                          </div>
+                        </div>
+                        <div className="grid gap-2">
+                          <label className="text-xs font-medium text-slate-600">
+                            P. Máximo unit. (€)
+                          </label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            placeholder="0"
+                            value={partidaForm.pmaxu}
+                            onChange={(e) =>
+                              setPartidaForm((p) => ({ ...p, pmaxu: e.target.value }))
+                            }
+                          />
+                        </div>
+                        {partidaError && (
+                          <p className="text-sm text-red-600">{partidaError}</p>
+                        )}
+                        <div className="flex justify-end gap-2 pt-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            onClick={() => setOpenPartidaManual(false)}
+                            disabled={submittingPartida}
+                          >
+                            Cancelar
+                          </Button>
+                          <Button type="submit" disabled={submittingPartida}>
+                            {submittingPartida ? "Guardando…" : "Añadir partida"}
+                          </Button>
+                        </div>
+                      </form>
+                    </DialogContent>
+                  </Dialog>
                 </div>
               </div>
             </div>
 
-            {/* Detalle por lote (tarjetas individuales) */}
             <div className="space-y-4">
               {lotesUnicos
                 .filter((lote) => lotesActivos.includes(lote))
                 .map((lote) => {
                   const items = itemsPorLote[lote] ?? [];
-                  const subtotalVenta = items.reduce(
-                    (acc, i) => acc + i.unidades * i.pvu,
-                    0
-                  );
-                  const subtotalCoste = items.reduce(
-                    (acc, i) => acc + i.unidades * i.pcu,
-                    0
-                  );
+                  const subtotalVenta = items.reduce((acc, i) => acc + i.unidades * i.pvu, 0);
+                  const subtotalCoste = items.reduce((acc, i) => acc + i.unidades * i.pcu, 0);
                   return (
                     <Card key={lote}>
                       <CardHeader className="flex flex-row items-center justify-between gap-3 pb-3">
@@ -535,12 +766,10 @@ export default function LicitacionDetallePage() {
                           <tbody>
                             {items.map((item) => {
                               const margenPct =
-                                item.pvu > 0
-                                  ? ((item.pvu - item.pcu) / item.pvu) * 100
-                                  : 0;
+                                item.pvu > 0 ? ((item.pvu - item.pcu) / item.pvu) * 100 : 0;
                               return (
                                 <tr
-                                  key={item.id}
+                                  key={`${item.lote}-${item.descripcion}`}
                                   className="border-b border-slate-100 last:border-0"
                                 >
                                   <td className="max-w-xs py-2 pr-3 text-sm text-slate-900">
@@ -583,35 +812,33 @@ export default function LicitacionDetallePage() {
             </div>
           </TabsContent>
 
-          {/* Tab Ejecución */}
           <TabsContent value="ejecucion">
             <div className="mb-3 flex items-center justify-between gap-2">
               <p className="text-sm text-slate-600">
                 Resumen de entregas y albaranes vinculados a esta licitación.
               </p>
-              <Button size="sm">➕ Registrar Nuevo Albarán</Button>
+              <Button size="sm" onClick={() => setOpenAlbaran(true)}>
+                ➕ Registrar Nuevo Albarán
+              </Button>
             </div>
-
-            {lic.entregas.length === 0 ? (
+            {entregas.length === 0 ? (
               <p className="text-sm text-slate-500">
-                Aún no hay entregas registradas (datos mock).
+                No hay entregas registradas para esta licitación.
               </p>
             ) : (
               <div className="space-y-3">
-                {lic.entregas.map((entrega) => (
-                  <Card key={entrega.id}>
+                {entregas.map((entrega) => (
+                  <Card key={entrega.id_entrega}>
                     <CardHeader className="flex flex-row items-center justify-between gap-3">
                       <div>
                         <CardTitle className="text-sm font-semibold text-slate-800">
-                          {entrega.codigo}
+                          {entrega.codigo_albaran}
                         </CardTitle>
                         <p className="text-xs text-slate-500">
-                          Fecha: {formatDate(entrega.fecha)}
+                          Fecha: {formatDate(entrega.fecha_entrega)}
                         </p>
                       </div>
-                      <p className="text-xs text-slate-400">
-                        {entrega.notas ?? "Documento simulado para la demo."}
-                      </p>
+                      <p className="text-xs text-slate-400">{entrega.observaciones ?? ""}</p>
                     </CardHeader>
                     <CardContent>
                       <table className="min-w-full text-left text-sm">
@@ -626,31 +853,24 @@ export default function LicitacionDetallePage() {
                           </tr>
                         </thead>
                         <tbody>
-                          {entrega.lineas.map((linea) => (
-                            <tr
-                              key={linea.id}
-                              className="border-b border-slate-100 last:border-0"
-                            >
-                              <td className="py-1.5 pr-3 text-xs text-slate-900">
-                                {linea.articulo}
-                              </td>
-                              <td className="py-1.5 pr-3 text-xs text-slate-600">
-                                {linea.proveedor}
-                              </td>
-                              <td className="py-1.5 pr-3 text-right text-xs text-slate-900">
-                                {linea.cantidad.toLocaleString("es-ES")}
-                              </td>
-                              <td className="py-1.5 pr-3 text-right text-xs text-slate-900">
-                                {linea.pcu.toFixed(2)} €
-                              </td>
-                              <td className="py-1.5 pr-3 text-center text-xs text-slate-700">
-                                {linea.estado}
-                              </td>
-                              <td className="py-1.5 pr-3 text-center text-xs">
-                                {linea.cobrado ? "✔" : "—"}
+                          {entrega.lineas.length === 0 ? (
+                            <tr>
+                              <td colSpan={6} className="py-4 text-center text-xs text-slate-500">
+                                Sin líneas
                               </td>
                             </tr>
-                          ))}
+                          ) : (
+                            entrega.lineas.map((lin, idx) => (
+                              <tr key={lin.id_real ?? idx} className="border-b border-slate-100 last:border-0">
+                                <td className="py-1.5 pr-3 text-slate-900">{lin.articulo ?? "—"}</td>
+                                <td className="py-1.5 pr-3 text-slate-600">{lin.proveedor ?? "—"}</td>
+                                <td className="py-1.5 pr-3 text-right text-slate-900">{lin.cantidad}</td>
+                                <td className="py-1.5 pr-3 text-right text-slate-900">{lin.pcu}</td>
+                                <td className="py-1.5 pr-3 text-center text-slate-500">{lin.estado ?? "—"}</td>
+                                <td className="py-1.5 pr-3 text-center text-slate-500">{lin.cobrado ? "Sí" : "No"}</td>
+                              </tr>
+                            ))
+                          )}
                         </tbody>
                       </table>
                     </CardContent>
@@ -658,14 +878,189 @@ export default function LicitacionDetallePage() {
                 ))}
               </div>
             )}
+
+            <Dialog open={openAlbaran} onOpenChange={setOpenAlbaran}>
+              <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+                <DialogHeader>
+                  <DialogTitle>Registrar nuevo albarán</DialogTitle>
+                  <DialogDescription>
+                    Cabecera del albarán y líneas de entrega (concepto, proveedor, cantidad, coste).
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-4 pt-2">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                    <div className="grid gap-2">
+                      <label className="text-xs font-medium text-slate-600">Fecha</label>
+                      <Input
+                        type="date"
+                        value={albaranForm.fecha}
+                        onChange={(e) =>
+                          setAlbaranForm((f) => ({ ...f, fecha: e.target.value }))
+                        }
+                      />
+                    </div>
+                    <div className="grid gap-2">
+                      <label className="text-xs font-medium text-slate-600">Código albarán</label>
+                      <Input
+                        value={albaranForm.codigo_albaran}
+                        onChange={(e) =>
+                          setAlbaranForm((f) => ({ ...f, codigo_albaran: e.target.value }))
+                        }
+                        placeholder="Ej. ALB-001"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid gap-2">
+                    <label className="text-xs font-medium text-slate-600">Observaciones</label>
+                    <Textarea
+                      value={albaranForm.observaciones}
+                      onChange={(e) =>
+                        setAlbaranForm((f) => ({ ...f, observaciones: e.target.value }))
+                      }
+                      placeholder="Opcional"
+                      rows={2}
+                    />
+                  </div>
+                  <div>
+                    <p className="mb-2 text-xs font-medium text-slate-600">Líneas</p>
+                    <div className="space-y-2">
+                      {albaranForm.lineas.map((lin, idx) => (
+                        <div
+                          key={idx}
+                          className="flex flex-wrap items-end gap-2 rounded border border-slate-200 bg-slate-50/50 p-2"
+                        >
+                          <div className="min-w-[180px] flex-1">
+                            <label className="sr-only">Concepto partida</label>
+                            <select
+                              className="h-9 w-full rounded border border-slate-300 bg-white px-2 text-sm"
+                              value={lin.concepto_partida || opcionesPartidas[0]}
+                              onChange={(e) =>
+                                setAlbaranForm((f) => ({
+                                  ...f,
+                                  lineas: f.lineas.map((l, i) =>
+                                    i === idx ? { ...l, concepto_partida: e.target.value } : l
+                                  ),
+                                }))
+                              }
+                            >
+                              {opcionesPartidas.map((opt, optIdx) => (
+                                <option key={`partida-${optIdx}`} value={opt}>
+                                  {opt}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+                          <Input
+                            placeholder="Proveedor"
+                            className="max-w-[140px]"
+                            value={lin.proveedor}
+                            onChange={(e) =>
+                              setAlbaranForm((f) => ({
+                                ...f,
+                                lineas: f.lineas.map((l, i) =>
+                                  i === idx ? { ...l, proveedor: e.target.value } : l
+                                ),
+                              }))
+                            }
+                          />
+                          <Input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            placeholder="Cant."
+                            className="w-20"
+                            value={lin.cantidad}
+                            onChange={(e) =>
+                              setAlbaranForm((f) => ({
+                                ...f,
+                                lineas: f.lineas.map((l, i) =>
+                                  i === idx ? { ...l, cantidad: e.target.value } : l
+                                ),
+                              }))
+                            }
+                          />
+                          <Input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            placeholder="Coste €"
+                            className="w-24"
+                            value={lin.coste_unit}
+                            onChange={(e) =>
+                              setAlbaranForm((f) => ({
+                                ...f,
+                                lineas: f.lineas.map((l, i) =>
+                                  i === idx ? { ...l, coste_unit: e.target.value } : l
+                                ),
+                              }))
+                            }
+                          />
+                          {albaranForm.lineas.length > 1 && (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="text-red-600"
+                              onClick={() =>
+                                setAlbaranForm((f) => ({
+                                  ...f,
+                                  lineas: f.lineas.filter((_, i) => i !== idx),
+                                }))
+                              }
+                            >
+                              Quitar
+                            </Button>
+                          )}
+                        </div>
+                      ))}
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setAlbaranForm((f) => ({
+                            ...f,
+                            lineas: [
+                              ...f.lineas,
+                              {
+                                concepto_partida: opcionesPartidas[0] ?? "",
+                                proveedor: "",
+                                cantidad: "",
+                                coste_unit: "",
+                              },
+                            ],
+                          }))
+                        }
+                      >
+                        Añadir línea
+                      </Button>
+                    </div>
+                  </div>
+                  {albaranError && (
+                    <p className="text-sm text-red-600">{albaranError}</p>
+                  )}
+                  <div className="flex justify-end gap-2 pt-2">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => setOpenAlbaran(false)}
+                      disabled={submittingAlbaran}
+                    >
+                      Cancelar
+                    </Button>
+                    <Button onClick={handleSubmitAlbaran} disabled={submittingAlbaran}>
+                      {submittingAlbaran ? "Guardando…" : "Registrar albarán"}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
           </TabsContent>
 
-          {/* Tab Remaining */}
           <TabsContent value="remaining">
             <p className="mb-3 text-sm text-slate-600">
               Comparativa entre unidades presupuestadas y ejecutadas por partida.
             </p>
-
             <Card>
               <CardContent className="pt-4">
                 <table className="min-w-full text-left text-sm">
@@ -680,26 +1075,20 @@ export default function LicitacionDetallePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {lic.itemsPresupuesto.map((item) => {
-                      const key = `${item.lote} - ${item.descripcion}`;
-                      const ejecutado = ejecutadoPorArticulo.get(key) ?? 0;
-                      const pendiente = item.unidades - ejecutado;
+                    {itemsPresupuestoAgregado.map((item) => {
+                      const keyPartida = `${item.lote}|${item.descripcion}`;
+                      const ejecutado = ejecutadoPorPartida[keyPartida] ?? 0;
+                      const pendiente = Math.max(0, item.unidades - ejecutado);
                       const progreso =
                         item.unidades > 0
-                          ? Math.min(
-                              100,
-                              Math.max(0, (ejecutado / item.unidades) * 100)
-                            )
+                          ? Math.min(100, Math.max(0, (ejecutado / item.unidades) * 100))
                           : 0;
-
                       return (
                         <tr
-                          key={item.id}
+                          key={`${item.lote}-${item.descripcion}`}
                           className="border-b border-slate-100 last:border-0"
                         >
-                          <td className="py-2 pr-3 text-xs text-slate-500">
-                            {item.lote}
-                          </td>
+                          <td className="py-2 pr-3 text-xs text-slate-500">{item.lote}</td>
                           <td className="max-w-xs py-2 pr-3 text-sm text-slate-900">
                             {item.descripcion}
                           </td>
@@ -736,4 +1125,3 @@ export default function LicitacionDetallePage() {
     </div>
   );
 }
-

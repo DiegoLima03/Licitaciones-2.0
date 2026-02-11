@@ -8,7 +8,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
-from backend.models import TenderCreate, TenderUpdate
+from backend.models import PartidaCreate, TenderCreate, TenderUpdate
 
 
 router = APIRouter(prefix="/tenders", tags=["tenders"])
@@ -91,6 +91,53 @@ def get_tender(tender_id: int) -> dict:
         ) from e
 
 
+@router.post("/{tender_id}/partidas", response_model=dict, status_code=status.HTTP_201_CREATED)
+def add_partida(tender_id: int, payload: PartidaCreate) -> dict:
+    """
+    Añade una partida manual al presupuesto de la licitación (tbl_licitaciones_detalle).
+
+    POST /tenders/{id}/partidas
+    """
+    try:
+        check = (
+            supabase_client.table("tbl_licitaciones")
+            .select("id_licitacion")
+            .eq("id_licitacion", tender_id)
+            .execute()
+        )
+        if not check.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Licitación no encontrada.",
+            )
+        row: dict[str, Any] = {
+            "id_licitacion": tender_id,
+            "lote": payload.lote or "General",
+            "producto": payload.producto,
+            "unidades": payload.unidades if payload.unidades is not None else 1.0,
+            "pvu": payload.pvu or 0.0,
+            "pcu": payload.pcu or 0.0,
+            "pmaxu": payload.pmaxu or 0.0,
+            "activo": payload.activo if payload.activo is not None else True,
+        }
+        response = (
+            supabase_client.table("tbl_licitaciones_detalle").insert(row).execute()
+        )
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="No se devolvió la partida creada.",
+            )
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error creando partida: {e!s}",
+        ) from e
+
+
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
 def create_tender(payload: TenderCreate) -> dict:
     """
@@ -108,6 +155,7 @@ def create_tender(payload: TenderCreate) -> dict:
             "tipo_de_licitacion": payload.tipo_de_licitacion,
             "fecha_presentacion": payload.fecha_presentacion,
             "fecha_adjudicacion": payload.fecha_adjudicacion,
+            "fecha_finalizacion": payload.fecha_finalizacion,
         }
         response = supabase_client.table("tbl_licitaciones").insert(row).execute()
         if not response.data:

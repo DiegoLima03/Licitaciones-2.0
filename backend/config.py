@@ -1,10 +1,14 @@
 import os
+from pathlib import Path
 from typing import Dict, Any
 
 from dotenv import load_dotenv
 from supabase import Client, create_client
 
-
+# Cargar .env desde la raíz del proyecto (donde se ejecuta uvicorn)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+load_dotenv(dotenv_path=_env_path)
+# Por si se ejecuta desde otra ruta, intentar también el cwd
 load_dotenv()
 
 SUPABASE_URL: str | None = os.environ.get("SUPABASE_URL")
@@ -19,10 +23,20 @@ def init_connection() -> Client:
     """
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise RuntimeError(
-            "Faltan las credenciales de Supabase en las variables de entorno "
-            "(SUPABASE_URL, SUPABASE_KEY)."
+            "Faltan las credenciales de Supabase. En el archivo .env (raíz del proyecto) define:\n"
+            "  SUPABASE_URL=https://TU_PROJECT_REF.supabase.co\n"
+            "  SUPABASE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6... (anon o service_role key)\n"
+            "Obtén ambos en: Supabase → tu proyecto → Settings → API."
         )
-    return create_client(SUPABASE_URL, SUPABASE_KEY)
+    url = SUPABASE_URL.strip()
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise RuntimeError(
+            "SUPABASE_URL debe ser la URL completa del proyecto, por ejemplo:\n"
+            "  https://abcdefgh.supabase.co\n"
+            "No uses la clave pública/secret aquí. En .env tienes ahora algo tipo 'sb_publishable_...' "
+            "en SUPABASE_URL; ese valor no es una URL. En Settings → API copia 'Project URL' en SUPABASE_URL."
+        )
+    return create_client(url, SUPABASE_KEY)
 
 
 supabase_client: Client = init_connection()

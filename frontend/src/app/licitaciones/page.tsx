@@ -1,7 +1,9 @@
+"use client";
+
+import * as React from "react";
 import Link from "next/link";
 import { Plus, Search } from "lucide-react";
 
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -10,79 +12,22 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { CreateTenderDialog } from "@/components/licitaciones/create-tender-dialog";
+import { EstadosService, TendersService } from "@/services/api";
+import type { Estado, Tender } from "@/types/api";
 
-type LicitacionEstado =
-  | "En Estudio"
-  | "Presentada"
-  | "Pendiente de Fallo"
-  | "Pendiente"
-  | "Adjudicada"
-  | "Desierta";
+const ESTADO_COLOR_CLASSES = [
+  "bg-sky-100 text-sky-800 border-sky-200",      // info
+  "bg-amber-100 text-amber-800 border-amber-200",  // warning
+  "bg-emerald-100 text-emerald-800 border-emerald-200", // success
+  "bg-rose-100 text-rose-800 border-rose-200",   // destructive
+  "bg-slate-100 text-slate-800 border-slate-200", // default
+  "bg-violet-100 text-violet-800 border-violet-200", // extra
+] as const;
 
-type Licitacion = {
-  id: number;
-  expediente: string;
-  nombre: string;
-  estado: LicitacionEstado;
-  presupuesto: number;
-};
-
-function getEstadoVariant(estado: LicitacionEstado) {
-  switch (estado) {
-    case "Adjudicada":
-      return "success";
-    case "En Estudio":
-    case "Pendiente":
-      return "info";
-    case "Presentada":
-    case "Pendiente de Fallo":
-      return "warning";
-    case "Desierta":
-      return "destructive";
-    default:
-      return "default";
-  }
-}
-
-function getMockLicitaciones(): Licitacion[] {
-  // Mock basado en las columnas usadas en tenders_list.py
-  return [
-    {
-      id: 1,
-      expediente: "EXP-24-001",
-      nombre: "Suministro de material hospitalario",
-      estado: "En Estudio",
-      presupuesto: 850_000,
-    },
-    {
-      id: 2,
-      expediente: "EXP-24-014",
-      nombre: "Mantenimiento integral edificio corporativo",
-      estado: "Presentada",
-      presupuesto: 430_000,
-    },
-    {
-      id: 3,
-      expediente: "EXP-24-021",
-      nombre: "Servicio de limpieza centros educativos",
-      estado: "Pendiente de Fallo",
-      presupuesto: 1_250_000,
-    },
-    {
-      id: 4,
-      expediente: "EXP-23-087",
-      nombre: "Gestión de residuos sanitarios",
-      estado: "Adjudicada",
-      presupuesto: 620_000,
-    },
-    {
-      id: 5,
-      expediente: "EXP-23-033",
-      nombre: "Renovación parque de vehículos",
-      estado: "Desierta",
-      presupuesto: 295_000,
-    },
-  ];
+function getEstadoColorClass(idEstado: number, estados: Estado[]): string {
+  const idx = estados.findIndex((e) => e.id_estado === idEstado);
+  if (idx >= 0 && idx < ESTADO_COLOR_CLASSES.length) return ESTADO_COLOR_CLASSES[idx];
+  return ESTADO_COLOR_CLASSES[4];
 }
 
 function formatEuro(value: number) {
@@ -94,7 +39,41 @@ function formatEuro(value: number) {
 }
 
 export default function LicitacionesPage() {
-  const data = getMockLicitaciones();
+  const [data, setData] = React.useState<Tender[]>([]);
+  const [estados, setEstados] = React.useState<Estado[]>([]);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
+  const [searchNombre, setSearchNombre] = React.useState("");
+  const [filterEstadoId, setFilterEstadoId] = React.useState<number | "">("");
+  const [updatingId, setUpdatingId] = React.useState<number | null>(null);
+
+  React.useEffect(() => {
+    EstadosService.getAll().then(setEstados).catch(() => setEstados([]));
+  }, []);
+
+  const fetchLicitaciones = React.useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const list = await TendersService.getAll({
+        nombre: searchNombre.trim() || undefined,
+        estado_id:
+          filterEstadoId !== "" && Number.isFinite(Number(filterEstadoId))
+            ? Number(filterEstadoId)
+            : undefined,
+      });
+      setData(list);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Error al cargar licitaciones");
+      setData([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [searchNombre, filterEstadoId]);
+
+  React.useEffect(() => {
+    fetchLicitaciones();
+  }, [fetchLicitaciones]);
 
   return (
     <div className="flex flex-1 flex-col gap-6">
@@ -107,78 +86,141 @@ export default function LicitacionesPage() {
             Gestión rápida del pipeline: estados, presupuesto y detalle.
           </p>
         </div>
-        <CreateTenderDialog triggerLabel="Nueva Licitación" />
+        <CreateTenderDialog triggerLabel="Nueva Licitación" onSuccess={fetchLicitaciones} />
       </header>
 
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4">
+        <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-4">
           <CardTitle className="text-sm font-medium text-slate-800">
             Listado de licitaciones
           </CardTitle>
-          <div className="relative w-full max-w-xs">
-            <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
-            <input
-              type="text"
-              placeholder="Buscar por nombre o expediente…"
-              className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
-            />
+          <div className="flex flex-wrap items-center gap-3">
+            <select
+              value={filterEstadoId}
+              onChange={(e) => {
+                const v = e.target.value;
+                setFilterEstadoId(v === "" ? "" : Number(v));
+              }}
+              className="h-9 min-w-[160px] rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              title="Filtrar por estado"
+            >
+              <option value="">Todos los estados</option>
+              {estados.map((est) => (
+                <option key={est.id_estado} value={est.id_estado}>
+                  {est.nombre_estado}
+                </option>
+              ))}
+            </select>
+            <div className="relative w-full max-w-xs">
+              <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                value={searchNombre}
+                onChange={(e) => setSearchNombre(e.target.value)}
+                onBlur={() => fetchLicitaciones()}
+                onKeyDown={(e) => e.key === "Enter" && fetchLicitaciones()}
+                placeholder="Buscar por nombre o expediente…"
+                className="h-9 w-full rounded-lg border border-slate-200 bg-white pl-8 pr-3 text-sm text-slate-900 placeholder:text-slate-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+              />
+            </div>
           </div>
         </CardHeader>
         <CardContent className="overflow-x-auto">
-          <table className="min-w-full text-left text-sm">
-            <thead>
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                <th className="py-2 pr-4">Expediente</th>
-                <th className="py-2 pr-4">Nombre proyecto</th>
-                <th className="py-2 pr-4">Estado</th>
-                <th className="py-2 pr-4 text-right">Presupuesto (€)</th>
-              </tr>
-            </thead>
-            <tbody>
-              {data.map((lic) => (
-                <tr
-                  key={lic.id}
-                  className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
-                >
-                  <td className="py-2 pr-4 text-xs font-medium text-slate-500">
-                    <Link
-                      href={`/licitaciones/${lic.id}`}
-                      className="hover:underline"
-                    >
-                      {lic.expediente}
-                    </Link>
-                  </td>
-                  <td className="max-w-xs py-2 pr-4 text-sm font-medium text-slate-900">
-                    <Link
-                      href={`/licitaciones/${lic.id}`}
-                      className="hover:underline"
-                    >
-                      {lic.nombre}
-                    </Link>
-                  </td>
-                  <td className="py-2 pr-4">
-                    <Badge variant={getEstadoVariant(lic.estado)}>
-                      {lic.estado}
-                    </Badge>
-                  </td>
-                  <td className="py-2 pr-4 text-right text-sm font-semibold text-slate-900">
-                    {formatEuro(lic.presupuesto)}
-                  </td>
+          {error && (
+            <p className="mb-3 text-sm text-red-600">{error}</p>
+          )}
+          {loading ? (
+            <p className="py-6 text-sm text-slate-500">Cargando licitaciones…</p>
+          ) : (
+            <table className="min-w-full text-left text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
+                  <th className="py-2 pr-4">Expediente</th>
+                  <th className="py-2 pr-4">Nombre proyecto</th>
+                  <th className="py-2 pr-4">Estado</th>
+                  <th className="py-2 pr-4 text-right">Presupuesto (€)</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {data.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-6 text-center text-sm text-slate-500">
+                      No hay licitaciones. Crea una o ajusta el filtro.
+                    </td>
+                  </tr>
+                ) : (
+                  data.map((lic) => (
+                    <tr
+                      key={lic.id_licitacion}
+                      className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                    >
+                      <td className="py-2 pr-4 text-xs font-medium text-slate-500">
+                        <Link
+                          href={`/licitaciones/${lic.id_licitacion}`}
+                          className="hover:underline"
+                        >
+                          {lic.numero_expediente ?? "—"}
+                        </Link>
+                      </td>
+                      <td className="max-w-xs py-2 pr-4 text-sm font-medium text-slate-900">
+                        <Link
+                          href={`/licitaciones/${lic.id_licitacion}`}
+                          className="hover:underline"
+                        >
+                          {lic.nombre}
+                        </Link>
+                      </td>
+                      <td className="py-2 pr-4">
+                        <select
+                          value={lic.id_estado}
+                          disabled={updatingId === lic.id_licitacion}
+                          onChange={async (e) => {
+                            const newId = Number(e.target.value);
+                            if (!Number.isFinite(newId)) return;
+                            setUpdatingId(lic.id_licitacion);
+                            try {
+                              await TendersService.update(lic.id_licitacion, {
+                                id_estado: newId,
+                              });
+                              await fetchLicitaciones();
+                            } catch {
+                              // Mantener valor actual
+                            } finally {
+                              setUpdatingId(null);
+                            }
+                          }}
+                          className={`h-8 min-w-[140px] rounded-md border px-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60 ${getEstadoColorClass(lic.id_estado, estados)}`}
+                          title="Cambiar estado"
+                        >
+                          {estados.length === 0 ? (
+                            <option value={lic.id_estado}>Estado {lic.id_estado}</option>
+                          ) : (
+                            <>
+                              {!estados.some((e) => e.id_estado === lic.id_estado) && (
+                                <option value={lic.id_estado}>
+                                  Estado {lic.id_estado}
+                                </option>
+                              )}
+                              {estados.map((est) => (
+                                <option key={est.id_estado} value={est.id_estado}>
+                                  {est.nombre_estado}
+                                </option>
+                              ))}
+                            </>
+                          )}
+                        </select>
+                      </td>
+                      <td className="py-2 pr-4 text-right text-sm font-semibold text-slate-900">
+                        {formatEuro(Number(lic.pres_maximo) || 0)}
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          )}
         </CardContent>
       </Card>
-
-      <p className="text-xs text-slate-400">
-        Más adelante, este listado podrá conectarse a{" "}
-        <code className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-700">
-          GET http://localhost:8000/licitaciones
-        </code>{" "}
-        o al endpoint que definas en FastAPI.
-      </p>
     </div>
   );
 }
-

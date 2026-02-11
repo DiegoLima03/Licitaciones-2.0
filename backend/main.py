@@ -1,7 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import auth, analytics, tenders, import_data, deliveries, search
+from backend.routers import auth, analytics, tenders, import_data, deliveries, search, estados, tipos, precios_referencia
 
 
 app = FastAPI(
@@ -37,6 +37,9 @@ app.include_router(tenders.router, prefix="/api")
 app.include_router(import_data.router, prefix="/api")
 app.include_router(deliveries.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
+app.include_router(estados.router, prefix="/api")
+app.include_router(tipos.router, prefix="/api")
+app.include_router(precios_referencia.router, prefix="/api")
 
 
 @app.get("/")

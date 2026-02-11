@@ -4,15 +4,58 @@ Migrado desde src/logic/deliveries.py.
 Endpoint transaccional: cabecera + líneas; rollback si falla.
 """
 
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
 from backend.models import DeliveryCreate
 
 
 router = APIRouter(prefix="/deliveries", tags=["deliveries"])
+
+
+@router.get("", response_model=List[dict])
+def list_deliveries(
+    licitacion_id: Optional[int] = Query(None, description="Filtrar por licitación."),
+) -> List[dict]:
+    """
+    Lista entregas. Si se pasa licitacion_id, devuelve solo las de esa licitación
+    con sus líneas (tbl_entregas + tbl_licitaciones_real).
+
+    GET /deliveries
+    GET /deliveries?licitacion_id=1
+    """
+    try:
+        query = (
+            supabase_client.table("tbl_entregas")
+            .select("*")
+            .order("fecha_entrega", desc=True)
+        )
+        if licitacion_id is not None:
+            query = query.eq("id_licitacion", licitacion_id)
+        response = query.execute()
+        entregas = response.data or []
+        result: List[dict] = []
+        for ent in entregas:
+            id_e = ent.get("id_entrega")
+            lineas_resp = (
+                supabase_client.table("tbl_licitaciones_real")
+                .select("*")
+                .eq("id_entrega", id_e)
+                .order("id_real")
+                .execute()
+            )
+            result.append({
+                **ent,
+                "lineas": lineas_resp.data or [],
+            })
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error listando entregas: {e!s}",
+        ) from e
 
 
 def _get_mapa_ids(licitacion_id: int) -> Dict[str, int]:
@@ -43,14 +86,17 @@ def create_delivery(payload: DeliveryCreate) -> dict:
     """
     cabecera = payload.cabecera
     try:
+        insert_cab: dict[str, Any] = {
+            "id_licitacion": payload.id_licitacion,
+            "fecha_entrega": cabecera.fecha,
+            "codigo_albaran": cabecera.codigo_albaran,
+            "observaciones": cabecera.observaciones or "",
+        }
+        if cabecera.cliente is not None:
+            insert_cab["cliente"] = cabecera.cliente
         res_cab = (
             supabase_client.table("tbl_entregas")
-            .insert({
-                "id_licitacion": payload.id_licitacion,
-                "fecha_entrega": cabecera.fecha,
-                "codigo_albaran": cabecera.codigo_albaran,
-                "observaciones": cabecera.observaciones or "",
-            })
+            .insert(insert_cab)
             .execute()
         )
         if not res_cab.data:
