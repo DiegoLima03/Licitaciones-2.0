@@ -1,10 +1,9 @@
 """
 Dashboard: timeline por adjudicación–finalización y KPIs.
 Endpoints de analítica: material trends, risk pipeline, sweet spots, price deviation.
-Estados usados en fórmulas (deben coincidir con tbl_estados.nombre_estado):
-- Ofertado: Adjudicada, No Adjudicada, Presentada, Terminada
-- Adjudicadas+Terminadas: Adjudicada, Terminada
-- Descartadas / (total - Análisis - Valoración)
+
+Estados válidos (única lista en la app): VALORACIÓN, DESCARTADA, EN ANÁLISIS, PRESENTADA,
+ADJUDICADA, NO ADJUDICADA, TERMINADA. Las comparaciones son insensibles a mayúsculas.
 """
 
 from datetime import datetime, timedelta
@@ -15,22 +14,33 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client, get_maestros
 from backend.models import (
+    CompetitorItem,
     KPIDashboard,
     MaterialTrendPoint,
+    MaterialTrendResponse,
     PriceDeviationResult,
+    PriceHistoryPoint,
+    ProductAnalytics,
     RiskPipelineItem,
     SweetSpotItem,
     TimelineItem,
+    VolumeMetrics,
 )
 
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-# Nombres de estado que deben coincidir con tbl_estados (ajustar si hace falta)
+# Estados (solo los 7 del desplegable; comparación por lower())
 ESTADOS_OFERTADO = {"Adjudicada", "No Adjudicada", "Presentada", "Terminada"}
 ESTADOS_ADJUDICADAS_TERMINADAS = {"Adjudicada", "Terminada"}
-ESTADOS_DESCARTADA = {"Descartada", "Desierta"}  # considerar descartadas
-ESTADOS_ANALISIS_VALORACION = {"En Estudio", "Análisis", "Valoración"}  # excluir del denom. % descartadas
+ESTADOS_DESCARTADA = {"Descartada"}
+ESTADOS_ANALISIS_VALORACION = {"EN ANÁLISIS", "Valoración"}
+
+# Versión en minúsculas para comparación insensible a mayúsculas (tbl_estados puede tener "TERMINADA", etc.)
+ESTADOS_OFERTADO_NORM = {s.lower() for s in ESTADOS_OFERTADO}
+ESTADOS_ADJUDICADAS_TERMINADAS_NORM = {s.lower() for s in ESTADOS_ADJUDICADAS_TERMINADAS}
+ESTADOS_DESCARTADA_NORM = {s.lower() for s in ESTADOS_DESCARTADA}
+ESTADOS_ANALISIS_VALORACION_NORM = {s.lower() for s in ESTADOS_ANALISIS_VALORACION}
 
 
 def _get_licitaciones_df() -> pd.DataFrame:
@@ -51,16 +61,12 @@ def _enriquecer_estados(df: pd.DataFrame, maestros: Dict[str, Any]) -> pd.DataFr
     return df
 
 
-def _build_timeline(df: pd.DataFrame) -> List[Dict[str, Any]]:
-    """Líneas del timeline: cada licitación con fecha_adjudicacion y fecha_finalizacion."""
-    df = df.dropna(subset=["fecha_adjudicacion", "fecha_finalizacion"])
-    df = df[df["fecha_adjudicacion"].astype(str).str.strip() != ""]
-    df = df[df["fecha_finalizacion"].astype(str).str.strip() != ""]
-    df["f_adj"] = pd.to_datetime(df["fecha_adjudicacion"], errors="coerce")
-    df["f_fin"] = pd.to_datetime(df["fecha_finalizacion"], errors="coerce")
-    df = df.dropna(subset=["f_adj", "f_fin"])
-    df = df[df["f_fin"] >= df["f_adj"]]
-    return df[["id_licitacion", "nombre", "fecha_adjudicacion", "fecha_finalizacion", "estado_nombre", "pres_maximo"]].to_dict(orient="records")
+def _build_timeline_all(df: pd.DataFrame) -> List[Dict[str, Any]]:
+    """Todas las licitaciones para el timeline (con o sin fechas), para que el frontend muestre todas."""
+    cols = ["id_licitacion", "nombre", "fecha_adjudicacion", "fecha_finalizacion", "estado_nombre", "pres_maximo"]
+    if "estado_nombre" not in df.columns:
+        cols = [c for c in cols if c in df.columns]
+    return df[cols].to_dict(orient="records")
 
 
 def _compute_margen_ponderado(
@@ -180,14 +186,17 @@ def get_kpis(
             )
 
     df = _enriquecer_estados(df, maestros)
-    timeline_records = _build_timeline(df)
+    timeline_records = _build_timeline_all(df)
+
+    # Normalizar nombre de estado para comparación insensible a mayúsculas (ej. "TERMINADA" en BD)
+    df["_estado_norm"] = df["estado_nombre"].astype(str).str.strip().str.lower()
 
     # Total oportunidades = todas las licitaciones
     total_oportunidades_uds = len(df)
     total_oportunidades_euros = float(df["pres_maximo"].sum())
 
-    # Total ofertado = solo estados en ESTADOS_OFERTADO
-    mask_ofertado = df["estado_nombre"].isin(ESTADOS_OFERTADO)
+    # Total ofertado = solo estados en ESTADOS_OFERTADO (Adjudicada, No Adjudicada, Presentada, Terminada)
+    mask_ofertado = df["_estado_norm"].isin(ESTADOS_OFERTADO_NORM)
     df_ofertado = df[mask_ofertado]
     total_ofertado_uds = len(df_ofertado)
     total_ofertado_euros = float(df_ofertado["pres_maximo"].sum())
@@ -201,7 +210,7 @@ def get_kpis(
     )
 
     # Adjudicadas + Terminadas
-    mask_adj_ter = df["estado_nombre"].isin(ESTADOS_ADJUDICADAS_TERMINADAS)
+    mask_adj_ter = df["_estado_norm"].isin(ESTADOS_ADJUDICADAS_TERMINADAS_NORM)
     count_adj_ter = mask_adj_ter.sum()
     ratio_adjudicadas_terminadas_ofertado = (
         (count_adj_ter / total_ofertado_uds * 100) if total_ofertado_uds else 0.0
@@ -213,8 +222,8 @@ def get_kpis(
     margen_real = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=False)
 
     # % descartadas = descartadas / (total - análisis - valoración)
-    mask_des = df["estado_nombre"].isin(ESTADOS_DESCARTADA)
-    mask_an_val = df["estado_nombre"].isin(ESTADOS_ANALISIS_VALORACION)
+    mask_des = df["_estado_norm"].isin(ESTADOS_DESCARTADA_NORM)
+    mask_an_val = df["_estado_norm"].isin(ESTADOS_ANALISIS_VALORACION_NORM)
     count_des = mask_des.sum()
     denom = total_oportunidades_uds - mask_an_val.sum()
     pct_descartadas_uds = (count_des / denom * 100) if denom and denom > 0 else None
@@ -226,17 +235,23 @@ def get_kpis(
     # Ofertado ya es ese conjunto; entonces ratio_adjudicadas_terminadas_ofertado es el ratio adjudicación en uds.
     ratio_adjudicacion = ratio_adjudicadas_terminadas_ofertado / 100.0 if total_ofertado_uds else 0.0
 
-    timeline_items = [
-        TimelineItem(
+    def _norm_timeline_record(r: Dict[str, Any]) -> TimelineItem:
+        raw_nombre = r.get("nombre")
+        nombre = (str(raw_nombre).strip() if raw_nombre is not None and str(raw_nombre) != "nan" else "") or f"Licitación {r['id_licitacion']}"
+        raw_adj = r.get("fecha_adjudicacion")
+        raw_fin = r.get("fecha_finalizacion")
+        fecha_adj = str(raw_adj).strip() if raw_adj is not None and str(raw_adj) != "nan" else None
+        fecha_fin = str(raw_fin).strip() if raw_fin is not None and str(raw_fin) != "nan" else None
+        return TimelineItem(
             id_licitacion=int(r["id_licitacion"]),
-            nombre=str(r.get("nombre", "")),
-            fecha_adjudicacion=r.get("fecha_adjudicacion"),
-            fecha_finalizacion=r.get("fecha_finalizacion"),
+            nombre=nombre,
+            fecha_adjudicacion=fecha_adj or None,
+            fecha_finalizacion=fecha_fin or None,
             estado_nombre=r.get("estado_nombre"),
             pres_maximo=float(r["pres_maximo"]) if r.get("pres_maximo") is not None else None,
         )
-        for r in timeline_records
-    ]
+
+    timeline_items = [_norm_timeline_record(r) for r in timeline_records]
 
     return KPIDashboard(
         timeline=timeline_items,
@@ -257,19 +272,28 @@ def get_kpis(
 
 # ---------- Endpoints de analítica avanzada ----------
 
-ESTADO_EN_ESTUDIO = "En Estudio"
-ESTADOS_SWEET_SPOT = {"Adjudicada", "Perdida", "No Adjudicada"}  # cerradas para sweet spot
+# Estado "en estudio" y licitaciones cerradas para sweet spot (solo estados del desplegable)
+ESTADO_EN_ESTUDIO = "EN ANÁLISIS"
+ESTADOS_SWEET_SPOT = {"Adjudicada", "No Adjudicada", "Terminada"}
 DEVIATION_THRESHOLD_PCT = 10.0
 
 
-@router.get("/material-trends/{material_name}", response_model=List[MaterialTrendPoint])
-def get_material_trends(material_name: str) -> List[MaterialTrendPoint]:
+def _norm_date(fecha: Any) -> Optional[str]:
+    """Extrae YYYY-MM-DD de fecha (ISO o string)."""
+    if not fecha:
+        return None
+    s = str(fecha).split("T")[0] if isinstance(fecha, str) else str(fecha)[:10]
+    return s if len(s) >= 10 else None
+
+
+@router.get("/material-trends/{material_name}", response_model=MaterialTrendResponse)
+def get_material_trends(material_name: str) -> MaterialTrendResponse:
     """
     GET /analytics/material-trends/{material_name}
-    Histórico temporal de precios de un insumo (por nombre de producto). Formato para Lightweight Charts.
+    Histórico temporal de precios: PVU desde precios_referencia + licitaciones_detalle;
+    PCU desde precios_referencia + licitaciones_real (fecha vía tbl_entregas).
     """
     try:
-        # Productos cuyo nombre coincida (ilike)
         prod_resp = (
             supabase_client.table("tbl_productos")
             .select("id")
@@ -278,36 +302,129 @@ def get_material_trends(material_name: str) -> List[MaterialTrendPoint]:
         )
         product_ids = [r["id"] for r in (prod_resp.data or []) if r.get("id") is not None]
         if not product_ids:
-            return []
+            return MaterialTrendResponse(pvu=[], pcu=[])
 
-        # Precios de referencia con fecha (PVU como valor)
-        precios_resp = (
+        pvu_points: List[MaterialTrendPoint] = []
+        pcu_points: List[MaterialTrendPoint] = []
+
+        # --- PVU: precios_referencia (pvu, fecha_presupuesto) ---
+        ref_resp = (
             supabase_client.table("tbl_precios_referencia")
-            .select("id_producto, pvu, fecha_creacion")
+            .select("id_producto, pvu, pcu, fecha_presupuesto")
             .in_("id_producto", product_ids)
-            .order("fecha_creacion")
+            .order("fecha_presupuesto")
             .execute()
         )
-        rows = precios_resp.data or []
-        if not rows:
-            return []
-
-        out: List[MaterialTrendPoint] = []
-        for r in rows:
-            fecha = r.get("fecha_creacion")
-            if not fecha:
+        for r in (ref_resp.data or []):
+            time_str = _norm_date(r.get("fecha_presupuesto"))
+            if not time_str:
                 continue
-            # fecha_creacion puede ser ISO con hora; tomar solo YYYY-MM-DD
-            time_str = str(fecha).split("T")[0] if isinstance(fecha, str) else str(fecha)[:10]
+            if r.get("pvu") is not None:
+                try:
+                    pvu_points.append(MaterialTrendPoint(time=time_str, value=round(float(r["pvu"]), 2)))
+                except (TypeError, ValueError):
+                    pass
+            if r.get("pcu") is not None:
+                try:
+                    pcu_points.append(MaterialTrendPoint(time=time_str, value=round(float(r["pcu"]), 2)))
+                except (TypeError, ValueError):
+                    pass
+
+        # --- PVU: licitaciones_detalle (pvu) con fecha de licitación ---
+        det_resp = (
+            supabase_client.table("tbl_licitaciones_detalle")
+            .select("id_licitacion, pvu, unidades")
+            .in_("id_producto", product_ids)
+            .eq("activo", True)
+            .execute()
+        )
+        det_rows = det_resp.data or []
+        id_lics = list({r["id_licitacion"] for r in det_rows if r.get("id_licitacion") is not None})
+        lic_fechas: Dict[int, str] = {}
+        if id_lics:
+            lic_resp = (
+                supabase_client.table("tbl_licitaciones")
+                .select("id_licitacion, fecha_presentacion, fecha_adjudicacion")
+                .in_("id_licitacion", id_lics)
+                .execute()
+            )
+            for row in (lic_resp.data or []):
+                lid = row.get("id_licitacion")
+                if lid is None:
+                    continue
+                time_str = _norm_date(row.get("fecha_adjudicacion") or row.get("fecha_presentacion"))
+                if time_str:
+                    lic_fechas[int(lid)] = time_str
+        for r in det_rows:
             pvu = r.get("pvu")
-            if pvu is None:
+            id_lic = r.get("id_licitacion")
+            if pvu is None or id_lic is None:
+                continue
+            time_str = lic_fechas.get(int(id_lic))
+            if not time_str:
                 continue
             try:
-                value = float(pvu)
+                pvu_points.append(MaterialTrendPoint(time=time_str, value=round(float(pvu), 2)))
             except (TypeError, ValueError):
-                continue
-            out.append(MaterialTrendPoint(time=time_str, value=round(value, 2)))
-        return out
+                pass
+
+        # --- PCU: licitaciones_real (pcu) con fecha de entrega ---
+        id_detalles: List[int] = []
+        det_for_real = (
+            supabase_client.table("tbl_licitaciones_detalle")
+            .select("id_detalle")
+            .in_("id_producto", product_ids)
+            .execute()
+        )
+        for r in (det_for_real.data or []):
+            if r.get("id_detalle") is not None:
+                id_detalles.append(int(r["id_detalle"]))
+        if id_detalles:
+            real_resp = (
+                supabase_client.table("tbl_licitaciones_real")
+                .select("id_detalle, id_entrega, pcu")
+                .in_("id_detalle", id_detalles)
+                .execute()
+            )
+            real_rows = real_resp.data or []
+            id_entregas = list({r["id_entrega"] for r in real_rows if r.get("id_entrega") is not None})
+            entrega_fechas: Dict[Any, str] = {}
+            if id_entregas:
+                ent_resp = (
+                    supabase_client.table("tbl_entregas")
+                    .select("id_entrega, fecha_entrega")
+                    .in_("id_entrega", id_entregas)
+                    .execute()
+                )
+                for row in (ent_resp.data or []):
+                    eid = row.get("id_entrega")
+                    t = _norm_date(row.get("fecha_entrega"))
+                    if eid is not None and t:
+                        entrega_fechas[eid] = t
+            for r in real_rows:
+                pcu = r.get("pcu")
+                id_ent = r.get("id_entrega")
+                if pcu is None or id_ent is None:
+                    continue
+                time_str = entrega_fechas.get(id_ent)
+                if not time_str:
+                    continue
+                try:
+                    pcu_points.append(MaterialTrendPoint(time=time_str, value=round(float(pcu), 2)))
+                except (TypeError, ValueError):
+                    pass
+
+        # Ordenar y desduplicar por fecha (quedarse con el último valor por día)
+        def dedup_sorted(points: List[MaterialTrendPoint]) -> List[MaterialTrendPoint]:
+            if not points:
+                return []
+            df = pd.DataFrame([{"time": p.time, "value": p.value} for p in points])
+            df = df.sort_values("time").drop_duplicates(subset=["time"], keep="last")
+            return [MaterialTrendPoint(time=row["time"], value=round(float(row["value"]), 2)) for _, row in df.iterrows()]
+
+        pvu_points = dedup_sorted(pvu_points)
+        pcu_points = dedup_sorted(pcu_points)
+        return MaterialTrendResponse(pvu=pvu_points, pcu=pcu_points)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -319,61 +436,104 @@ def get_material_trends(material_name: str) -> List[MaterialTrendPoint]:
 def get_risk_adjusted_pipeline() -> List[RiskPipelineItem]:
     """
     GET /analytics/risk-adjusted-pipeline
-    Agrupa licitaciones 'En Estudio' por categoría (tipo); pipeline bruto y ajustado por win rate histórico.
+    Comparativa solo para licitaciones EN ANÁLISIS: barra 1 = suma (pvu*unidades) del detalle;
+    barra 2 = misma suma usando la media de precio por artículo (tbl_precios_referencia).
     """
     try:
+        # Solo licitaciones en estado EN ANÁLISIS
         maestros = get_maestros(supabase_client)
-        estados_map = maestros.get("estados_id_map", {})
-        tipos_map = maestros.get("tipos_id_map", {})
-        # Nombre de estado -> id para filtrar "En Estudio"
-        name_to_estado_id = maestros.get("estados_name_map", {})
-        id_estudio = name_to_estado_id.get(ESTADO_EN_ESTUDIO)
-        if id_estudio is None:
-            return []
-
+        estados_name_map = maestros.get("estados_name_map", {})
+        analisis_norm = (ESTADO_EN_ESTUDIO or "").strip().lower()
+        id_estado_analisis = None
+        for nombre, id_est in estados_name_map.items():
+            if (nombre or "").strip().lower() == analisis_norm:
+                id_estado_analisis = id_est
+                break
+        if id_estado_analisis is None:
+            return [
+                RiskPipelineItem(category="Comparativa", pipeline_bruto=0.0, pipeline_ajustado=0.0),
+            ]
         lic_resp = (
             supabase_client.table("tbl_licitaciones")
-            .select("id_licitacion, pres_maximo, id_estado, tipo_de_licitacion")
-            .eq("id_estado", id_estudio)
+            .select("id_licitacion")
+            .eq("id_estado", id_estado_analisis)
             .execute()
         )
-        rows = lic_resp.data or []
+        id_licitaciones_analisis = [r["id_licitacion"] for r in (lic_resp.data or []) if r.get("id_licitacion") is not None]
+        if not id_licitaciones_analisis:
+            return [
+                RiskPipelineItem(category="Comparativa", pipeline_bruto=0.0, pipeline_ajustado=0.0),
+            ]
+
+        # Detalles activos solo de esas licitaciones: id_licitacion, id_producto, pvu, unidades
+        det_resp = (
+            supabase_client.table("tbl_licitaciones_detalle")
+            .select("id_producto, pvu, unidades")
+            .eq("activo", True)
+            .in_("id_licitacion", id_licitaciones_analisis)
+            .execute()
+        )
+        rows = det_resp.data or []
         if not rows:
-            return []
+            return [
+                RiskPipelineItem(
+                    category="Comparativa",
+                    pipeline_bruto=0.0,
+                    pipeline_ajustado=0.0,
+                )
+            ]
 
-        # Win rate global: ratio adjudicación (Adjudicadas+Terminadas / Ofertado)
-        df_all = _get_licitaciones_df()
-        if df_all.empty:
-            win_rate = 0.2
-        else:
-            df_all = _enriquecer_estados(df_all, maestros)
-            mask_ofertado = df_all["estado_nombre"].isin(ESTADOS_OFERTADO)
-            mask_adj = df_all["estado_nombre"].isin(ESTADOS_ADJUDICADAS_TERMINADAS)
-            total_ofertado = mask_ofertado.sum()
-            total_adj = mask_adj.sum()
-            win_rate = (total_adj / total_ofertado) if total_ofertado and total_ofertado > 0 else 0.2
-
-        # Agrupar por tipo
-        agg: Dict[str, Dict[str, Any]] = {}
+        # Barra 1: venta presupuestada = suma (pvu * unidades)
+        venta_presupuestada = 0.0
+        lineas: List[Dict[str, Any]] = []
         for r in rows:
-            pres = float(r.get("pres_maximo") or 0)
-            tipo_id = r.get("tipo_de_licitacion")
-            category = tipos_map.get(tipo_id, f"Tipo {tipo_id}" if tipo_id is not None else "Sin tipo")
-            if category not in agg:
-                agg[category] = {"pipeline_bruto": 0.0, "pipeline_ajustado": 0.0}
-            agg[category]["pipeline_bruto"] += pres
-        for cat, v in agg.items():
-            v["pipeline_ajustado"] = round(v["pipeline_bruto"] * win_rate, 2)
-            v["pipeline_bruto"] = round(v["pipeline_bruto"], 2)
+            pvu = float(r.get("pvu") or 0)
+            ud = float(r.get("unidades") or 0)
+            venta_presupuestada += pvu * ud
+            id_producto = r.get("id_producto")
+            if id_producto is not None:
+                lineas.append({"id_producto": int(id_producto), "pvu": pvu, "unidades": ud})
+
+        # Medias de precio por producto desde tbl_precios_referencia
+        product_ids = list({ln["id_producto"] for ln in lineas})
+        ref_resp = (
+            supabase_client.table("tbl_precios_referencia")
+            .select("id_producto, pvu")
+            .in_("id_producto", product_ids)
+            .execute()
+        )
+        ref_rows = ref_resp.data or []
+        # id_producto -> lista de pvu
+        pvu_por_producto: Dict[int, List[float]] = {}
+        for ref in ref_rows:
+            pid = ref.get("id_producto")
+            pvu_val = ref.get("pvu")
+            if pid is not None and pvu_val is not None:
+                pid = int(pid)
+                pvu_por_producto.setdefault(pid, []).append(float(pvu_val))
+        avg_pvu: Dict[int, float] = {}
+        for pid, vals in pvu_por_producto.items():
+            avg_pvu[pid] = sum(vals) / len(vals)
+
+        # Barra 2: venta a precio medio = suma (media_pvu[id_producto] * unidades); si no hay media usamos pvu del detalle
+        venta_a_precio_medio = 0.0
+        for ln in lineas:
+            pid = ln["id_producto"]
+            ud = ln["unidades"]
+            pvu_medio = avg_pvu.get(pid, ln["pvu"])
+            venta_a_precio_medio += pvu_medio * ud
 
         return [
-            RiskPipelineItem(category=k, pipeline_bruto=v["pipeline_bruto"], pipeline_ajustado=v["pipeline_ajustado"])
-            for k, v in agg.items()
+            RiskPipelineItem(
+                category="Comparativa",
+                pipeline_bruto=round(venta_presupuestada, 2),
+                pipeline_ajustado=round(venta_a_precio_medio, 2),
+            )
         ]
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error obteniendo pipeline ajustado: {e!s}",
+            detail=f"Error obteniendo comparativa venta vs precio medio: {e!s}",
         ) from e
 
 
@@ -381,14 +541,19 @@ def get_risk_adjusted_pipeline() -> List[RiskPipelineItem]:
 def get_sweet_spots() -> List[SweetSpotItem]:
     """
     GET /analytics/sweet-spots
-    Licitaciones cerradas (Adjudicada / Perdida o No Adjudicada) con presupuesto y estado para scatter.
+    Licitaciones cerradas (Adjudicada, No Adjudicada, Terminada) con presupuesto y estado para scatter.
     """
     try:
         maestros = get_maestros(supabase_client)
         estados_id_map = maestros.get("estados_id_map", {})
         estados_name_map = maestros.get("estados_name_map", {})
-        # IDs de estados que consideramos "cerrados" para sweet spot
-        ids_cerrados = [estados_name_map.get(n) for n in ESTADOS_SWEET_SPOT if estados_name_map.get(n) is not None]
+        # IDs de estados cerrados (comparación insensible a mayúsculas: BD puede tener "NO ADJUDICADA", "TERMINADA")
+        sweet_spot_norm = {s.lower().strip() for s in ESTADOS_SWEET_SPOT}
+        ids_cerrados = [
+            id_estado
+            for nombre_estado, id_estado in estados_name_map.items()
+            if (nombre_estado or "").strip().lower() in sweet_spot_norm
+        ]
         if not ids_cerrados:
             return []
 
@@ -425,14 +590,13 @@ def get_sweet_spots() -> List[SweetSpotItem]:
 @router.get("/price-deviation-check", response_model=PriceDeviationResult)
 def get_price_deviation_check(
     material_name: str = Query(..., description="Nombre del material/insumo."),
-    current_price: float = Query(..., ge=0, description="Precio actual a comparar."),
+    current_price: float = Query(..., ge=0, description="Precio actual a comparar (PVU o PCU)."),
 ) -> PriceDeviationResult:
     """
     GET /analytics/price-deviation-check?material_name=...&current_price=...
-    Compara el precio actual con la media histórica del último año. Recomendación si desviación > 10%.
+    Compara el precio actual con la media histórica del último año (referencia + detalle + real).
     """
     try:
-        # Productos por nombre
         prod_resp = (
             supabase_client.table("tbl_productos")
             .select("id")
@@ -448,17 +612,17 @@ def get_price_deviation_check(
                 recommendation="No hay histórico para este material. Revisar precio manualmente.",
             )
 
-        # Último año: filtrar por fecha_creacion (Supabase no tiene date_trunc en filtro fácil)
-        precios_resp = (
+        one_year_ago = (datetime.utcnow() - timedelta(days=365)).strftime("%Y-%m-%d")
+        values: List[float] = []
+
+        # PVU y PCU: precios_referencia (último año)
+        ref_resp = (
             supabase_client.table("tbl_precios_referencia")
-            .select("pvu, fecha_creacion")
+            .select("pvu, pcu, fecha_presupuesto")
             .in_("id_producto", product_ids)
             .execute()
         )
-        rows = precios_resp.data or []
-        one_year_ago = (datetime.utcnow() - timedelta(days=365)).strftime("%Y-%m-%d")
-        values: List[float] = []
-        for r in rows:
+        for r in (ref_resp.data or []):
             pvu = r.get("pvu")
             if pvu is None:
                 continue
@@ -466,9 +630,27 @@ def get_price_deviation_check(
                 v = float(pvu)
             except (TypeError, ValueError):
                 continue
-            fecha = r.get("fecha_creacion")
-            if fecha and str(fecha)[:10] >= one_year_ago:
+            if _norm_date(r.get("fecha_presupuesto")) and str(r.get("fecha_presupuesto", ""))[:10] >= one_year_ago:
                 values.append(v)
+
+        # PVU: licitaciones_detalle (todos los presupuestados, con o sin fecha en último año)
+        det_resp = (
+            supabase_client.table("tbl_licitaciones_detalle")
+            .select("id_licitacion, pvu")
+            .in_("id_producto", product_ids)
+            .eq("activo", True)
+            .execute()
+        )
+        for r in (det_resp.data or []):
+            pvu = r.get("pvu")
+            if pvu is None:
+                continue
+            try:
+                values.append(float(pvu))
+            except (TypeError, ValueError):
+                pass
+
+        # Histórico para desviación: solo PVU (referencia + detalle) para comparar con precio actual
         historical_avg = float(sum(values) / len(values)) if values else 0.0
         if historical_avg <= 0:
             return PriceDeviationResult(
@@ -503,4 +685,176 @@ def get_price_deviation_check(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error en comprobación de desviación: {e!s}",
+        ) from e
+
+
+# ---------- Product Analytics (ficha técnica por producto) ----------
+
+MA_WINDOW = 5  # Ventana para Moving Average del forecast
+
+
+@router.get("/product/{product_id}", response_model=ProductAnalytics)
+def get_product_analytics(product_id: int) -> ProductAnalytics:
+    """
+    GET /analytics/product/{id}
+    Analíticas avanzadas por producto: price_history, volume_metrics, competitor_analysis, forecast.
+    """
+    try:
+        # Nombre del producto
+        prod_resp = (
+            supabase_client.table("tbl_productos")
+            .select("id, nombre")
+            .eq("id", product_id)
+            .single()
+            .execute()
+        )
+        if not prod_resp.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Producto no encontrado.",
+            )
+        product_name = str(prod_resp.data.get("nombre") or "")
+
+        # Detalle: partidas de licitaciones con este producto + fecha adjudicación
+        det_resp = (
+            supabase_client.table("tbl_licitaciones_detalle")
+            .select("id_detalle, id_licitacion, pvu, unidades")
+            .eq("id_producto", product_id)
+            .execute()
+        )
+        det_rows = det_resp.data or []
+        id_licitaciones = list({r["id_licitacion"] for r in det_rows if r.get("id_licitacion") is not None})
+        id_detalles = [r["id_detalle"] for r in det_rows if r.get("id_detalle") is not None]
+
+        # Fechas de adjudicación por licitación
+        lic_fechas: Dict[int, str] = {}
+        if id_licitaciones:
+            lic_resp = (
+                supabase_client.table("tbl_licitaciones")
+                .select("id_licitacion, fecha_adjudicacion")
+                .in_("id_licitacion", id_licitaciones)
+                .execute()
+            )
+            for r in (lic_resp.data or []):
+                lid = r.get("id_licitacion")
+                f = r.get("fecha_adjudicacion")
+                if lid is not None and f:
+                    lic_fechas[int(lid)] = str(f).split("T")[0][:10]
+
+        # Precios de referencia (con fecha_presupuesto)
+        ref_resp = (
+            supabase_client.table("tbl_precios_referencia")
+            .select("pvu, fecha_presupuesto")
+            .eq("id_producto", product_id)
+            .execute()
+        )
+        ref_rows = ref_resp.data or []
+
+        # Construir price_history con Pandas
+        hist_rows: List[Dict[str, Any]] = []
+        for r in det_rows:
+            pvu = r.get("pvu")
+            id_lic = r.get("id_licitacion")
+            if pvu is None or id_lic is None:
+                continue
+            try:
+                value = float(pvu)
+            except (TypeError, ValueError):
+                continue
+            time_str = lic_fechas.get(int(id_lic))
+            if not time_str:
+                continue
+            hist_rows.append({"time": time_str, "value": value})
+        for r in ref_rows:
+            pvu = r.get("pvu")
+            fecha = r.get("fecha_presupuesto")
+            if pvu is None or not fecha:
+                continue
+            try:
+                value = float(pvu)
+            except (TypeError, ValueError):
+                continue
+            time_str = str(fecha).split("T")[0][:10]
+            hist_rows.append({"time": time_str, "value": value})
+
+        df_hist = pd.DataFrame(hist_rows)
+        if not df_hist.empty:
+            df_hist = df_hist.sort_values("time").drop_duplicates(subset=["time"], keep="last")
+        price_history = [
+            PriceHistoryPoint(time=row["time"], value=round(float(row["value"]), 2))
+            for _, row in df_hist.iterrows()
+        ]
+
+        # Volume metrics: total licitado (sum pvu*unidades), oferentes promedio (distinct licitaciones / count)
+        total_licitado = 0.0
+        for r in det_rows:
+            pvu = r.get("pvu")
+            un = r.get("unidades")
+            if pvu is not None and un is not None:
+                try:
+                    total_licitado += float(pvu) * float(un)
+                except (TypeError, ValueError):
+                    pass
+        num_licitaciones = len(id_licitaciones) if id_licitaciones else 0
+        cantidad_oferentes_promedio = float(num_licitaciones) if num_licitaciones else 0.0
+        volume_metrics = VolumeMetrics(
+            total_licitado=round(total_licitado, 2),
+            cantidad_oferentes_promedio=round(cantidad_oferentes_promedio, 2),
+        )
+
+        # Competitor analysis: top 3 proveedores desde tbl_licitaciones_real (por id_detalle)
+        competitor_analysis: List[CompetitorItem] = []
+        if id_detalles:
+            real_resp = (
+                supabase_client.table("tbl_licitaciones_real")
+                .select("id_detalle, proveedor, pcu")
+                .in_("id_detalle", id_detalles)
+                .execute()
+            )
+            real_rows = real_resp.data or []
+            if real_rows:
+                df_real = pd.DataFrame(real_rows)
+                df_real["pcu"] = pd.to_numeric(df_real["pcu"], errors="coerce").fillna(0)
+                df_real["proveedor"] = df_real["proveedor"].fillna("—")
+                agg = df_real.groupby("proveedor").agg(
+                    precio_medio=("pcu", "mean"),
+                    cantidad_adjudicaciones=("id_detalle", "count"),
+                ).reset_index()
+                agg = agg.sort_values("cantidad_adjudicaciones", ascending=False).head(3)
+                competitor_analysis = [
+                    CompetitorItem(
+                        empresa=str(row["proveedor"]),
+                        precio_medio=round(float(row["precio_medio"]), 2),
+                        cantidad_adjudicaciones=int(row["cantidad_adjudicaciones"]),
+                    )
+                    for _, row in agg.iterrows()
+                ]
+
+        # Forecast: Moving Average de los últimos MA_WINDOW puntos
+        forecast_val: Optional[float] = None
+        if len(price_history) >= 2:
+            values = [p.value for p in price_history]
+            window = min(MA_WINDOW, len(values))
+            ma = sum(values[-window:]) / window
+            forecast_val = round(ma, 2)
+
+        # Precio referencia medio (desde tbl_precios_referencia)
+        precios_ref = [float(r["pvu"]) for r in ref_rows if r.get("pvu") is not None]
+        precio_referencia_medio = round(sum(precios_ref) / len(precios_ref), 2) if precios_ref else None
+
+        return ProductAnalytics(
+            product_id=product_id,
+            product_name=product_name,
+            price_history=price_history,
+            volume_metrics=volume_metrics,
+            competitor_analysis=competitor_analysis,
+            forecast=forecast_val,
+            precio_referencia_medio=precio_referencia_medio,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error obteniendo analíticas de producto: {e!s}",
         ) from e

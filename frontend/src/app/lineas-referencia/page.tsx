@@ -4,7 +4,7 @@ import * as React from "react";
 import Link from "next/link";
 import { ArrowLeft, Plus } from "lucide-react";
 
-import { ProductCombobox } from "@/components/producto-combobox";
+import { ProductAutocompleteInput } from "@/components/producto-autocomplete-input";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -31,6 +31,7 @@ const initialForm = {
   unidades: null as number | null,
   proveedor: "",
   notas: "",
+  fecha_presupuesto: "" as string,
 };
 
 export default function LineasReferenciaPage() {
@@ -85,6 +86,7 @@ export default function LineasReferenciaPage() {
         unidades: form.unidades != null ? Number(form.unidades) : null,
         proveedor: form.proveedor?.trim() || null,
         notas: form.notas?.trim() || null,
+        fecha_presupuesto: form.fecha_presupuesto?.trim() || null,
       };
       await PreciosReferenciaService.create(payload);
       setSelectedProduct(null);
@@ -131,14 +133,28 @@ export default function LineasReferenciaPage() {
               </p>
             )}
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              <div className="sm:col-span-2 lg:col-span-1">
+              <div className="sm:col-span-2 lg:col-span-2">
                 <label className="mb-1 block text-xs font-medium text-slate-600">
                   Producto *
                 </label>
-                <ProductCombobox
+                <ProductAutocompleteInput
                   value={selectedProduct}
                   onSelect={(id, nombre) => setSelectedProduct({ id, nombre })}
                   placeholder="Buscar producto…"
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="fecha_presupuesto"
+                  className="mb-1 block text-xs font-medium text-slate-600"
+                >
+                  Fecha presupuesto
+                </label>
+                <Input
+                  id="fecha_presupuesto"
+                  type="date"
+                  value={form.fecha_presupuesto ?? ""}
+                  onChange={(e) => handleChange("fecha_presupuesto", e.target.value)}
                 />
               </div>
               <div>
@@ -207,7 +223,7 @@ export default function LineasReferenciaPage() {
                   placeholder="—"
                 />
               </div>
-              <div className="sm:col-span-2">
+              <div className="sm:col-span-2 lg:col-span-3">
                 <label
                   htmlFor="proveedor"
                   className="mb-1 block text-xs font-medium text-slate-600"
@@ -265,6 +281,7 @@ export default function LineasReferenciaPage() {
                 <thead>
                   <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                     <th className="py-2 pr-3">Producto</th>
+                    <th className="py-2 pr-3">Fecha presupuesto</th>
                     <th className="py-2 pr-3">Proveedor</th>
                     <th className="py-2 pr-3 text-right">Unidades</th>
                     <th className="py-2 pr-3 text-right">PCU</th>
@@ -281,6 +298,11 @@ export default function LineasReferenciaPage() {
                     >
                       <td className="max-w-xs py-2 pr-3 font-medium text-slate-900">
                         {item.product_nombre ?? "—"}
+                      </td>
+                      <td className="py-2 pr-3 text-slate-600">
+                        {item.fecha_presupuesto
+                          ? new Date(item.fecha_presupuesto + "T00:00:00").toLocaleDateString("es-ES")
+                          : "—"}
                       </td>
                       <td className="py-2 pr-3 text-slate-700">
                         {item.proveedor ?? "—"}

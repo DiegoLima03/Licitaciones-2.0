@@ -1,6 +1,9 @@
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
+
+# Valores permitidos para país de licitación
+PaisLicitacion = Literal["España", "Portugal"]
 
 
 # ----- Auth -----
@@ -80,6 +83,7 @@ class TenderCreate(BaseModel):
     """Payload para crear una licitación."""
 
     nombre: str = Field(..., description="Nombre del proyecto.")
+    pais: PaisLicitacion = Field(..., description="País de la licitación: España o Portugal.")
     numero_expediente: Optional[str] = Field(None, description="Nº expediente.")
     pres_maximo: Optional[float] = Field(0.0, description="Presupuesto máximo (€).")
     descripcion: Optional[str] = Field(None, description="Notas / descripción.")
@@ -94,6 +98,7 @@ class TenderUpdate(BaseModel):
     """Payload para actualizar una licitación (campos opcionales)."""
 
     nombre: Optional[str] = None
+    pais: Optional[PaisLicitacion] = None
     numero_expediente: Optional[str] = None
     pres_maximo: Optional[float] = None
     descripcion: Optional[str] = None
@@ -130,6 +135,18 @@ class PartidaCreate(BaseModel):
     activo: Optional[bool] = Field(True, description="Partida activa en el presupuesto.")
 
 
+class PartidaUpdate(BaseModel):
+    """Payload para actualizar una partida (campos opcionales)."""
+
+    lote: Optional[str] = None
+    id_producto: Optional[int] = None
+    unidades: Optional[float] = Field(None, ge=0)
+    pvu: Optional[float] = Field(None, ge=0)
+    pcu: Optional[float] = Field(None, ge=0)
+    pmaxu: Optional[float] = Field(None, ge=0)
+    activo: Optional[bool] = None
+
+
 # ----- Entregas (tbl_entregas + tbl_licitaciones_real) -----
 
 
@@ -164,6 +181,13 @@ class DeliveryCreate(BaseModel):
     lineas: List[DeliveryLineCreate] = Field(default_factory=list, description="Líneas del documento.")
 
 
+class DeliveryLineUpdate(BaseModel):
+    """Payload para actualizar estado/cobrado de una línea (tbl_licitaciones_real)."""
+
+    estado: Optional[str] = Field(None, description="Estado de la línea (ej. EN ESPERA, ENTREGADO).")
+    cobrado: Optional[bool] = Field(None, description="Si la línea está cobrada.")
+
+
 # ----- Precios de referencia (tbl_precios_referencia) -----
 
 
@@ -176,6 +200,7 @@ class PrecioReferenciaCreate(BaseModel):
     unidades: Optional[float] = Field(None, description="Unidades.")
     proveedor: Optional[str] = Field(None, description="Proveedor.")
     notas: Optional[str] = Field(None, description="Notas.")
+    fecha_presupuesto: Optional[str] = Field(None, description="Fecha del presupuesto/vigencia (YYYY-MM-DD). Para importación masiva.")
 
 
 class PrecioReferencia(BaseModel):
@@ -189,8 +214,7 @@ class PrecioReferencia(BaseModel):
     unidades: Optional[float] = Field(None, description="Unidades.")
     proveedor: Optional[str] = Field(None, description="Proveedor.")
     notas: Optional[str] = Field(None, description="Notas.")
-    fecha_creacion: Optional[str] = Field(None, description="Fecha de creación (ISO).")
-    creado_por: Optional[str] = Field(None, description="UUID del usuario creador.")
+    fecha_presupuesto: Optional[str] = Field(None, description="Fecha del presupuesto/vigencia (YYYY-MM-DD).")
 
 
 # ----- Buscador (productos en tbl_licitaciones_detalle + tbl_precios_referencia) -----
@@ -199,6 +223,7 @@ class PrecioReferencia(BaseModel):
 class ProductSearchItem(BaseModel):
     """Un resultado de búsqueda por producto con datos de la licitación asociada."""
 
+    id_producto: Optional[int] = Field(None, description="ID del producto en tbl_productos (para ficha analíticas).")
     producto: str = Field(..., description="Nombre del producto.")
     pvu: Optional[float] = Field(None, description="Precio venta unitario.")
     pcu: Optional[float] = Field(None, description="Precio coste unitario.")
@@ -214,7 +239,13 @@ class ProductSearchItem(BaseModel):
 class MaterialTrendPoint(BaseModel):
     """Punto temporal para gráfico de evolución de precios (Lightweight Charts)."""
     time: str = Field(..., description="Fecha en formato YYYY-MM-DD.")
-    value: float = Field(..., description="Precio (PVU) en esa fecha.")
+    value: float = Field(..., description="Precio en esa fecha (PVU o PCU).")
+
+
+class MaterialTrendResponse(BaseModel):
+    """Tendencia de precios: PVU (referencia + licitaciones detalle) y PCU (referencia + licitaciones real)."""
+    pvu: List[MaterialTrendPoint] = Field(default_factory=list, description="Precio venta unitario (referencia + detalle).")
+    pcu: List[MaterialTrendPoint] = Field(default_factory=list, description="Precio coste unitario (referencia + real).")
 
 
 class RiskPipelineItem(BaseModel):
@@ -238,4 +269,37 @@ class PriceDeviationResult(BaseModel):
     deviation_percentage: float = Field(..., description="Porcentaje de desviación vs media histórica.")
     historical_avg: float = Field(..., description="Media del precio en el último año.")
     recommendation: str = Field(..., description="Recomendación para el usuario.")
+
+
+# ----- Product Analytics (ficha técnica por producto) -----
+
+
+class PriceHistoryPoint(BaseModel):
+    """Punto de la serie temporal de precios adjudicados (eje X tiempo, eje Y precio)."""
+    time: str = Field(..., description="Fecha ISO YYYY-MM-DD.")
+    value: float = Field(..., description="Precio de adjudicación (PVU).")
+
+
+class VolumeMetrics(BaseModel):
+    """Métricas de volumen para el producto."""
+    total_licitado: float = Field(..., description="Importe total licitado (PVU * unidades).")
+    cantidad_oferentes_promedio: float = Field(..., description="Promedio de oferentes/licitaciones.")
+
+
+class CompetitorItem(BaseModel):
+    """Top empresa/proveedor con precios para este producto."""
+    empresa: str = Field(..., description="Nombre del proveedor/empresa.")
+    precio_medio: float = Field(..., description="Precio medio adjudicado.")
+    cantidad_adjudicaciones: int = Field(..., description="Número de adjudicaciones.")
+
+
+class ProductAnalytics(BaseModel):
+    """Respuesta de GET /analytics/product/{id}: analíticas avanzadas por producto."""
+    product_id: int = Field(..., description="ID del producto en tbl_productos.")
+    product_name: str = Field(..., description="Nombre del producto.")
+    price_history: List[PriceHistoryPoint] = Field(default_factory=list)
+    volume_metrics: VolumeMetrics = Field(...)
+    competitor_analysis: List[CompetitorItem] = Field(default_factory=list)
+    forecast: Optional[float] = Field(None, description="Proyección MA del próximo precio.")
+    precio_referencia_medio: Optional[float] = Field(None, description="Media de precios de referencia.")
 

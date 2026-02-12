@@ -28,7 +28,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { EstadosService, TiposService, TendersService } from "@/services/api";
-import type { Estado, Tipo } from "@/types/api";
+import type { Estado, PaisLicitacion, Tipo } from "@/types/api";
+
+const PAISES_OPCIONES: PaisLicitacion[] = ["España", "Portugal"];
 
 type CreateTenderDialogProps = {
   triggerLabel?: string;
@@ -37,6 +39,7 @@ type CreateTenderDialogProps = {
 
 const formSchema = z.object({
   nombre: z.string().min(1, "El nombre del proyecto es obligatorio"),
+  pais: z.enum(["España", "Portugal"], { required_error: "Selecciona el país de la licitación" }),
   expediente: z.string().min(1, "El nº de expediente es obligatorio"),
   f_presentacion: z.date({
     required_error: "La fecha de presentación es obligatoria",
@@ -128,6 +131,7 @@ export function CreateTenderDialog({
     resolver: zodResolver(formSchema),
     defaultValues: {
       nombre: "",
+      pais: "España" as PaisLicitacion,
       expediente: "",
       presupuesto: 0,
       notas: "",
@@ -144,6 +148,7 @@ export function CreateTenderDialog({
 
       await TendersService.create({
         nombre: values.nombre,
+        pais: values.pais,
         numero_expediente: values.expediente,
         pres_maximo: values.presupuesto ?? 0,
         descripcion: values.notas,
@@ -274,6 +279,31 @@ export function CreateTenderDialog({
                         placeholder="Ej. Servicio de limpieza centros educativos"
                         {...field}
                       />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="pais"
+                render={({ field }) => (
+                  <FormItem>
+                    <FormLabel>País</FormLabel>
+                    <FormControl>
+                      <select
+                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:opacity-50"
+                        value={field.value ?? ""}
+                        onChange={(e) => field.onChange(e.target.value as PaisLicitacion)}
+                      >
+                        <option value="">Selecciona el país</option>
+                        {PAISES_OPCIONES.map((p) => (
+                          <option key={p} value={p}>
+                            {p}
+                          </option>
+                        ))}
+                      </select>
                     </FormControl>
                     <FormMessage />
                   </FormItem>

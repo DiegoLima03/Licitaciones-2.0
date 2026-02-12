@@ -41,16 +41,19 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { ProductCombobox } from "@/components/producto-combobox";
+import { ProductAutocompleteInput } from "@/components/producto-autocomplete-input";
 import { EditableBudgetTable } from "@/components/licitaciones/editable-budget-table";
 import { DeliveriesService, EstadosService, TendersService, TiposService } from "@/services/api";
 import type {
+  EntregaLinea,
   Estado,
   EntregaWithLines,
   TenderDetail,
   TenderPartida,
   Tipo,
 } from "@/types/api";
+
+const ESTADOS_LINEA_ENTREGA = ["EN ESPERA", "ENTREGADO", "FACTURADO"] as const;
 
 type PresupuestoItem = {
   id: number;
@@ -111,6 +114,65 @@ const cabeceraFormSchema = z.object({
 });
 type CabeceraFormValues = z.infer<typeof cabeceraFormSchema>;
 
+function EstadoLineaCell({
+  lin,
+  updatingLineId,
+  onUpdate,
+  options,
+}: {
+  lin: EntregaLinea;
+  updatingLineId: number | null;
+  onUpdate: (idReal: number, payload: { estado?: string; cobrado?: boolean }) => void;
+  options: readonly string[];
+}) {
+  const idReal = lin.id_real;
+  const valor = lin.estado ?? "";
+  if (idReal == null) {
+    return <span className="text-slate-500">{valor || "—"}</span>;
+  }
+  const isUpdating = updatingLineId === idReal;
+  return (
+    <select
+      value={valor || options[0]}
+      onChange={(e) => onUpdate(idReal, { estado: e.target.value })}
+      disabled={isUpdating}
+      className="rounded border border-slate-200 bg-white px-2 py-1 text-sm text-slate-900 disabled:opacity-60"
+    >
+      {options.map((opt) => (
+        <option key={opt} value={opt}>
+          {opt}
+        </option>
+      ))}
+    </select>
+  );
+}
+
+function CobradoLineaCell({
+  lin,
+  updatingLineId,
+  onUpdate,
+}: {
+  lin: EntregaLinea;
+  updatingLineId: number | null;
+  onUpdate: (idReal: number, payload: { estado?: string; cobrado?: boolean }) => void;
+}) {
+  const idReal = lin.id_real;
+  const checked = lin.cobrado ?? false;
+  if (idReal == null) {
+    return <span className="text-slate-500">{checked ? "Sí" : "No"}</span>;
+  }
+  const isUpdating = updatingLineId === idReal;
+  return (
+    <div className="flex justify-center">
+      <Switch
+        checked={checked}
+        onCheckedChange={(c) => onUpdate(idReal, { cobrado: c })}
+        disabled={isUpdating}
+      />
+    </div>
+  );
+}
+
 export default function LicitacionDetallePage() {
   const params = useParams<{ id: string }>();
   const id = Number(params.id);
@@ -145,6 +207,7 @@ export default function LicitacionDetallePage() {
   const [albaranError, setAlbaranError] = React.useState<string | null>(null);
   const [openEditarCabecera, setOpenEditarCabecera] = React.useState(false);
   const [submittingCabecera, setSubmittingCabecera] = React.useState(false);
+  const [updatingLineId, setUpdatingLineId] = React.useState<number | null>(null);
 
   const cabeceraForm = useForm<CabeceraFormValues>({
     resolver: zodResolver(cabeceraFormSchema),
@@ -210,6 +273,17 @@ export default function LicitacionDetallePage() {
     if (!Number.isFinite(id)) return;
     DeliveriesService.getByLicitacion(id).then(setEntregas).catch(() => setEntregas([]));
   }, [id]);
+
+  const handleUpdateLineaEntrega = React.useCallback(
+    (idReal: number, payload: { estado?: string; cobrado?: boolean }) => {
+      setUpdatingLineId(idReal);
+      DeliveriesService.updateLine(idReal, payload)
+        .then(() => refetchEntregas())
+        .catch(() => {})
+        .finally(() => setUpdatingLineId(null));
+    },
+    [refetchEntregas]
+  );
 
   React.useEffect(() => {
     if (!Number.isFinite(id) || !lic) return;
@@ -698,8 +772,21 @@ export default function LicitacionDetallePage() {
                                 <td className="py-1.5 pr-3 text-slate-600">{lin.proveedor ?? "—"}</td>
                                 <td className="py-1.5 pr-3 text-right text-slate-900">{lin.cantidad}</td>
                                 <td className="py-1.5 pr-3 text-right text-slate-900">{lin.pcu}</td>
-                                <td className="py-1.5 pr-3 text-center text-slate-500">{lin.estado ?? "—"}</td>
-                                <td className="py-1.5 pr-3 text-center text-slate-500">{lin.cobrado ? "Sí" : "No"}</td>
+                                <td className="py-1.5 pr-3 text-center">
+                                  <EstadoLineaCell
+                                    lin={lin}
+                                    updatingLineId={updatingLineId}
+                                    onUpdate={handleUpdateLineaEntrega}
+                                    options={ESTADOS_LINEA_ENTREGA}
+                                  />
+                                </td>
+                                <td className="py-1.5 pr-3 text-center">
+                                  <CobradoLineaCell
+                                    lin={lin}
+                                    updatingLineId={updatingLineId}
+                                    onUpdate={handleUpdateLineaEntrega}
+                                  />
+                                </td>
                               </tr>
                             ))
                           )}
@@ -834,7 +921,7 @@ export default function LicitacionDetallePage() {
                               <label className="mb-1 block text-xs font-medium text-slate-600">
                                 Producto (catálogo global)
                               </label>
-                              <ProductCombobox
+                              <ProductAutocompleteInput
                                 value={
                                   lin.id_producto != null && lin.productNombre
                                     ? { id: lin.id_producto, nombre: lin.productNombre }

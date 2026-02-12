@@ -33,7 +33,7 @@ export function RiskPipelineChart(props: RiskPipelineChartProps) {
   if (isLoading) {
     return (
       <div className={"flex min-h-[280px] animate-pulse items-center justify-center rounded-lg border border-slate-200 bg-slate-100 " + (className ?? "")}>
-        <span className="text-sm text-slate-500">Cargando pipeline…</span>
+        <span className="text-sm text-slate-500">Cargando comparativa…</span>
       </div>
     );
   }
@@ -41,14 +41,14 @@ export function RiskPipelineChart(props: RiskPipelineChartProps) {
   if (data.length === 0) {
     return (
       <div className={"flex min-h-[280px] items-center justify-center rounded-lg border border-slate-200 bg-slate-50 text-sm text-slate-500 " + (className ?? "")}>
-        No hay licitaciones en estudio
+        No hay partidas en el presupuesto
       </div>
     );
   }
 
   return (
     <div className={className}>
-      <p className="mb-2 text-xs font-medium text-slate-500">Pipeline por categoría (bruto vs ajustado por riesgo)</p>
+      <p className="mb-2 text-xs font-medium text-slate-500">Suma por detalle (precio venta) vs suma a precio medio por artículo</p>
       <div className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 12, right: 12, left: 0, bottom: 0 }}>
@@ -57,8 +57,8 @@ export function RiskPipelineChart(props: RiskPipelineChartProps) {
             <YAxis tick={{ fontSize: 11 }} tickFormatter={(v) => "€" + (v / 1000).toFixed(0) + "k"} />
             <Tooltip />
             <Legend />
-            <Bar dataKey="pipeline_bruto" name="Pipeline bruto" fill="#64748b" radius={[2, 2, 0, 0]} />
-            <Bar dataKey="pipeline_ajustado" name="Pipeline ajustado" fill="#059669" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="pipeline_bruto" name="Venta presupuestada" fill="#64748b" radius={[2, 2, 0, 0]} />
+            <Bar dataKey="pipeline_ajustado" name="Venta a precio medio" fill="#059669" radius={[2, 2, 0, 0]} />
           </BarChart>
         </ResponsiveContainer>
       </div>

@@ -25,8 +25,8 @@ def list_precios_referencia() -> List[PrecioReferencia]:
     try:
         response = (
             supabase_client.table("tbl_precios_referencia")
-            .select("id, id_producto, pvu, pcu, unidades, proveedor, notas, fecha_creacion, creado_por, tbl_productos(nombre)")
-            .order("fecha_creacion", desc=True)
+            .select("id, id_producto, pvu, pcu, unidades, proveedor, notas, fecha_presupuesto, tbl_productos(nombre)")
+            .order("fecha_presupuesto", desc=True)
             .execute()
         )
         rows = response.data or []
@@ -40,8 +40,7 @@ def list_precios_referencia() -> List[PrecioReferencia]:
                 unidades=float(r["unidades"]) if r.get("unidades") is not None else None,
                 proveedor=r.get("proveedor"),
                 notas=r.get("notas"),
-                fecha_creacion=r.get("fecha_creacion"),
-                creado_por=str(r["creado_por"]) if r.get("creado_por") else None,
+                fecha_presupuesto=r.get("fecha_presupuesto"),
             )
             for r in rows
         ]
@@ -61,18 +60,31 @@ def create_precio_referencia(payload: PrecioReferenciaCreate) -> PrecioReferenci
     POST /precios-referencia
     """
     try:
+        prod_resp = (
+            supabase_client.table("tbl_productos")
+            .select("nombre")
+            .eq("id", payload.id_producto)
+            .limit(1)
+            .execute()
+        )
+        product_nombre = ""
+        if prod_resp.data and len(prod_resp.data) > 0:
+            product_nombre = (prod_resp.data[0].get("nombre") or "").strip()
         row = {
             "id_producto": payload.id_producto,
+            "producto": product_nombre or None,
             "pvu": payload.pvu,
             "pcu": payload.pcu,
             "unidades": payload.unidades,
             "proveedor": (payload.proveedor or "").strip() or None,
             "notas": (payload.notas or "").strip() or None,
+            "fecha_presupuesto": (payload.fecha_presupuesto or "").strip() or None,
         }
+        if row["producto"] is None:
+            row["producto"] = ""
         response = (
             supabase_client.table("tbl_precios_referencia")
             .insert(row)
-            .select("id, id_producto, pvu, pcu, unidades, proveedor, notas, fecha_creacion, creado_por, tbl_productos(nombre)")
             .execute()
         )
         data = response.data
@@ -82,18 +94,30 @@ def create_precio_referencia(payload: PrecioReferenciaCreate) -> PrecioReferenci
                 detail="No se devolvió la fila creada.",
             )
         r = data[0]
-        prod = r.get("tbl_productos") or {}
+        id_producto = int(r["id_producto"])
+        product_nombre = None
+        try:
+            prod_resp = (
+                supabase_client.table("tbl_productos")
+                .select("nombre")
+                .eq("id", id_producto)
+                .limit(1)
+                .execute()
+            )
+            if prod_resp.data and len(prod_resp.data) > 0:
+                product_nombre = prod_resp.data[0].get("nombre")
+        except Exception:
+            pass
         return PrecioReferencia(
             id=str(r["id"]),
-            id_producto=int(r["id_producto"]),
-            product_nombre=prod.get("nombre"),
+            id_producto=id_producto,
+            product_nombre=product_nombre,
             pvu=float(r["pvu"]) if r.get("pvu") is not None else None,
             pcu=float(r["pcu"]) if r.get("pcu") is not None else None,
             unidades=float(r["unidades"]) if r.get("unidades") is not None else None,
             proveedor=r.get("proveedor"),
             notas=r.get("notas"),
-            fecha_creacion=r.get("fecha_creacion"),
-            creado_por=str(r["creado_por"]) if r.get("creado_por") else None,
+            fecha_presupuesto=r.get("fecha_presupuesto"),
         )
     except HTTPException:
         raise

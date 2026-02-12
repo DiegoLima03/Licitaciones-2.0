@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { Loader2 } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
 import { ProductosService } from "@/services/api";
 import type { ProductoSearchResult } from "@/types/api";
 import { cn } from "@/lib/utils";
@@ -12,10 +13,14 @@ const DEBOUNCE_MS = 280;
 export interface ProductAutocompleteInputProps {
   value: { id: number; nombre: string } | null;
   onSelect: (id: number, nombre: string) => void;
+  /** Llámalo para limpiar la selección (p. ej. botón X o borrar todo el texto). */
+  onClear?: () => void;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
   inputClassName?: string;
+  /** Si true, solo muestra productos que tengan precios de referencia (con datos para tendencia). */
+  onlyWithPreciosReferencia?: boolean;
 }
 
 /**
@@ -25,10 +30,12 @@ export interface ProductAutocompleteInputProps {
 export function ProductAutocompleteInput({
   value,
   onSelect,
+  onClear,
   placeholder = "Buscar o seleccionar producto…",
   disabled = false,
   className,
   inputClassName,
+  onlyWithPreciosReferencia = false,
 }: ProductAutocompleteInputProps) {
   const [query, setQuery] = React.useState("");
   const [options, setOptions] = React.useState<ProductoSearchResult[]>([]);
@@ -53,7 +60,7 @@ export function ProductAutocompleteInput({
     setOpen(true);
     setHighlight(0);
     debounceRef.current = setTimeout(() => {
-      ProductosService.search(query.trim())
+      ProductosService.search(query.trim(), { onlyWithPreciosReferencia })
         .then((data) => {
           setOptions(data);
           setHighlight(0);
@@ -67,7 +74,7 @@ export function ProductAutocompleteInput({
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query]);
+  }, [query, onlyWithPreciosReferencia]);
 
   React.useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -88,6 +95,13 @@ export function ProductAutocompleteInput({
     },
     [onSelect]
   );
+
+  const clearSelection = React.useCallback(() => {
+    onClear?.();
+    setQuery("");
+    setOpen(false);
+    setOptions([]);
+  }, [onClear]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (open && options.length > 0) {
@@ -125,26 +139,47 @@ export function ProductAutocompleteInput({
 
   return (
     <div ref={wrapperRef} className={cn("relative w-full", className)}>
-      <Input
-        type="text"
-        autoComplete="off"
-        role="combobox"
-        aria-expanded={open}
-        aria-autocomplete="list"
-        disabled={disabled}
-        className={cn("bg-white dark:bg-slate-800", inputClassName)}
-        value={displayValue}
-        placeholder={placeholder}
-        onChange={(e) => {
-          setQuery(e.target.value);
-          if (!e.target.value) setOptions([]);
-        }}
-        onFocus={() => {
-          if (query.trim()) setOpen(true);
-          if (value) setQuery("");
-        }}
-        onKeyDown={handleKeyDown}
-      />
+      <div className="relative">
+        <Input
+          type="text"
+          autoComplete="off"
+          role="combobox"
+          aria-expanded={open}
+          aria-autocomplete="list"
+          disabled={disabled}
+          className={cn("bg-white dark:bg-slate-800 pr-9", inputClassName)}
+          value={displayValue}
+          placeholder={placeholder}
+          onChange={(e) => {
+            const v = e.target.value;
+            setQuery(v);
+            if (!v.trim()) {
+              setOptions([]);
+              if (value && onClear) onClear();
+            }
+          }}
+          onFocus={() => {
+            if (query.trim()) setOpen(true);
+            if (value) setQuery(value.nombre);
+          }}
+          onKeyDown={handleKeyDown}
+        />
+        {value && onClear && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="absolute right-0 top-0 h-full px-2 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700 dark:hover:text-slate-200"
+            onClick={(e) => {
+              e.preventDefault();
+              clearSelection();
+            }}
+            aria-label="Borrar selección"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        )}
+      </div>
       {open && (query.trim() || loading) && (
         <div
           ref={listRef}

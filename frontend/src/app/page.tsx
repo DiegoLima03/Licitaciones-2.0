@@ -76,23 +76,31 @@ function KpiWithHelp({
   );
 }
 
-function TimelineChart({ items }: { items: TimelineItem[] }) {
-  if (items.length === 0) {
-    return (
-      <p className="py-8 text-center text-sm text-slate-500">
-        No hay licitaciones con fecha de adjudicación y finalización para mostrar el timeline.
-      </p>
-    );
-  }
+function parseTimelineDate(s: string | null | undefined): number | null {
+  if (!s || typeof s !== "string" || !s.trim()) return null;
+  const t = new Date(s.trim() + "T00:00:00").getTime();
+  return Number.isNaN(t) ? null : t;
+}
 
-  const displayItems = items.slice(0, 24);
-  const dates = displayItems.flatMap((i) => {
-    const a = i.fecha_adjudicacion ? new Date(i.fecha_adjudicacion + "T00:00:00").getTime() : null;
-    const f = i.fecha_finalizacion ? new Date(i.fecha_finalizacion + "T00:00:00").getTime() : null;
-    return [a, f].filter((x): x is number => typeof x === "number" && !Number.isNaN(x));
+function TimelineChart({ items }: { items: TimelineItem[] }) {
+  const displayItems = React.useMemo(() => items.slice(0, 24), [items]);
+  const itemsWithDates = React.useMemo(
+    () =>
+      displayItems.filter((i) => {
+        const t0 = parseTimelineDate(i.fecha_adjudicacion);
+        const t1 = parseTimelineDate(i.fecha_finalizacion);
+        return t0 != null && t1 != null && t1 >= t0;
+      }),
+    [displayItems]
+  );
+
+  const dates = itemsWithDates.flatMap((i) => {
+    const a = parseTimelineDate(i.fecha_adjudicacion);
+    const f = parseTimelineDate(i.fecha_finalizacion);
+    return [a, f].filter((x): x is number => typeof x === "number");
   });
-  const minT = Math.min(...dates);
-  const maxT = Math.max(...dates);
+  const minT = dates.length ? Math.min(...dates) : Date.now();
+  const maxT = dates.length ? Math.max(...dates) : Date.now();
   const range = maxT - minT || 1;
 
   const minDate = new Date(minT);
@@ -113,6 +121,14 @@ function TimelineChart({ items }: { items: TimelineItem[] }) {
   }
   const yearLabel = minYear === maxYear ? `${minYear}` : `${minYear} - ${maxYear}`;
 
+  if (displayItems.length === 0) {
+    return (
+      <p className="py-8 text-center text-sm text-slate-500">
+        No hay licitaciones para mostrar en el timeline.
+      </p>
+    );
+  }
+
   return (
     <div className="w-full overflow-x-auto">
       <h3 className="mb-4 text-center text-xl font-semibold tracking-tight text-slate-800">
@@ -120,34 +136,30 @@ function TimelineChart({ items }: { items: TimelineItem[] }) {
       </h3>
 
       <div className="min-w-[640px]">
-        {/* Eje izquierdo: nombres + área de barras con fechas */}
+        {/* Eje izquierdo: nombres + área de barras con fechas (todas las licitaciones) */}
         <div className="border-b border-slate-200">
-          {displayItems.map((item) => {
-            const t0 = item.fecha_adjudicacion
-              ? new Date(item.fecha_adjudicacion + "T00:00:00").getTime()
-              : minT;
-            const t1 = item.fecha_finalizacion
-              ? new Date(item.fecha_finalizacion + "T00:00:00").getTime()
-              : maxT;
-            const left = ((t0 - minT) / range) * 100;
-            const width = ((t1 - t0) / range) * 100;
+          {displayItems.map((item, idx) => {
+            const t0 = parseTimelineDate(item.fecha_adjudicacion);
+            const t1 = parseTimelineDate(item.fecha_finalizacion);
+            const hasValidDates = t0 != null && t1 != null && t1 >= t0;
+            const label = (item.nombre && String(item.nombre).trim()) || `Licitación ${item.id_licitacion}`;
+
             return (
               <div
-                key={item.id_licitacion}
+                key={`timeline-${item.id_licitacion}-${idx}`}
                 className="flex items-center gap-2 border-t border-slate-100 py-1.5 first:border-t-0"
               >
                 <div
                   className="w-40 shrink-0 truncate text-xs font-medium text-slate-800"
-                  title={item.nombre}
+                  title={label}
                 >
-                  {item.nombre}
+                  {label}
                 </div>
                 <div className="flex min-w-0 flex-1 items-center gap-2">
                   <span className="w-14 shrink-0 text-right text-[11px] text-slate-600">
-                    {formatDateShort(item.fecha_adjudicacion ?? undefined)}
+                    {hasValidDates ? formatDateShort(item.fecha_adjudicacion ?? undefined) : "—"}
                   </span>
                   <div className="relative h-6 flex-1 overflow-hidden rounded-sm bg-slate-100">
-                    {/* Cuadrícula por trimestres */}
                     {quarters.map((q) => (
                       <div
                         key={`${item.id_licitacion}-${q.label}-${q.xPercent}`}
@@ -155,18 +167,26 @@ function TimelineChart({ items }: { items: TimelineItem[] }) {
                         style={{ left: `${q.xPercent}%` }}
                       />
                     ))}
-                    <div
-                      className="absolute inset-y-0 rounded-sm bg-teal-600 shadow-sm"
-                      style={{
-                        left: `${left}%`,
-                        width: `${Math.max(width, 1)}%`,
-                        boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
-                      }}
-                      title={`${formatDate(item.fecha_adjudicacion ?? undefined)} → ${formatDate(item.fecha_finalizacion ?? undefined)}`}
-                    />
+                    {hasValidDates ? (
+                      <div
+                        className="absolute inset-y-0 rounded-sm bg-teal-600 shadow-sm"
+                        style={{
+                          left: `${((t0! - minT) / range) * 100}%`,
+                          width: `${Math.max(((t1! - t0!) / range) * 100, 1)}%`,
+                          boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
+                        }}
+                        title={`${formatDate(item.fecha_adjudicacion ?? undefined)} → ${formatDate(item.fecha_finalizacion ?? undefined)}`}
+                      />
+                    ) : (
+                      <div className="absolute inset-0 flex items-center justify-center rounded-sm bg-slate-200/60">
+                        <span className="text-[10px] text-slate-500">
+                          Indica fecha de adjudicación y finalización
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <span className="w-14 shrink-0 text-left text-[11px] text-slate-600">
-                    {formatDateShort(item.fecha_finalizacion ?? undefined)}
+                    {hasValidDates ? formatDateShort(item.fecha_finalizacion ?? undefined) : "—"}
                   </span>
                 </div>
               </div>

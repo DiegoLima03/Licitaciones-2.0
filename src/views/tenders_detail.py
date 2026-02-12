@@ -6,6 +6,25 @@ from src.logic.excel_import import analizar_excel_licitacion, guardar_datos_impo
 # AÑADIDO: Importamos la lógica de entregas
 from src.logic.deliveries import guardar_entrega_completa, eliminar_entrega_completa
 
+def _safe_float(value, default=0.0):
+    """Convierte a float controlando vacíos/NaN para evitar sobrescrituras indeseadas."""
+    if value is None:
+        return default
+    try:
+        if pd.isna(value):
+            return default
+    except Exception:
+        pass
+    if isinstance(value, str):
+        value = value.strip()
+        if not value:
+            return default
+        value = value.replace(",", ".")
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
 def render_detalle(client, maestros):
     # Recuperamos datos de sesión
     lic_data = st.session_state.get('licitacion_activa')
@@ -349,10 +368,19 @@ def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
     st.markdown("##### 📋 Detalle del Presupuesto (Edición en Lote)")
     
     if items_db:
-        df = pd.DataFrame(items_db)
+        df = pd.DataFrame(items_db).copy()
+        original_by_id = {i.get("id_detalle"): i for i in items_db if i.get("id_detalle") is not None}
         
         column_order = ["lote", "producto", "unidades", "pmaxu", "pvu", "pcu", "beneficio_u"]
-        
+
+        # Normalizamos columnas numéricas para que el editor no devuelva valores inconsistentes.
+        for col in ["unidades", "pmaxu", "pvu", "pcu"]:
+            if col not in df.columns:
+                df[col] = 0.0
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+        if "activo" not in df.columns:
+            df["activo"] = True
+
         df["pvu"] = df["pvu"].fillna(0).astype(float)
         df["pcu"] = df["pcu"].fillna(0).astype(float)
         df["beneficio_u"] = df["pvu"] - df["pcu"]
@@ -389,22 +417,43 @@ def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
                 
                 for r in records:
                     if not r.get("producto"): continue
-                    
-                    val_pmax = float(r.get('pmaxu', 0) or 0)
-                    val_pvu = float(r.get('pvu', 0) or 0)
-                    if tipo_id == 2: val_pvu = val_pmax * (1 - (dto_global / 100))
+
+                    id_detalle = r.get("id_detalle")
+                    original_row = original_by_id.get(id_detalle, {})
+
+                    val_pmax = _safe_float(
+                        r.get("pmaxu"),
+                        _safe_float(original_row.get("pmaxu"), 0.0)
+                    )
+                    if tipo_id == 2:
+                        val_pvu = val_pmax * (1 - (dto_global / 100))
+                    else:
+                        val_pvu = _safe_float(
+                            r.get("pvu"),
+                            _safe_float(original_row.get("pvu"), 0.0)
+                        )
+                    val_pcu = _safe_float(
+                        r.get("pcu"),
+                        _safe_float(original_row.get("pcu"), 0.0)
+                    )
+                    val_unidades = _safe_float(
+                        r.get("unidades"),
+                        _safe_float(original_row.get("unidades"), 1.0)
+                    )
 
                     obj = {
                         "id_licitacion": lic_id,
-                        "lote": r.get('lote', 'General'),
+                        "lote": r.get('lote') or original_row.get("lote") or 'General',
                         "producto": r['producto'],
-                        "unidades": float(r.get('unidades', 1) or 1),
-                        "pmaxu": val_pmax, "pvu": val_pvu, "pcu": float(r.get('pcu', 0) or 0),
-                        "activo": r.get('activo', True) 
+                        "unidades": val_unidades,
+                        "pmaxu": val_pmax,
+                        "pvu": val_pvu,
+                        "pcu": val_pcu,
+                        "activo": r.get('activo', original_row.get('activo', True))
                     }
-                    if pd.notna(r.get('id_detalle')):
-                        obj['id_detalle'] = r['id_detalle']
-                        ids_actuales.append(r['id_detalle'])
+                    if pd.notna(id_detalle):
+                        obj['id_detalle'] = id_detalle
+                        ids_actuales.append(id_detalle)
                     to_upsert.append(obj)
                 
                 ids_originales = [i['id_detalle'] for i in items_db]

@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
-from backend.models import DeliveryCreate
+from backend.models import DeliveryCreate, DeliveryLineUpdate
 
 
 router = APIRouter(prefix="/deliveries", tags=["deliveries"])
@@ -171,6 +171,34 @@ def create_delivery(payload: DeliveryCreate) -> dict:
         "message": f"Documento guardado con {len(lineas_a_insertar)} líneas.",
         "lines_count": len(lineas_a_insertar),
     }
+
+
+@router.patch("/lines/{id_real}", response_model=dict)
+def update_delivery_line(id_real: int, payload: DeliveryLineUpdate) -> dict:
+    """
+    Actualiza estado y/o cobrado de una línea de entrega (tbl_licitaciones_real).
+    PATCH /deliveries/lines/{id_real}
+    """
+    updates: Dict[str, Any] = {}
+    if payload.estado is not None:
+        updates["estado"] = payload.estado
+    if payload.cobrado is not None:
+        updates["cobrado"] = payload.cobrado
+    if not updates:
+        return {"id_real": id_real, "message": "Nada que actualizar."}
+    try:
+        (
+            supabase_client.table("tbl_licitaciones_real")
+            .update(updates)
+            .eq("id_real", id_real)
+            .execute()
+        )
+        return {"id_real": id_real, "message": "Línea actualizada."}
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error actualizando línea: {e!s}",
+        ) from e
 
 
 @router.delete("/{delivery_id}", status_code=status.HTTP_204_NO_CONTENT)

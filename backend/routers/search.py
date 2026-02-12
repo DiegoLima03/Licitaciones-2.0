@@ -1,5 +1,7 @@
 """
 Buscador histórico.
+Misma lógica que analítica (tendencia/desviación): productos con datos en
+tbl_precios_referencia O en tbl_licitaciones_detalle; luego filtrar por nombre.
 - tbl_licitaciones_detalle: producto, PVU, unidades, licitación; PCU/proveedor desde tbl_licitaciones_real.
 - tbl_precios_referencia: líneas sin licitación (producto, pvu, pcu, unidades, proveedor).
 """
@@ -15,11 +17,35 @@ from backend.models import ProductSearchItem
 router = APIRouter(prefix="/search", tags=["search"])
 
 
-def _search_producto_ids(q: str) -> List[int]:
-    """Devuelve ids de tbl_productos cuyo nombre coincide con la búsqueda."""
+def _producto_ids_con_historico_y_nombre(q: str) -> List[int]:
+    """
+    Productos que tienen histórico (referencia o presupuestados en licitaciones)
+    y cuyo nombre coincide con q. Misma lógica que selector de analítica.
+    """
+    id_productos = set()
+    ref_resp = (
+        supabase_client.table("tbl_precios_referencia")
+        .select("id_producto")
+        .execute()
+    )
+    for r in (ref_resp.data or []):
+        if r.get("id_producto") is not None:
+            id_productos.add(int(r["id_producto"]))
+    det_resp = (
+        supabase_client.table("tbl_licitaciones_detalle")
+        .select("id_producto")
+        .eq("activo", True)
+        .execute()
+    )
+    for r in (det_resp.data or []):
+        if r.get("id_producto") is not None:
+            id_productos.add(int(r["id_producto"]))
+    if not id_productos:
+        return []
     response = (
         supabase_client.table("tbl_productos")
         .select("id")
+        .in_("id", list(id_productos))
         .ilike("nombre", f"%{q}%")
         .limit(500)
         .execute()
@@ -27,15 +53,15 @@ def _search_producto_ids(q: str) -> List[int]:
     return [int(r["id"]) for r in (response.data or []) if r.get("id") is not None]
 
 
-def _search_detalle(q: str) -> List[dict]:
-    """Busca en tbl_licitaciones_detalle por id_producto (nombre en tbl_productos)."""
-    id_productos = _search_producto_ids(q)
+def _search_detalle(id_productos: List[int]) -> List[dict]:
+    """Busca en tbl_licitaciones_detalle por id_producto (solo partidas activas)."""
     if not id_productos:
         return []
     response = (
         supabase_client.table("tbl_licitaciones_detalle")
         .select("*, tbl_licitaciones(nombre, numero_expediente), tbl_productos(nombre)")
         .in_("id_producto", id_productos)
+        .eq("activo", True)
         .execute()
     )
     return response.data or []
@@ -68,21 +94,21 @@ def _get_pcu_and_proveedor_from_real(id_detalles: List[int]) -> Tuple[Dict[int, 
     return pcu_by_id, proveedor_by_id
 
 
-def _search_precios_referencia(q: str) -> List[ProductSearchItem]:
-    """Busca en tbl_precios_referencia por id_producto (nombre en tbl_productos)."""
+def _search_precios_referencia(id_productos: List[int]) -> List[ProductSearchItem]:
+    """Busca en tbl_precios_referencia por id_producto."""
     try:
-        id_productos = _search_producto_ids(q)
         if not id_productos:
             return []
         response = (
             supabase_client.table("tbl_precios_referencia")
-            .select("pvu, pcu, unidades, proveedor, tbl_productos(nombre)")
+            .select("id_producto, pvu, pcu, unidades, proveedor, tbl_productos(nombre)")
             .in_("id_producto", id_productos)
             .execute()
         )
         rows = response.data or []
         return [
             ProductSearchItem(
+                id_producto=r.get("id_producto"),
                 producto=(r.get("tbl_productos") or {}).get("nombre") or "",
                 pvu=float(r["pvu"]) if r.get("pvu") is not None else None,
                 pcu=float(r["pcu"]) if r.get("pcu") is not None else None,
@@ -106,7 +132,8 @@ def search(
     GET /search?q=Planta
     """
     try:
-        data = _search_detalle(q)
+        id_productos = _producto_ids_con_historico_y_nombre(q)
+        data = _search_detalle(id_productos)
         id_detalles = list({item["id_detalle"] for item in data if item.get("id_detalle") is not None})
         pcu_by_id, proveedor_by_id = _get_pcu_and_proveedor_from_real(id_detalles)
 
@@ -119,6 +146,7 @@ def search(
             proveedor = proveedor_by_id.get(id_d) if id_d is not None else None
             results.append(
                 ProductSearchItem(
+                    id_producto=item.get("id_producto"),
                     producto=prod.get("nombre") or "",
                     pvu=item.get("pvu"),
                     pcu=pcu,
@@ -128,8 +156,7 @@ def search(
                     proveedor=proveedor,
                 )
             )
-        # Añadir líneas de precios de referencia (sin licitación)
-        results.extend(_search_precios_referencia(q))
+        results.extend(_search_precios_referencia(id_productos))
         return results
     except HTTPException:
         raise

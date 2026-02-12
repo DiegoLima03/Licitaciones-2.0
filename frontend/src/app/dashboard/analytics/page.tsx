@@ -64,7 +64,7 @@ export default function DashboardAnalyticsPage() {
         <Card className="overflow-hidden border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-slate-800 dark:text-slate-200">
-              Tendencia de precios (material)
+              Tendencia de precios (productos)
             </CardTitle>
           </CardHeader>
           <CardContent className="pt-0">
@@ -72,11 +72,13 @@ export default function DashboardAnalyticsPage() {
               <ProductAutocompleteInput
                 value={selectedProductTrend}
                 onSelect={(id, nombre) => setSelectedProductTrend({ id, nombre })}
+                onClear={() => setSelectedProductTrend(null)}
+                onlyWithPreciosReferencia
                 placeholder="Escribe para buscar producto…"
               />
             </div>
             <MaterialTrendChart
-              data={materialTrends.data ?? []}
+              data={materialTrends.data ?? { pvu: [], pcu: [] }}
               materialName={materialName}
               isLoading={materialTrends.isLoading}
               error={materialTrends.error}
@@ -87,7 +89,7 @@ export default function DashboardAnalyticsPage() {
         <Card className="overflow-hidden border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-slate-800 dark:text-slate-200">
-              Pipeline ajustado por riesgo
+              Venta presupuestada vs venta a precio medio
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -104,7 +106,7 @@ export default function DashboardAnalyticsPage() {
         <Card className="overflow-hidden border-slate-200 bg-white shadow-sm dark:border-slate-700 dark:bg-slate-900">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-slate-800 dark:text-slate-200">
-              Sweet spots (Adjudicadas vs Perdidas)
+              Sweet spots (Ganadas vs No adjudicadas)
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -128,6 +130,8 @@ export default function DashboardAnalyticsPage() {
                 <ProductAutocompleteInput
                   value={selectedProductDeviation}
                   onSelect={(id, nombre) => setSelectedProductDeviation({ id, nombre })}
+                  onClear={() => setSelectedProductDeviation(null)}
+                  onlyWithPreciosReferencia
                   placeholder="Escribe para buscar producto…"
                 />
               </div>

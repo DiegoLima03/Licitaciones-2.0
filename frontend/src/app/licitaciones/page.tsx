@@ -13,7 +13,13 @@ import {
 } from "@/components/ui/card";
 import { CreateTenderDialog } from "@/components/licitaciones/create-tender-dialog";
 import { EstadosService, TendersService } from "@/services/api";
-import type { Estado, Tender } from "@/types/api";
+import type { Estado, PaisLicitacion, Tender } from "@/types/api";
+
+const PAISES_FILTRO: { value: "" | PaisLicitacion; label: string }[] = [
+  { value: "", label: "Todos los países" },
+  { value: "España", label: "España" },
+  { value: "Portugal", label: "Portugal" },
+];
 
 const ESTADO_COLOR_CLASSES = [
   "bg-sky-100 text-sky-800 border-sky-200",      // info
@@ -45,6 +51,7 @@ export default function LicitacionesPage() {
   const [error, setError] = React.useState<string | null>(null);
   const [searchNombre, setSearchNombre] = React.useState("");
   const [filterEstadoId, setFilterEstadoId] = React.useState<number | "">("");
+  const [filterPais, setFilterPais] = React.useState<"" | PaisLicitacion>("");
   const [updatingId, setUpdatingId] = React.useState<number | null>(null);
 
   React.useEffect(() => {
@@ -61,6 +68,7 @@ export default function LicitacionesPage() {
           filterEstadoId !== "" && Number.isFinite(Number(filterEstadoId))
             ? Number(filterEstadoId)
             : undefined,
+        pais: filterPais || undefined,
       });
       setData(list);
     } catch (e) {
@@ -69,7 +77,7 @@ export default function LicitacionesPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchNombre, filterEstadoId]);
+  }, [searchNombre, filterEstadoId, filterPais]);
 
   React.useEffect(() => {
     fetchLicitaciones();
@@ -95,6 +103,18 @@ export default function LicitacionesPage() {
             Listado de licitaciones
           </CardTitle>
           <div className="flex flex-wrap items-center gap-3">
+            <select
+              value={filterPais}
+              onChange={(e) => setFilterPais(e.target.value as "" | PaisLicitacion)}
+              className="h-9 min-w-[140px] rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              title="Filtrar por país"
+            >
+              {PAISES_FILTRO.map((opt) => (
+                <option key={opt.value || "todos"} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
             <select
               value={filterEstadoId}
               onChange={(e) => {
@@ -137,6 +157,7 @@ export default function LicitacionesPage() {
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                   <th className="py-2 pr-4">Expediente</th>
                   <th className="py-2 pr-4">Nombre proyecto</th>
+                  <th className="py-2 pr-4">País</th>
                   <th className="py-2 pr-4">Estado</th>
                   <th className="py-2 pr-4 text-right">Presupuesto (€)</th>
                 </tr>
@@ -144,7 +165,7 @@ export default function LicitacionesPage() {
               <tbody>
                 {data.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="py-6 text-center text-sm text-slate-500">
+                    <td colSpan={5} className="py-6 text-center text-sm text-slate-500">
                       No hay licitaciones. Crea una o ajusta el filtro.
                     </td>
                   </tr>
@@ -169,6 +190,9 @@ export default function LicitacionesPage() {
                         >
                           {lic.nombre}
                         </Link>
+                      </td>
+                      <td className="py-2 pr-4 text-sm text-slate-600">
+                        {lic.pais ?? "—"}
                       </td>
                       <td className="py-2 pr-4">
                         <select

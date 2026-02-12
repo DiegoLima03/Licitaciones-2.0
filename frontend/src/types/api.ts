@@ -31,9 +31,12 @@ export interface Tipo {
 
 // ----- Licitaciones (tbl_licitaciones) -----
 
+export type PaisLicitacion = "España" | "Portugal";
+
 export interface Tender {
   id_licitacion: number;
   nombre: string;
+  pais?: PaisLicitacion | null;
   numero_expediente?: string | null;
   pres_maximo?: number | null;
   descripcion?: string | null;
@@ -48,6 +51,7 @@ export interface Tender {
 
 export interface TenderCreate {
   nombre: string;
+  pais: PaisLicitacion;
   numero_expediente?: string | null;
   pres_maximo?: number | null;
   descripcion?: string | null;
@@ -60,6 +64,7 @@ export interface TenderCreate {
 
 export interface TenderUpdate {
   nombre?: string | null;
+  pais?: PaisLicitacion | null;
   numero_expediente?: string | null;
   pres_maximo?: number | null;
   descripcion?: string | null;
@@ -109,6 +114,17 @@ export interface PartidaCreate {
   activo?: boolean | null;
 }
 
+/** Payload para actualizar una partida (PUT /tenders/{id}/partidas/{detalle_id}). */
+export interface PartidaUpdate {
+  lote?: string | null;
+  id_producto?: number | null;
+  unidades?: number | null;
+  pvu?: number | null;
+  pcu?: number | null;
+  pmaxu?: number | null;
+  activo?: boolean | null;
+}
+
 // ----- Entregas (tbl_entregas + tbl_licitaciones_real) -----
 
 export interface DeliveryHeaderCreate {
@@ -137,6 +153,12 @@ export interface DeliveryCreateResponse {
   id_entrega: number;
   message: string;
   lines_count: number;
+}
+
+/** Payload para actualizar estado/cobrado de una línea de entrega. */
+export interface DeliveryLineUpdate {
+  estado?: string | null;
+  cobrado?: boolean | null;
 }
 
 /** Línea de una entrega (tbl_licitaciones_real). */
@@ -183,8 +205,7 @@ export interface PrecioReferencia {
   unidades?: number | null;
   proveedor?: string | null;
   notas?: string | null;
-  fecha_creacion?: string | null;
-  creado_por?: string | null;
+  fecha_presupuesto?: string | null;
 }
 
 export interface PrecioReferenciaCreate {
@@ -194,11 +215,13 @@ export interface PrecioReferenciaCreate {
   unidades?: number | null;
   proveedor?: string | null;
   notas?: string | null;
+  fecha_presupuesto?: string | null;
 }
 
 // ----- Buscador -----
 
 export interface SearchResult {
+  id_producto?: number | null;
   producto: string;
   pvu?: number | null;
   pcu?: number | null;
@@ -208,11 +231,40 @@ export interface SearchResult {
   proveedor?: string | null;
 }
 
+// ----- Product Analytics (GET /analytics/product/{id}) -----
+
+export interface PriceHistoryPoint {
+  time: string;
+  value: number;
+}
+
+export interface VolumeMetrics {
+  total_licitado: number;
+  cantidad_oferentes_promedio: number;
+}
+
+export interface CompetitorItem {
+  empresa: string;
+  precio_medio: number;
+  cantidad_adjudicaciones: number;
+}
+
+export interface ProductAnalytics {
+  product_id: number;
+  product_name: string;
+  price_history: PriceHistoryPoint[];
+  volume_metrics: VolumeMetrics;
+  competitor_analysis: CompetitorItem[];
+  forecast: number | null;
+  precio_referencia_medio: number | null;
+}
+
 // ----- Filtros (query params) -----
 
 export interface TenderListFilters {
   estado_id?: number;
   nombre?: string;
+  pais?: PaisLicitacion;
 }
 
 // ----- Dashboard / Analytics -----
@@ -247,6 +299,11 @@ export interface DashboardKPIs {
 export interface MaterialTrendPoint {
   time: string;
   value: number;
+}
+
+export interface MaterialTrendResponse {
+  pvu: MaterialTrendPoint[];
+  pcu: MaterialTrendPoint[];
 }
 
 export interface RiskPipelineItem {

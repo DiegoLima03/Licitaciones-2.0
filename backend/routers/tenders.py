@@ -8,7 +8,7 @@ from typing import Any, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
-from backend.models import PartidaCreate, TenderCreate, TenderUpdate
+from backend.models import PartidaCreate, PartidaUpdate, TenderCreate, TenderUpdate
 
 
 router = APIRouter(prefix="/tenders", tags=["tenders"])
@@ -18,6 +18,7 @@ router = APIRouter(prefix="/tenders", tags=["tenders"])
 def list_tenders(
     estado_id: Optional[int] = Query(None, description="Filtrar por id_estado."),
     nombre: Optional[str] = Query(None, description="Buscar por nombre (ilike)."),
+    pais: Optional[str] = Query(None, description="Filtrar por país: España o Portugal."),
 ) -> List[dict]:
     """
     Lista licitaciones con filtros opcionales.
@@ -25,6 +26,7 @@ def list_tenders(
     GET /tenders
     GET /tenders?estado_id=1
     GET /tenders?nombre=obra
+    GET /tenders?pais=España
     """
     try:
         query = (
@@ -36,6 +38,8 @@ def list_tenders(
             query = query.eq("id_estado", estado_id)
         if nombre:
             query = query.ilike("nombre", f"%{nombre}%")
+        if pais and pais.strip():
+            query = query.eq("pais", pais.strip())
         response = query.execute()
         return response.data or []
     except Exception as e:
@@ -145,6 +149,83 @@ def add_partida(tender_id: int, payload: PartidaCreate) -> dict:
         ) from e
 
 
+@router.put("/{tender_id}/partidas/{detalle_id}", response_model=dict)
+def update_partida(tender_id: int, detalle_id: int, payload: PartidaUpdate) -> dict:
+    """
+    Actualiza una partida existente del presupuesto (tbl_licitaciones_detalle).
+
+    PUT /tenders/{id}/partidas/{detalle_id}
+    """
+    try:
+        check = (
+            supabase_client.table("tbl_licitaciones_detalle")
+            .select("id_detalle")
+            .eq("id_licitacion", tender_id)
+            .eq("id_detalle", detalle_id)
+            .execute()
+        )
+        if not check.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Partida no encontrada.",
+            )
+        update_data = payload.model_dump(exclude_unset=True)
+        if not update_data:
+            partidas_resp = (
+                supabase_client.table("tbl_licitaciones_detalle")
+                .select("*, tbl_productos(nombre)")
+                .eq("id_licitacion", tender_id)
+                .eq("id_detalle", detalle_id)
+                .single()
+                .execute()
+            )
+            if not partidas_resp.data:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Partida no encontrada.")
+            p = partidas_resp.data
+            prod = p.get("tbl_productos") or {}
+            return {**{k: v for k, v in p.items() if k != "tbl_productos"}, "product_nombre": prod.get("nombre")}
+        response = (
+            supabase_client.table("tbl_licitaciones_detalle")
+            .update(update_data)
+            .eq("id_licitacion", tender_id)
+            .eq("id_detalle", detalle_id)
+            .execute()
+        )
+        if not response.data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Partida no encontrada.",
+            )
+        return response.data[0]
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error actualizando partida: {e!s}",
+        ) from e
+
+
+@router.delete("/{tender_id}/partidas/{detalle_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_partida(tender_id: int, detalle_id: int) -> None:
+    """
+    Elimina una partida del presupuesto (tbl_licitaciones_detalle).
+
+    DELETE /tenders/{id}/partidas/{detalle_id}
+    """
+    try:
+        supabase_client.table("tbl_licitaciones_detalle").delete().eq(
+            "id_licitacion", tender_id
+        ).eq("id_detalle", detalle_id).execute()
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error eliminando partida: {e!s}",
+        ) from e
+
+
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
 def create_tender(payload: TenderCreate) -> dict:
     """
@@ -155,6 +236,7 @@ def create_tender(payload: TenderCreate) -> dict:
     try:
         row: dict[str, Any] = {
             "nombre": payload.nombre,
+            "pais": payload.pais,
             "numero_expediente": payload.numero_expediente or "",
             "pres_maximo": payload.pres_maximo or 0.0,
             "descripcion": payload.descripcion or "",

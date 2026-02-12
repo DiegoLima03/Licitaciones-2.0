@@ -20,8 +20,14 @@ export interface SweetSpotScatterProps {
 }
 
 const ADJUDICADA = "Adjudicada";
-const COLOR_ADJ = "#059669";
-const COLOR_PERD = "#dc2626";
+const TERMINADA = "Terminada";
+const COLOR_GANADA = "#059669";
+const COLOR_PERDIDA = "#dc2626";
+
+function esGanada(estado: string): boolean {
+  const e = (estado || "").trim().toLowerCase();
+  return e === ADJUDICADA.toLowerCase() || e === TERMINADA.toLowerCase(); // Terminada = fue adjudicada y ya finalizó
+}
 
 export function SweetSpotScatter({
   data,
@@ -33,8 +39,8 @@ export function SweetSpotScatter({
     return data.map((d) => ({
       ...d,
       x: d.presupuesto,
-      y: d.estado === ADJUDICADA ? 1 : 0,
-      fill: d.estado === ADJUDICADA ? COLOR_ADJ : COLOR_PERD,
+      y: esGanada(d.estado) ? 1 : 0,
+      fill: esGanada(d.estado) ? COLOR_GANADA : COLOR_PERDIDA,
     }));
   }, [data]);
 
@@ -72,7 +78,7 @@ export function SweetSpotScatter({
           (className ?? "")
         }
       >
-        No hay licitaciones cerradas (Adjudicada/Perdida)
+        No hay licitaciones cerradas (Adjudicada / No Adjudicada / Terminada)
       </div>
     );
   }
@@ -80,7 +86,7 @@ export function SweetSpotScatter({
   return (
     <div className={className}>
       <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-        Sweet spots — Presupuesto vs resultado (Verde: Adjudicada, Rojo: Perdida)
+        Sweet spots — Presupuesto vs resultado (Verde: Adjudicada / Terminada, Rojo: No Adjudicada)
       </p>
       <div className="h-[280px] w-full">
         <ResponsiveContainer width="100%" height="100%">
@@ -110,8 +116,8 @@ export function SweetSpotScatter({
               }}
             />
             <Legend />
-            <Scatter name="Adjudicada" data={points.filter((p) => p.estado === ADJUDICADA)} fill={COLOR_ADJ} />
-            <Scatter name="Perdida / No Adjudicada" data={points.filter((p) => p.estado !== ADJUDICADA)} fill={COLOR_PERD} />
+            <Scatter name="Adjudicada / Terminada" data={points.filter((p) => esGanada(p.estado))} fill={COLOR_GANADA} />
+            <Scatter name="No Adjudicada" data={points.filter((p) => !esGanada(p.estado))} fill={COLOR_PERDIDA} />
           </ScatterChart>
         </ResponsiveContainer>
       </div>

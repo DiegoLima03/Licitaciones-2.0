@@ -8,13 +8,16 @@ import type {
   DashboardKPIs,
   DeliveryCreate,
   DeliveryCreateResponse,
+  DeliveryLineUpdate,
   EntregaWithLines,
   Estado,
   ExcelImportResponse,
   LoginResponse,
   PartidaCreate,
+  PartidaUpdate,
   PrecioReferencia,
   PrecioReferenciaCreate,
+  ProductAnalytics,
   ProductoSearchResult,
   SearchResult,
   Tender,
@@ -83,12 +86,21 @@ export const TiposService = {
 // ----- ProductosService -----
 
 export const ProductosService = {
-  async search(query: string): Promise<ProductoSearchResult[]> {
+  async search(
+    query: string,
+    options?: { onlyWithPreciosReferencia?: boolean }
+  ): Promise<ProductoSearchResult[]> {
     try {
       if (!query.trim()) return [];
+      const params: Record<string, string | number | boolean> = {
+        q: query.trim(),
+        limit: 30,
+      };
+      if (options?.onlyWithPreciosReferencia)
+        params.only_with_precios_referencia = true;
       const { data } = await apiClient.get<ProductoSearchResult[]>(
         "/productos/search",
-        { params: { q: query.trim(), limit: 30 } }
+        { params }
       );
       return data ?? [];
     } catch (error) {
@@ -128,6 +140,7 @@ export const TendersService = {
       const params = new URLSearchParams();
       if (filters?.estado_id != null) params.set("estado_id", String(filters.estado_id));
       if (filters?.nombre) params.set("nombre", filters.nombre);
+      if (filters?.pais) params.set("pais", filters.pais);
       const { data } = await apiClient.get<Tender[]>("/tenders", { params });
       return data ?? [];
     } catch (error) {
@@ -185,6 +198,31 @@ export const TendersService = {
       throw new Error(getMessageFromError(error));
     }
   },
+
+  async updatePartida(
+    tenderId: number,
+    detalleId: number,
+    payload: PartidaUpdate
+  ): Promise<TenderPartida> {
+    try {
+      const { data } = await apiClient.put<TenderPartida>(
+        `/tenders/${tenderId}/partidas/${detalleId}`,
+        payload
+      );
+      if (!data) throw new Error("No se devolvió la partida actualizada.");
+      return data;
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+
+  async deletePartida(tenderId: number, detalleId: number): Promise<void> {
+    try {
+      await apiClient.delete(`/tenders/${tenderId}/partidas/${detalleId}`);
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
 };
 
 // ----- ImportService -----
@@ -232,6 +270,42 @@ export const SearchService = {
   },
 };
 
+// ----- AnalyticsService -----
+
+export interface DashboardKpisFilters {
+  fecha_adjudicacion_desde?: string;
+  fecha_adjudicacion_hasta?: string;
+}
+
+export const AnalyticsService = {
+  async getProductAnalytics(productId: number): Promise<ProductAnalytics> {
+    try {
+      const { data } = await apiClient.get<ProductAnalytics>(
+        `/analytics/product/${productId}`
+      );
+      if (!data) throw new Error("No se devolvieron analíticas del producto.");
+      return data;
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+
+  async getKpis(filters?: DashboardKpisFilters): Promise<DashboardKPIs> {
+    try {
+      const params: Record<string, string> = {};
+      if (filters?.fecha_adjudicacion_desde)
+        params.fecha_adjudicacion_desde = filters.fecha_adjudicacion_desde;
+      if (filters?.fecha_adjudicacion_hasta)
+        params.fecha_adjudicacion_hasta = filters.fecha_adjudicacion_hasta;
+      const { data } = await apiClient.get<DashboardKPIs>("/analytics/kpis", { params });
+      if (!data) throw new Error("No se devolvieron los KPIs.");
+      return data;
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+};
+
 // ----- DeliveriesService -----
 
 export const DeliveriesService = {
@@ -263,28 +337,13 @@ export const DeliveriesService = {
       throw new Error(getMessageFromError(error));
     }
   },
-};
 
-// ----- AnalyticsService -----
-
-export interface DashboardKpisFilters {
-  fecha_adjudicacion_desde?: string;
-  fecha_adjudicacion_hasta?: string;
-}
-
-export const AnalyticsService = {
-  async getKpis(filters?: DashboardKpisFilters): Promise<DashboardKPIs> {
+  async updateLine(idReal: number, payload: DeliveryLineUpdate): Promise<void> {
     try {
-      const params: Record<string, string> = {};
-      if (filters?.fecha_adjudicacion_desde)
-        params.fecha_adjudicacion_desde = filters.fecha_adjudicacion_desde;
-      if (filters?.fecha_adjudicacion_hasta)
-        params.fecha_adjudicacion_hasta = filters.fecha_adjudicacion_hasta;
-      const { data } = await apiClient.get<DashboardKPIs>("/analytics/kpis", { params });
-      if (!data) throw new Error("No se devolvieron los KPIs.");
-      return data;
+      await apiClient.patch(`/deliveries/lines/${idReal}`, payload);
     } catch (error) {
       throw new Error(getMessageFromError(error));
     }
   },
 };
+

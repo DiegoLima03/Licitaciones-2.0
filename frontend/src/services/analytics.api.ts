@@ -6,6 +6,7 @@
 import { apiClient } from "@/lib/axios";
 import type {
   MaterialTrendPoint,
+  MaterialTrendResponse,
   PriceDeviationResult,
   RiskPipelineItem,
   SweetSpotItem,
@@ -14,11 +15,11 @@ import type {
 const BASE = "/analytics";
 
 export const AnalyticsService = {
-  async getMaterialTrends(materialName: string): Promise<MaterialTrendPoint[]> {
-    const { data } = await apiClient.get<MaterialTrendPoint[]>(
+  async getMaterialTrends(materialName: string): Promise<MaterialTrendResponse> {
+    const { data } = await apiClient.get<MaterialTrendResponse>(
       `${BASE}/material-trends/${encodeURIComponent(materialName)}`
     );
-    return data ?? [];
+    return data ?? { pvu: [], pcu: [] };
   },
 
   async getRiskAdjustedPipeline(): Promise<RiskPipelineItem[]> {
