@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { AuthLayout } from "@/components/auth-layout";
+import { QueryProvider } from "@/components/providers/query-provider";
 
 import "./globals.css";
 
@@ -17,7 +18,9 @@ export default function RootLayout({
   return (
     <html lang="es">
       <body className="min-h-screen bg-slate-50 antialiased">
-        <AuthLayout>{children}</AuthLayout>
+        <QueryProvider>
+          <AuthLayout>{children}</AuthLayout>
+        </QueryProvider>
       </body>
     </html>
   );

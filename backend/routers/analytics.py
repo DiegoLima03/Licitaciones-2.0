@@ -1,18 +1,27 @@
 """
 Dashboard: timeline por adjudicación–finalización y KPIs.
+Endpoints de analítica: material trends, risk pipeline, sweet spots, price deviation.
 Estados usados en fórmulas (deben coincidir con tbl_estados.nombre_estado):
 - Ofertado: Adjudicada, No Adjudicada, Presentada, Terminada
 - Adjudicadas+Terminadas: Adjudicada, Terminada
 - Descartadas / (total - Análisis - Valoración)
 """
 
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client, get_maestros
-from backend.models import KPIDashboard, TimelineItem
+from backend.models import (
+    KPIDashboard,
+    MaterialTrendPoint,
+    PriceDeviationResult,
+    RiskPipelineItem,
+    SweetSpotItem,
+    TimelineItem,
+)
 
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -244,3 +253,254 @@ def get_kpis(
         pct_descartadas_euros=round(pct_descartadas_euros, 2) if pct_descartadas_euros is not None else None,
         ratio_adjudicacion=round(ratio_adjudicacion, 4),
     )
+
+
+# ---------- Endpoints de analítica avanzada ----------
+
+ESTADO_EN_ESTUDIO = "En Estudio"
+ESTADOS_SWEET_SPOT = {"Adjudicada", "Perdida", "No Adjudicada"}  # cerradas para sweet spot
+DEVIATION_THRESHOLD_PCT = 10.0
+
+
+@router.get("/material-trends/{material_name}", response_model=List[MaterialTrendPoint])
+def get_material_trends(material_name: str) -> List[MaterialTrendPoint]:
+    """
+    GET /analytics/material-trends/{material_name}
+    Histórico temporal de precios de un insumo (por nombre de producto). Formato para Lightweight Charts.
+    """
+    try:
+        # Productos cuyo nombre coincida (ilike)
+        prod_resp = (
+            supabase_client.table("tbl_productos")
+            .select("id")
+            .ilike("nombre", f"%{material_name}%")
+            .execute()
+        )
+        product_ids = [r["id"] for r in (prod_resp.data or []) if r.get("id") is not None]
+        if not product_ids:
+            return []
+
+        # Precios de referencia con fecha (PVU como valor)
+        precios_resp = (
+            supabase_client.table("tbl_precios_referencia")
+            .select("id_producto, pvu, fecha_creacion")
+            .in_("id_producto", product_ids)
+            .order("fecha_creacion")
+            .execute()
+        )
+        rows = precios_resp.data or []
+        if not rows:
+            return []
+
+        out: List[MaterialTrendPoint] = []
+        for r in rows:
+            fecha = r.get("fecha_creacion")
+            if not fecha:
+                continue
+            # fecha_creacion puede ser ISO con hora; tomar solo YYYY-MM-DD
+            time_str = str(fecha).split("T")[0] if isinstance(fecha, str) else str(fecha)[:10]
+            pvu = r.get("pvu")
+            if pvu is None:
+                continue
+            try:
+                value = float(pvu)
+            except (TypeError, ValueError):
+                continue
+            out.append(MaterialTrendPoint(time=time_str, value=round(value, 2)))
+        return out
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error obteniendo tendencia de material: {e!s}",
+        ) from e
+
+
+@router.get("/risk-adjusted-pipeline", response_model=List[RiskPipelineItem])
+def get_risk_adjusted_pipeline() -> List[RiskPipelineItem]:
+    """
+    GET /analytics/risk-adjusted-pipeline
+    Agrupa licitaciones 'En Estudio' por categoría (tipo); pipeline bruto y ajustado por win rate histórico.
+    """
+    try:
+        maestros = get_maestros(supabase_client)
+        estados_map = maestros.get("estados_id_map", {})
+        tipos_map = maestros.get("tipos_id_map", {})
+        # Nombre de estado -> id para filtrar "En Estudio"
+        name_to_estado_id = maestros.get("estados_name_map", {})
+        id_estudio = name_to_estado_id.get(ESTADO_EN_ESTUDIO)
+        if id_estudio is None:
+            return []
+
+        lic_resp = (
+            supabase_client.table("tbl_licitaciones")
+            .select("id_licitacion, pres_maximo, id_estado, tipo_de_licitacion")
+            .eq("id_estado", id_estudio)
+            .execute()
+        )
+        rows = lic_resp.data or []
+        if not rows:
+            return []
+
+        # Win rate global: ratio adjudicación (Adjudicadas+Terminadas / Ofertado)
+        df_all = _get_licitaciones_df()
+        if df_all.empty:
+            win_rate = 0.2
+        else:
+            df_all = _enriquecer_estados(df_all, maestros)
+            mask_ofertado = df_all["estado_nombre"].isin(ESTADOS_OFERTADO)
+            mask_adj = df_all["estado_nombre"].isin(ESTADOS_ADJUDICADAS_TERMINADAS)
+            total_ofertado = mask_ofertado.sum()
+            total_adj = mask_adj.sum()
+            win_rate = (total_adj / total_ofertado) if total_ofertado and total_ofertado > 0 else 0.2
+
+        # Agrupar por tipo
+        agg: Dict[str, Dict[str, Any]] = {}
+        for r in rows:
+            pres = float(r.get("pres_maximo") or 0)
+            tipo_id = r.get("tipo_de_licitacion")
+            category = tipos_map.get(tipo_id, f"Tipo {tipo_id}" if tipo_id is not None else "Sin tipo")
+            if category not in agg:
+                agg[category] = {"pipeline_bruto": 0.0, "pipeline_ajustado": 0.0}
+            agg[category]["pipeline_bruto"] += pres
+        for cat, v in agg.items():
+            v["pipeline_ajustado"] = round(v["pipeline_bruto"] * win_rate, 2)
+            v["pipeline_bruto"] = round(v["pipeline_bruto"], 2)
+
+        return [
+            RiskPipelineItem(category=k, pipeline_bruto=v["pipeline_bruto"], pipeline_ajustado=v["pipeline_ajustado"])
+            for k, v in agg.items()
+        ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error obteniendo pipeline ajustado: {e!s}",
+        ) from e
+
+
+@router.get("/sweet-spots", response_model=List[SweetSpotItem])
+def get_sweet_spots() -> List[SweetSpotItem]:
+    """
+    GET /analytics/sweet-spots
+    Licitaciones cerradas (Adjudicada / Perdida o No Adjudicada) con presupuesto y estado para scatter.
+    """
+    try:
+        maestros = get_maestros(supabase_client)
+        estados_id_map = maestros.get("estados_id_map", {})
+        estados_name_map = maestros.get("estados_name_map", {})
+        # IDs de estados que consideramos "cerrados" para sweet spot
+        ids_cerrados = [estados_name_map.get(n) for n in ESTADOS_SWEET_SPOT if estados_name_map.get(n) is not None]
+        if not ids_cerrados:
+            return []
+
+        lic_resp = (
+            supabase_client.table("tbl_licitaciones")
+            .select("id_licitacion, nombre, numero_expediente, pres_maximo, id_estado")
+            .in_("id_estado", ids_cerrados)
+            .execute()
+        )
+        rows = lic_resp.data or []
+        result: List[SweetSpotItem] = []
+        for r in rows:
+            id_lic = r.get("id_licitacion")
+            pres = float(r.get("pres_maximo") or 0)
+            id_estado = r.get("id_estado")
+            estado_nombre = estados_id_map.get(id_estado, "Desconocido")
+            cliente = str(r.get("nombre") or r.get("numero_expediente") or id_lic)
+            result.append(
+                SweetSpotItem(
+                    id=str(id_lic),
+                    presupuesto=round(pres, 2),
+                    estado=estado_nombre,
+                    cliente=cliente,
+                )
+            )
+        return result
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error obteniendo sweet spots: {e!s}",
+        ) from e
+
+
+@router.get("/price-deviation-check", response_model=PriceDeviationResult)
+def get_price_deviation_check(
+    material_name: str = Query(..., description="Nombre del material/insumo."),
+    current_price: float = Query(..., ge=0, description="Precio actual a comparar."),
+) -> PriceDeviationResult:
+    """
+    GET /analytics/price-deviation-check?material_name=...&current_price=...
+    Compara el precio actual con la media histórica del último año. Recomendación si desviación > 10%.
+    """
+    try:
+        # Productos por nombre
+        prod_resp = (
+            supabase_client.table("tbl_productos")
+            .select("id")
+            .ilike("nombre", f"%{material_name}%")
+            .execute()
+        )
+        product_ids = [r["id"] for r in (prod_resp.data or []) if r.get("id") is not None]
+        if not product_ids:
+            return PriceDeviationResult(
+                is_deviated=True,
+                deviation_percentage=0.0,
+                historical_avg=0.0,
+                recommendation="No hay histórico para este material. Revisar precio manualmente.",
+            )
+
+        # Último año: filtrar por fecha_creacion (Supabase no tiene date_trunc en filtro fácil)
+        precios_resp = (
+            supabase_client.table("tbl_precios_referencia")
+            .select("pvu, fecha_creacion")
+            .in_("id_producto", product_ids)
+            .execute()
+        )
+        rows = precios_resp.data or []
+        one_year_ago = (datetime.utcnow() - timedelta(days=365)).strftime("%Y-%m-%d")
+        values: List[float] = []
+        for r in rows:
+            pvu = r.get("pvu")
+            if pvu is None:
+                continue
+            try:
+                v = float(pvu)
+            except (TypeError, ValueError):
+                continue
+            fecha = r.get("fecha_creacion")
+            if fecha and str(fecha)[:10] >= one_year_ago:
+                values.append(v)
+        historical_avg = float(sum(values) / len(values)) if values else 0.0
+        if historical_avg <= 0:
+            return PriceDeviationResult(
+                is_deviated=True,
+                deviation_percentage=0.0,
+                historical_avg=0.0,
+                recommendation="Sin histórico reciente. Verificar precio con el mercado.",
+            )
+        deviation_percentage = ((current_price - historical_avg) / historical_avg) * 100
+        is_deviated = abs(deviation_percentage) > DEVIATION_THRESHOLD_PCT
+        if is_deviated and deviation_percentage > 0:
+            recommendation = (
+                f"Precio {deviation_percentage:.1f}% por encima de la media del último año (€{historical_avg:.2f}). "
+                "Revisar si el coste actual está justificado."
+            )
+        elif is_deviated and deviation_percentage < 0:
+            recommendation = (
+                f"Precio {abs(deviation_percentage):.1f}% por debajo de la media del último año (€{historical_avg:.2f}). "
+                "Confirmar que el proveedor y la calidad son correctos."
+            )
+        else:
+            recommendation = f"Precio alineado con la media histórica (€{historical_avg:.2f})."
+        return PriceDeviationResult(
+            is_deviated=is_deviated,
+            deviation_percentage=round(deviation_percentage, 2),
+            historical_avg=round(historical_avg, 2),
+            recommendation=recommendation,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error en comprobación de desviación: {e!s}",
+        ) from e

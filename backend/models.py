@@ -207,3 +207,35 @@ class ProductSearchItem(BaseModel):
     numero_expediente: Optional[str] = Field(None, description="Nº expediente.")
     proveedor: Optional[str] = Field(None, description="Proveedor asociado (desde tbl_licitaciones_real).")
 
+
+# ----- Analytics (respuestas para endpoints de analítica) -----
+
+
+class MaterialTrendPoint(BaseModel):
+    """Punto temporal para gráfico de evolución de precios (Lightweight Charts)."""
+    time: str = Field(..., description="Fecha en formato YYYY-MM-DD.")
+    value: float = Field(..., description="Precio (PVU) en esa fecha.")
+
+
+class RiskPipelineItem(BaseModel):
+    """Pipeline bruto y ajustado por riesgo por categoría."""
+    category: str = Field(..., description="Categoría (ej. tipo de obra/cliente).")
+    pipeline_bruto: float = Field(..., description="Suma de presupuestos máximos.")
+    pipeline_ajustado: float = Field(..., description="Pipeline ajustado por win rate.")
+
+
+class SweetSpotItem(BaseModel):
+    """Licitación cerrada para análisis de sweet spots."""
+    id: str = Field(..., description="Identificador de la licitación.")
+    presupuesto: float = Field(..., description="Presupuesto máximo.")
+    estado: str = Field(..., description="Adjudicada o Perdida.")
+    cliente: str = Field(..., description="Nombre del expediente/cliente.")
+
+
+class PriceDeviationResult(BaseModel):
+    """Resultado de comprobación de desviación de precio vs histórico."""
+    is_deviated: bool = Field(..., description="True si el precio se desvía significativamente.")
+    deviation_percentage: float = Field(..., description="Porcentaje de desviación vs media histórica.")
+    historical_avg: float = Field(..., description="Media del precio en el último año.")
+    recommendation: str = Field(..., description="Recomendación para el usuario.")
+

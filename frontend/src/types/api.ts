@@ -241,3 +241,30 @@ export interface DashboardKPIs {
   pct_descartadas_euros?: number | null;
   ratio_adjudicacion: number;
 }
+
+// ----- Analytics avanzada -----
+
+export interface MaterialTrendPoint {
+  time: string;
+  value: number;
+}
+
+export interface RiskPipelineItem {
+  category: string;
+  pipeline_bruto: number;
+  pipeline_ajustado: number;
+}
+
+export interface SweetSpotItem {
+  id: string;
+  presupuesto: number;
+  estado: string;
+  cliente: string;
+}
+
+export interface PriceDeviationResult {
+  is_deviated: boolean;
+  deviation_percentage: number;
+  historical_avg: number;
+  recommendation: string;
+}

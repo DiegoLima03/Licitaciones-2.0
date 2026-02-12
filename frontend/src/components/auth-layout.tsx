@@ -3,7 +3,7 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, FolderKanban, ListPlus, LogOut, Search } from "lucide-react";
+import { BarChart3, FolderKanban, LineChart, ListPlus, LogOut, Search } from "lucide-react";
 
 const STORAGE_KEY = "veraleza_user";
 
@@ -111,6 +111,13 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
           >
             <ListPlus className="h-4 w-4" />
             <span>Añadir líneas</span>
+          </Link>
+          <Link
+            href="/dashboard/analytics"
+            className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+          >
+            <LineChart className="h-4 w-4" />
+            <span>Analítica</span>
           </Link>
           {!SKIP_LOGIN && (
             <button
