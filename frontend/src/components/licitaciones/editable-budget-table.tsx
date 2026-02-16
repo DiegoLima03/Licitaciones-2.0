@@ -222,7 +222,7 @@ export function EditableBudgetTable({
 }: EditableBudgetTableProps) {
   const tenderId = lic.id_licitacion;
   /** Tipo 1 = Unidades y Precio Máximo: mostrar columna PMAXU */
-  const showPmaxu = lic.tipo_de_licitacion === 1;
+  const showPmaxu = lic.id_tipolicitacion === 1;
 
   // Restaurar foco después de añadir línea para no saltar a la nueva fila
   const focusRestoreRef = React.useRef<HTMLElement | null>(null);

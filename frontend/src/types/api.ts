@@ -41,7 +41,7 @@ export interface Tender {
   pres_maximo?: number | null;
   descripcion?: string | null;
   id_estado: number;
-  tipo_de_licitacion?: number | null;
+  id_tipolicitacion?: number | null;
   fecha_presentacion?: string | null;
   fecha_adjudicacion?: string | null;
   fecha_finalizacion?: string | null;
@@ -56,7 +56,7 @@ export interface TenderCreate {
   pres_maximo?: number | null;
   descripcion?: string | null;
   id_estado: number;
-  tipo_de_licitacion?: number | null;
+  id_tipolicitacion?: number | null;
   fecha_presentacion?: string | null;
   fecha_adjudicacion?: string | null;
   fecha_finalizacion?: string | null;
@@ -69,7 +69,7 @@ export interface TenderUpdate {
   pres_maximo?: number | null;
   descripcion?: string | null;
   id_estado?: number | null;
-  tipo_de_licitacion?: number | null;
+  id_tipolicitacion?: number | null;
   fecha_presentacion?: string | null;
   fecha_adjudicacion?: string | null;
   fecha_finalizacion?: string | null;

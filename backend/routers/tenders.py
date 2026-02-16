@@ -241,7 +241,7 @@ def create_tender(payload: TenderCreate) -> dict:
             "pres_maximo": payload.pres_maximo or 0.0,
             "descripcion": payload.descripcion or "",
             "id_estado": payload.id_estado,
-            "tipo_de_licitacion": payload.tipo_de_licitacion,
+            "id_tipolicitacion": payload.id_tipolicitacion,
             "fecha_presentacion": payload.fecha_presentacion,
             "fecha_adjudicacion": payload.fecha_adjudicacion,
             "fecha_finalizacion": payload.fecha_finalizacion,

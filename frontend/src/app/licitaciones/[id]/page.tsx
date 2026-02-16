@@ -446,8 +446,8 @@ export default function LicitacionDetallePage() {
             </span>
             <span>
               <span className="font-medium text-slate-700">Tipo:</span>{" "}
-              {lic.tipo_de_licitacion != null
-                ? (tipos.find((t) => t.id_tipolicitacion === lic.tipo_de_licitacion)?.tipo ?? `Tipo ${lic.tipo_de_licitacion}`)
+              {lic.id_tipolicitacion != null
+                ? (tipos.find((t) => t.id_tipolicitacion === lic.id_tipolicitacion)?.tipo ?? `Tipo ${lic.id_tipolicitacion}`)
                 : "—"}
             </span>
             <Badge variant="info">

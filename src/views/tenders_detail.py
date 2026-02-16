@@ -159,7 +159,7 @@ def render_configuracion_cabecera(client, lic_id, data, maestros):
             "fecha_presentacion": str(n_fp), "fecha_adjudicacion": str(n_fa)
         }).eq("id_licitacion", lic_id).execute()
         
-        if data.get('tipo_de_licitacion') == 2:
+        if data.get('id_tipolicitacion') == 2:
             recalcular_tipo_2(client, lic_id, n_dto)
         
         st.success("Datos actualizados.")
@@ -231,7 +231,7 @@ def render_dashboard_completo(client, lic_id, data_lic, items_db):
         r4.metric("RDO Real", f"{fmt_num(real_rdo)} €", delta=f"{fmt_num(real_margen_pct)}% Margen")
 
 def render_presupuesto_completo(client, lic_id, data, maestros, items_db):
-    tipo_id = data.get('tipo_de_licitacion')
+    tipo_id = data.get('id_tipolicitacion')
     nombre_tipo = maestros['tipos_id_map'].get(tipo_id, "Estándar")
     dto_global = float(data.get('descuento_global', 0) or 0)
     

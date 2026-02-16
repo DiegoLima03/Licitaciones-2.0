@@ -187,7 +187,7 @@ def render_nueva(client, maestros):
                     "pres_maximo": pres, 
                     "descripcion": desc,
                     "id_estado": maestros['estados_name_map'][est],
-                    "tipo_de_licitacion": maestros['tipos_name_map'].get(tip),
+                    "id_tipolicitacion": maestros['tipos_name_map'].get(tip),
                     "fecha_presentacion": str(f_pres), 
                     "fecha_adjudicacion": str(f_adj)
                 }

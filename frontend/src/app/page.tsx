@@ -76,11 +76,52 @@ function KpiWithHelp({
   );
 }
 
+/** Tarjeta KPI que muestra dos valores (uds | euros) separados por una barra */
+function KpiDualWithHelp({
+  title,
+  valueUds,
+  valueEuros,
+  help,
+  className,
+}: {
+  title: string;
+  valueUds: React.ReactNode;
+  valueEuros: React.ReactNode;
+  help: string;
+  className?: string;
+}) {
+  return (
+    <Card className={className}>
+      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1">
+        <CardTitle className="text-sm font-medium text-slate-600">{title}</CardTitle>
+        <span
+          className="text-slate-400 transition-colors hover:text-slate-600"
+          title={help}
+          role="img"
+          aria-label="Explicación"
+        >
+          <HelpCircle className="h-4 w-4" />
+        </span>
+      </CardHeader>
+      <CardContent>
+        <div className="flex flex-wrap items-baseline gap-3 text-2xl font-semibold text-slate-900">
+          <span>{valueUds}</span>
+          <span className="h-6 w-px bg-slate-300" aria-hidden />
+          <span>{valueEuros}</span>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 function parseTimelineDate(s: string | null | undefined): number | null {
   if (!s || typeof s !== "string" || !s.trim()) return null;
   const t = new Date(s.trim() + "T00:00:00").getTime();
   return Number.isNaN(t) ? null : t;
 }
+
+/** Meses en español abreviados para el eje de fechas */
+const MESES = ["Ene", "Feb", "Mar", "Abr", "May", "Jun", "Jul", "Ago", "Sep", "Oct", "Nov", "Dic"];
 
 function TimelineChart({ items }: { items: TimelineItem[] }) {
   const displayItems = React.useMemo(() => items.slice(0, 24), [items]);
@@ -105,21 +146,35 @@ function TimelineChart({ items }: { items: TimelineItem[] }) {
 
   const minDate = new Date(minT);
   const maxDate = new Date(maxT);
-  const minYear = minDate.getFullYear();
-  const maxYear = maxDate.getFullYear();
-  const quarters: { label: string; xPercent: number }[] = [];
-  for (let y = minYear; y <= maxYear; y++) {
-    for (let q = 1; q <= 4; q++) {
-      const qStart = new Date(y, (q - 1) * 3, 1).getTime();
-      if (qStart >= minT && qStart <= maxT) {
-        quarters.push({
-          label: `Q${q}`,
-          xPercent: ((qStart - minT) / range) * 100,
-        });
+
+  /** Ticks del eje de fechas: escalado para no saturar (1, 2 o 3 meses según rango) */
+  const dateTicks = React.useMemo(() => {
+    const ticks: { ts: number; label: string }[] = [];
+    const monthsDiff = (maxDate.getFullYear() - minDate.getFullYear()) * 12 + (maxDate.getMonth() - minDate.getMonth()) + 1;
+    const step = monthsDiff > 18 ? 3 : monthsDiff > 9 ? 2 : 1;
+    const start = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+    const end = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, 0);
+    let cur = new Date(start);
+    while (cur <= end) {
+      const ts = cur.getTime();
+      if (ts >= minT && ts <= maxT) {
+        const year = cur.getFullYear();
+        const shortYear = String(year).slice(-2);
+        const monthCount = (cur.getFullYear() - minDate.getFullYear()) * 12 + (cur.getMonth() - minDate.getMonth());
+        if (monthCount % step === 0) {
+          ticks.push({
+            ts,
+            label: `${MESES[cur.getMonth()]} ${shortYear}`,
+          });
+        }
       }
+      cur.setMonth(cur.getMonth() + 1);
     }
-  }
-  const yearLabel = minYear === maxYear ? `${minYear}` : `${minYear} - ${maxYear}`;
+    if (ticks.length === 0) {
+      ticks.push({ ts: minT, label: MESES[minDate.getMonth()] + " " + String(minDate.getFullYear()).slice(-2) });
+    }
+    return ticks;
+  }, [minT, maxT, minDate, maxDate]);
 
   if (displayItems.length === 0) {
     return (
@@ -129,94 +184,131 @@ function TimelineChart({ items }: { items: TimelineItem[] }) {
     );
   }
 
+  const barHeight = 28;
+  const axisLabelHeight = 40;
+
   return (
     <div className="w-full overflow-x-auto">
-      <h3 className="mb-4 text-center text-xl font-semibold tracking-tight text-slate-800">
-        TIMELINE
-      </h3>
-
-      <div className="min-w-[640px]">
-        {/* Eje izquierdo: nombres + área de barras con fechas (todas las licitaciones) */}
-        <div className="border-b border-slate-200">
-          {displayItems.map((item, idx) => {
-            const t0 = parseTimelineDate(item.fecha_adjudicacion);
-            const t1 = parseTimelineDate(item.fecha_finalizacion);
-            const hasValidDates = t0 != null && t1 != null && t1 >= t0;
-            const label = (item.nombre && String(item.nombre).trim()) || `Licitación ${item.id_licitacion}`;
-
-            return (
-              <div
-                key={`timeline-${item.id_licitacion}-${idx}`}
-                className="flex items-center gap-2 border-t border-slate-100 py-1.5 first:border-t-0"
-              >
+      <div className="min-w-[560px]">
+        {/* Layout tipo Gantt: lateral = licitaciones, abajo = fechas */}
+        <div className="flex">
+          {/* Columna lateral: nombres de licitaciones */}
+          <div className="flex shrink-0 flex-col border-r border-slate-200 pr-3">
+            {displayItems.map((item, idx) => {
+              const label = (item.nombre && String(item.nombre).trim()) || `Licitación ${item.id_licitacion}`;
+              return (
                 <div
-                  className="w-40 shrink-0 truncate text-xs font-medium text-slate-800"
-                  title={label}
+                  key={`row-${item.id_licitacion}-${idx}`}
+                  className="flex items-center border-b border-slate-100 py-1 last:border-b-0"
+                  style={{ minHeight: barHeight }}
                 >
-                  {label}
-                </div>
-                <div className="flex min-w-0 flex-1 items-center gap-2">
-                  <span className="w-14 shrink-0 text-right text-[11px] text-slate-600">
-                    {hasValidDates ? formatDateShort(item.fecha_adjudicacion ?? undefined) : "—"}
+                  <span
+                    className="line-clamp-2 max-w-[200px] truncate text-xs font-medium text-slate-800"
+                    title={label}
+                  >
+                    {label}
                   </span>
-                  <div className="relative h-6 flex-1 overflow-hidden rounded-sm bg-slate-100">
-                    {quarters.map((q) => (
-                      <div
-                        key={`${item.id_licitacion}-${q.label}-${q.xPercent}`}
-                        className="absolute top-0 bottom-0 w-px bg-slate-200/80"
-                        style={{ left: `${q.xPercent}%` }}
-                      />
-                    ))}
+                </div>
+              );
+            })}
+            {/* Espacio para el eje de fechas */}
+            <div className="mt-2 flex items-end border-t border-slate-200 pt-2" style={{ minHeight: axisLabelHeight }}>
+              <span className="text-[10px] font-medium uppercase tracking-wide text-slate-400">Licitaciones</span>
+            </div>
+          </div>
+
+          {/* Área Gantt: barras + cuadrícula de fechas */}
+          <div className="relative min-w-0 flex-1">
+            {/* Línea roja "hoy" */}
+            {(() => {
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              const todayT = today.getTime();
+              const inRange = todayT >= minT && todayT <= maxT;
+              if (!inRange) return null;
+              const leftPercent = ((todayT - minT) / range) * 100;
+              return (
+                <div
+                  className="absolute top-0 z-10 w-1 bg-red-500 shadow-sm"
+                  style={{
+                    left: `${leftPercent}%`,
+                    height: displayItems.length * (barHeight + 8),
+                  }}
+                  title={`Hoy: ${formatDate(today.toISOString().slice(0, 10))}`}
+                />
+              );
+            })()}
+            {/* Filas de barras */}
+            {displayItems.map((item, idx) => {
+              const t0 = parseTimelineDate(item.fecha_adjudicacion);
+              const t1 = parseTimelineDate(item.fecha_finalizacion);
+              const hasValidDates = t0 != null && t1 != null && t1 >= t0;
+
+              return (
+                <div
+                  key={`bar-${item.id_licitacion}-${idx}`}
+                  className="relative flex items-center border-b border-slate-100 py-1 last:border-b-0"
+                  style={{ minHeight: barHeight }}
+                >
+                  {/* Líneas verticales de la cuadrícula (fechas) */}
+                  {dateTicks.map((tick) => (
+                    <div
+                      key={`grid-${item.id_licitacion}-${tick.ts}`}
+                      className="absolute top-0 bottom-0 w-px bg-slate-100"
+                      style={{ left: `${((tick.ts - minT) / range) * 100}%` }}
+                    />
+                  ))}
+                  {/* Barra de la licitación */}
+                  <div className="absolute inset-x-0 inset-y-1 flex items-center">
                     {hasValidDates ? (
                       <div
-                        className="absolute inset-y-0 rounded-sm bg-teal-600 shadow-sm"
+                        className="absolute h-4 rounded bg-teal-600 shadow-sm transition-colors hover:bg-teal-700"
                         style={{
                           left: `${((t0! - minT) / range) * 100}%`,
-                          width: `${Math.max(((t1! - t0!) / range) * 100, 1)}%`,
-                          boxShadow: "0 1px 2px rgba(0,0,0,0.08)",
+                          width: `${Math.max(((t1! - t0!) / range) * 100, 2)}%`,
                         }}
                         title={`${formatDate(item.fecha_adjudicacion ?? undefined)} → ${formatDate(item.fecha_finalizacion ?? undefined)}`}
                       />
                     ) : (
-                      <div className="absolute inset-0 flex items-center justify-center rounded-sm bg-slate-200/60">
-                        <span className="text-[10px] text-slate-500">
-                          Indica fecha de adjudicación y finalización
+                      <div className="absolute inset-x-2 flex h-4 items-center justify-center rounded bg-slate-100">
+                        <span className="text-[10px] text-slate-400">
+                          Sin fechas de adjudicación/finalización
                         </span>
                       </div>
                     )}
                   </div>
-                  <span className="w-14 shrink-0 text-left text-[11px] text-slate-600">
-                    {hasValidDates ? formatDateShort(item.fecha_finalizacion ?? undefined) : "—"}
-                  </span>
                 </div>
-              </div>
-            );
-          })}
-        </div>
+              );
+            })}
 
-        {/* Eje temporal inferior: escala por trimestres */}
-        <div className="relative mt-3 flex pb-6">
-          <div className="w-40 shrink-0" />
-          <div className="relative h-8 flex-1">
-            {/* Barra de trimestres (estilo Gantt) */}
-            <div className="absolute inset-x-0 bottom-0 h-6 rounded-sm bg-teal-100">
-              {quarters.map((q) => (
+            {/* Eje de fechas abajo (estilo Gantt) */}
+            <div
+              className="relative mt-2 flex border-t border-slate-200 pt-2"
+              style={{ minHeight: axisLabelHeight }}
+            >
+              {dateTicks.map((tick, i) => (
+                <div
+                  key={`grid-bot-${tick.ts}-${i}`}
+                  className="absolute top-0 h-full border-l border-slate-200 first:border-l-0"
+                  style={{
+                    left: `${((tick.ts - minT) / range) * 100}%`,
+                    width: 0,
+                  }}
+                />
+              ))}
+              {dateTicks.map((tick, i) => (
                 <span
-                  key={`label-${q.label}-${q.xPercent}`}
-                  className="absolute text-[10px] font-medium text-teal-800"
-                  style={{ left: `${q.xPercent}%`, transform: "translateX(2px)", bottom: "4px" }}
+                  key={`label-${tick.ts}-${i}`}
+                  className="absolute bottom-0 text-[10px] font-medium text-slate-600"
+                  style={{
+                    left: `${((tick.ts - minT) / range) * 100}%`,
+                    transform: "translateX(-50%)",
+                  }}
                 >
-                  {q.label}
+                  {tick.label}
                 </span>
               ))}
             </div>
-            {/* Año(s) en los extremos */}
-            <span className="absolute -bottom-5 left-0 text-[10px] font-semibold text-slate-500">
-              {yearLabel}
-            </span>
-            <span className="absolute -bottom-5 right-0 text-[10px] font-semibold text-slate-500">
-              {yearLabel}
-            </span>
           </div>
         </div>
       </div>
@@ -368,35 +460,23 @@ export default function Home() {
           Indicadores
         </h2>
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-          <KpiWithHelp
-            title="Total oportunidades (nº)"
-            value={kpis.total_oportunidades_uds ?? 0}
-            help="Suma de todas las licitaciones registradas (número de expedientes)."
+          <KpiDualWithHelp
+            title="Total oportunidades"
+            valueUds={kpis.total_oportunidades_uds ?? 0}
+            valueEuros={formatEuro(Number(kpis.total_oportunidades_euros ?? 0))}
+            help="Nº: Suma de licitaciones registradas. €: Suma de presupuestos máximos (pres_maximo) de todas las licitaciones."
           />
-          <KpiWithHelp
-            title="Total oportunidades (€)"
-            value={formatEuro(Number(kpis.total_oportunidades_euros ?? 0))}
-            help="Suma de los presupuestos máximos (pres_maximo) de todas las licitaciones registradas."
+          <KpiDualWithHelp
+            title="Total ofertado"
+            valueUds={kpis.total_ofertado_uds ?? 0}
+            valueEuros={formatEuro(Number(kpis.total_ofertado_euros ?? 0))}
+            help="Solo licitaciones Adjudicada, No Adjudicada, Presentada, Terminada. Nº: cantidad. €: suma de presupuestos máximos."
           />
-          <KpiWithHelp
-            title="Total ofertado (nº)"
-            value={kpis.total_ofertado_uds ?? 0}
-            help="Mismo concepto que oportunidades pero solo licitaciones en estado: Adjudicada, No Adjudicada, Presentada, Terminada."
-          />
-          <KpiWithHelp
-            title="Total ofertado (€)"
-            value={formatEuro(Number(kpis.total_ofertado_euros ?? 0))}
-            help="Suma de presupuestos máximos solo de licitaciones Adjudicada, No Adjudicada, Presentada, Terminada."
-          />
-          <KpiWithHelp
-            title="Ratio ofertado/oportunidades (uds)"
-            value={`${(kpis.ratio_ofertado_oportunidades_uds ?? 0).toFixed(1)} %`}
-            help="(Total ofertado en nº / Total oportunidades en nº) × 100."
-          />
-          <KpiWithHelp
-            title="Ratio ofertado/oportunidades (€)"
-            value={`${(kpis.ratio_ofertado_oportunidades_euros ?? 0).toFixed(1)} %`}
-            help="(Total ofertado en € / Total oportunidades en €) × 100."
+          <KpiDualWithHelp
+            title="Ratio ofertado/oportunidades"
+            valueUds={`${(kpis.ratio_ofertado_oportunidades_uds ?? 0).toFixed(1)} %`}
+            valueEuros={`${(kpis.ratio_ofertado_oportunidades_euros ?? 0).toFixed(1)} %`}
+            help="(Total ofertado / Total oportunidades) × 100. En uds: por número de expedientes. En €: por importe de presupuestos."
           />
           <KpiWithHelp
             title="Ratio (Adj.+Term.)/Total ofertado"
@@ -426,23 +506,19 @@ export default function Home() {
             }
             help="Margen medio ponderado por venta en licitaciones Adjudicadas y Terminadas, usando datos reales (entregas/albaranes). Fórmula: (Σ beneficio real) / (Σ venta real) × 100."
           />
-          <KpiWithHelp
-            title="% descartadas (uds)"
-            value={
+          <KpiDualWithHelp
+            title="% descartadas"
+            valueUds={
               kpis.pct_descartadas_uds != null && kpis.pct_descartadas_uds !== undefined
                 ? `${Number(kpis.pct_descartadas_uds).toFixed(1)} %`
                 : "—"
             }
-            help="% descartadas = (número de licitaciones descartadas) / (total licitaciones − análisis − valoración) × 100."
-          />
-          <KpiWithHelp
-            title="% descartadas (€)"
-            value={
+            valueEuros={
               kpis.pct_descartadas_euros != null && kpis.pct_descartadas_euros !== undefined
                 ? `${Number(kpis.pct_descartadas_euros).toFixed(1)} %`
                 : "—"
             }
-            help="% descartadas en importe = (suma presupuestos de descartadas) / (suma presupuestos de licitaciones que no están en análisis ni valoración) × 100."
+            help="Uds: (nº licitaciones descartadas) / (total − análisis − valoración) × 100. €: mismo concepto aplicado a la suma de presupuestos."
           />
         </div>
       </section>

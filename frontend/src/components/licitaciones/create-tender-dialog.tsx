@@ -144,7 +144,7 @@ export function CreateTenderDialog({
     setSubmitting(true);
     try {
       const id_estado = Number(values.estado_id);
-      const tipo_de_licitacion = Number(values.tipo_id);
+      const id_tipolicitacion = Number(values.tipo_id);
 
       await TendersService.create({
         nombre: values.nombre,
@@ -153,7 +153,7 @@ export function CreateTenderDialog({
         pres_maximo: values.presupuesto ?? 0,
         descripcion: values.notas,
         id_estado,
-        tipo_de_licitacion,
+        id_tipolicitacion,
         fecha_presentacion: values.f_presentacion.toISOString().split("T")[0],
         fecha_adjudicacion: values.f_adjudicacion.toISOString().split("T")[0],
         fecha_finalizacion: values.f_finalizacion.toISOString().split("T")[0],

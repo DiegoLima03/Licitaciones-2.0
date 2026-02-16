@@ -88,7 +88,7 @@ class TenderCreate(BaseModel):
     pres_maximo: Optional[float] = Field(0.0, description="Presupuesto máximo (€).")
     descripcion: Optional[str] = Field(None, description="Notas / descripción.")
     id_estado: int = Field(..., description="ID del estado.")
-    tipo_de_licitacion: Optional[int] = Field(None, description="ID tipo de licitación.")
+    id_tipolicitacion: Optional[int] = Field(None, description="ID tipo de licitación (FK tbl_tipolicitacion).")
     fecha_presentacion: Optional[str] = Field(None, description="Fecha presentación (YYYY-MM-DD).")
     fecha_adjudicacion: Optional[str] = Field(None, description="Fecha adjudicación (YYYY-MM-DD).")
     fecha_finalizacion: Optional[str] = Field(None, description="Fecha finalización (YYYY-MM-DD).")
@@ -103,7 +103,7 @@ class TenderUpdate(BaseModel):
     pres_maximo: Optional[float] = None
     descripcion: Optional[str] = None
     id_estado: Optional[int] = None
-    tipo_de_licitacion: Optional[int] = None
+    id_tipolicitacion: Optional[int] = None
     fecha_presentacion: Optional[str] = None
     fecha_adjudicacion: Optional[str] = None
     fecha_finalizacion: Optional[str] = None
