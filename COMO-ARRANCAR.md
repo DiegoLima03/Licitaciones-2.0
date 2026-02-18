@@ -73,6 +73,24 @@ Con ambos activados, entras directo al dashboard y la API acepta peticiones sin 
 
 ---
 
+## Migraciones de base de datos
+
+Si aparece el error `Could not find the 'lotes_config' column` al usar los lotes del presupuesto:
+
+1. Entra en **Supabase** → tu proyecto → **SQL Editor**.
+2. Ejecuta el contenido de `backend/migrations/add_lotes_config_licitaciones.sql`:
+
+   ```sql
+   ALTER TABLE public.tbl_licitaciones
+   ADD COLUMN IF NOT EXISTS lotes_config JSONB DEFAULT '[]'::jsonb;
+
+   COMMENT ON COLUMN public.tbl_licitaciones.lotes_config IS 'Lista de lotes con estado ganado';
+   ```
+
+3. Recarga la aplicación.
+
+---
+
 ## Problemas frecuentes
 
 | Problema | Solución |
@@ -81,3 +99,4 @@ Con ambos activados, entras directo al dashboard y la API acepta peticiones sin 
 | "uvicorn no está instalado" | En la raíz del proyecto: `pip install -r requirements.txt` |
 | "ModuleNotFoundError: backend" | Ejecuta desde la **raíz del proyecto** (donde está la carpeta `backend`). |
 | Puerto 8000 en uso | Cierra otras instancias del backend o usa otro puerto: `uvicorn backend.main:app --reload --port 8001` |
+| Error `lotes_config` column not found | Ejecuta la migración en Supabase SQL Editor (ver sección "Migraciones" arriba). |

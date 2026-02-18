@@ -27,10 +27,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
-import { EstadosService, TiposService, TendersService } from "@/services/api";
-import type { Estado, PaisLicitacion, Tipo } from "@/types/api";
+import { TiposService, TendersService } from "@/services/api";
+import type { PaisLicitacion, Tipo } from "@/types/api";
 
 const PAISES_OPCIONES: PaisLicitacion[] = ["España", "Portugal"];
+const PAIS_LABEL: Record<PaisLicitacion, string> = { España: "🇪🇸 España", Portugal: "🇵🇹 Portugal" };
 
 type CreateTenderDialogProps = {
   triggerLabel?: string;
@@ -41,6 +42,10 @@ const formSchema = z.object({
   nombre: z.string().min(1, "El nombre del proyecto es obligatorio"),
   pais: z.enum(["España", "Portugal"], { required_error: "Selecciona el país de la licitación" }),
   expediente: z.string().min(1, "El nº de expediente es obligatorio"),
+  enlace_gober: z
+    .string()
+    .optional()
+    .refine((s) => !s || s.trim() === "" || /^https?:\/\/.+/.test(s.trim()), "Introduce una URL válida"),
   f_presentacion: z.date({
     required_error: "La fecha de presentación es obligatoria",
   }),
@@ -54,9 +59,28 @@ const formSchema = z.object({
     .union([z.string(), z.number()])
     .transform((val) => (typeof val === "string" ? parseFloat(val || "0") : val))
     .refine((val) => !Number.isNaN(val) && val >= 0, "Introduce un importe válido"),
-  estado_id: z.string().min(1, "Selecciona un estado inicial"),
   tipo_id: z.string().min(1, "Selecciona un tipo de licitación"),
-  notas: z.string().min(1, "Las notas/descripción son obligatorias"),
+  notas: z.string().optional().default(""),
+}).superRefine((data, ctx) => {
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  const fPresentacion = data.f_presentacion;
+  if (fPresentacion && fPresentacion > hoy) {
+    const enlace = (data.enlace_gober ?? "").trim();
+    if (!enlace) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "El enlace a Gober es obligatorio cuando la fecha de presentación es futura",
+        path: ["enlace_gober"],
+      });
+    } else if (!/^https?:\/\/.+/.test(enlace)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "Introduce una URL válida",
+        path: ["enlace_gober"],
+      });
+    }
+  }
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -67,7 +91,6 @@ export function CreateTenderDialog({
 }: CreateTenderDialogProps) {
   const [open, setOpen] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
-  const [estados, setEstados] = React.useState<Estado[]>([]);
   const [tipos, setTipos] = React.useState<Tipo[]>([]);
   const [loadingMaestros, setLoadingMaestros] = React.useState(false);
   const [openDatePopover, setOpenDatePopover] = React.useState<
@@ -116,13 +139,12 @@ export function CreateTenderDialog({
   React.useEffect(() => {
     if (!open) return;
     setLoadingMaestros(true);
-    Promise.all([EstadosService.getAll(), TiposService.getAll()])
-      .then(([e, t]) => {
-        setEstados(e);
+    TiposService.getAll()
+      .then((t) => {
         setTipos(t);
       })
       .catch((err) => {
-        console.error("Error cargando estados/tipos", err);
+        console.error("Error cargando tipos", err);
       })
       .finally(() => setLoadingMaestros(false));
   }, [open]);
@@ -133,9 +155,9 @@ export function CreateTenderDialog({
       nombre: "",
       pais: "España" as PaisLicitacion,
       expediente: "",
+      enlace_gober: "",
       presupuesto: 0,
       notas: "",
-      estado_id: "",
       tipo_id: "",
     },
   });
@@ -143,16 +165,15 @@ export function CreateTenderDialog({
   async function onSubmit(values: FormValues) {
     setSubmitting(true);
     try {
-      const id_estado = Number(values.estado_id);
       const id_tipolicitacion = Number(values.tipo_id);
 
       await TendersService.create({
         nombre: values.nombre,
         pais: values.pais,
         numero_expediente: values.expediente,
+        enlace_gober: values.enlace_gober?.trim() || undefined,
         pres_maximo: values.presupuesto ?? 0,
-        descripcion: values.notas,
-        id_estado,
+        descripcion: values.notas ?? "",
         id_tipolicitacion,
         fecha_presentacion: values.f_presentacion.toISOString().split("T")[0],
         fecha_adjudicacion: values.f_adjudicacion.toISOString().split("T")[0],
@@ -300,7 +321,7 @@ export function CreateTenderDialog({
                         <option value="">Selecciona el país</option>
                         {PAISES_OPCIONES.map((p) => (
                           <option key={p} value={p}>
-                            {p}
+                            {PAIS_LABEL[p]}
                           </option>
                         ))}
                       </select>
@@ -318,6 +339,25 @@ export function CreateTenderDialog({
                     <FormLabel>Nº Expediente</FormLabel>
                     <FormControl>
                       <Input placeholder="EXP-24-001" {...field} />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="enlace_gober"
+                render={({ field }) => (
+                  <FormItem className="md:col-span-2">
+                    <FormLabel>Enlace Gober (obligatorio si la fecha de presentación es futura)</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="url"
+                        placeholder="https://gober.es/... (URL de la licitación en Gober)"
+                        {...field}
+                        value={field.value ?? ""}
+                      />
                     </FormControl>
                     <FormMessage />
                   </FormItem>
@@ -380,34 +420,6 @@ export function CreateTenderDialog({
                     <FormLabel>F. Finalización</FormLabel>
                     <FormControl>
                       {renderDateField(field, "Selecciona la fecha", "f_finalizacion")}
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-
-              <FormField
-                control={form.control}
-                name="estado_id"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Estado Inicial</FormLabel>
-                    <FormControl>
-                      <select
-                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:opacity-50"
-                        value={field.value ?? ""}
-                        onChange={(e) => field.onChange(e.target.value)}
-                        disabled={loadingMaestros}
-                      >
-                        <option value="" disabled>
-                          {loadingMaestros ? "Cargando..." : "Selecciona un estado"}
-                        </option>
-                        {estados.map((est) => (
-                          <option key={est.id_estado} value={est.id_estado}>
-                            {est.nombre_estado}
-                          </option>
-                        ))}
-                      </select>
                     </FormControl>
                     <FormMessage />
                   </FormItem>

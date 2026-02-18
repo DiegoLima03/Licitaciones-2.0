@@ -46,7 +46,14 @@ export interface Tender {
   fecha_adjudicacion?: string | null;
   fecha_finalizacion?: string | null;
   descuento_global?: number | null;
+  enlace_gober?: string | null;
+  lotes_config?: LoteConfigItem[] | null;
   [key: string]: unknown;
+}
+
+export interface LoteConfigItem {
+  nombre: string;
+  ganado: boolean;
 }
 
 export interface TenderCreate {
@@ -55,7 +62,7 @@ export interface TenderCreate {
   numero_expediente?: string | null;
   pres_maximo?: number | null;
   descripcion?: string | null;
-  id_estado: number;
+  enlace_gober?: string | null;
   id_tipolicitacion?: number | null;
   fecha_presentacion?: string | null;
   fecha_adjudicacion?: string | null;
@@ -68,12 +75,14 @@ export interface TenderUpdate {
   numero_expediente?: string | null;
   pres_maximo?: number | null;
   descripcion?: string | null;
+  enlace_gober?: string | null;
   id_estado?: number | null;
   id_tipolicitacion?: number | null;
   fecha_presentacion?: string | null;
   fecha_adjudicacion?: string | null;
   fecha_finalizacion?: string | null;
   descuento_global?: number | null;
+  lotes_config?: LoteConfigItem[] | null;
 }
 
 /** Payload para POST /tenders/{id}/change-status (máquina de estados) */

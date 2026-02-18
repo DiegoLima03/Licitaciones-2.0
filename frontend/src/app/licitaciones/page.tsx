@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { Plus, Search } from "lucide-react";
+import { AlertTriangle, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -17,8 +17,8 @@ import type { Estado, PaisLicitacion, Tender } from "@/types/api";
 
 const PAISES_FILTRO: { value: "" | PaisLicitacion; label: string }[] = [
   { value: "", label: "Todos los países" },
-  { value: "España", label: "España" },
-  { value: "Portugal", label: "Portugal" },
+  { value: "España", label: "🇪🇸 España" },
+  { value: "Portugal", label: "🇵🇹 Portugal" },
 ];
 
 const ESTADO_COLOR_CLASSES = [
@@ -44,6 +44,31 @@ function formatEuro(value: number) {
   }).format(value);
 }
 
+/** EN ANÁLISIS = id 3 (alineado con backend EstadoLicitacion.EN_ANALISIS) */
+const ID_ESTADO_EN_ANALISIS = 3;
+
+function getUrgencyInfo(lic: Tender): { urgent: boolean; deadline: string | null } {
+  if (lic.id_estado !== ID_ESTADO_EN_ANALISIS) return { urgent: false, deadline: null };
+  const fPresentacion = lic.fecha_presentacion;
+  if (!fPresentacion || typeof fPresentacion !== "string") return { urgent: false, deadline: null };
+  const fecha = new Date(fPresentacion.split("T")[0]);
+  const hoy = new Date();
+  hoy.setHours(0, 0, 0, 0);
+  fecha.setHours(0, 0, 0, 0);
+  const diffMs = fecha.getTime() - hoy.getTime();
+  const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
+  const isUrgent = diffDays >= 0 && diffDays <= 5;
+  return {
+    urgent: isUrgent,
+    deadline: isUrgent ? fPresentacion.split("T")[0] : null,
+  };
+}
+
+function formatFechaCorta(isoDate: string): string {
+  const [y, m, d] = isoDate.split("-");
+  return `${d}/${m}/${y}`;
+}
+
 export default function LicitacionesPage() {
   const [data, setData] = React.useState<Tender[]>([]);
   const [estados, setEstados] = React.useState<Estado[]>([]);
@@ -52,7 +77,6 @@ export default function LicitacionesPage() {
   const [searchNombre, setSearchNombre] = React.useState("");
   const [filterEstadoId, setFilterEstadoId] = React.useState<number | "">("");
   const [filterPais, setFilterPais] = React.useState<"" | PaisLicitacion>("");
-  const [updatingId, setUpdatingId] = React.useState<number | null>(null);
 
   React.useEffect(() => {
     EstadosService.getAll().then(setEstados).catch(() => setEstados([]));
@@ -157,7 +181,7 @@ export default function LicitacionesPage() {
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
                   <th className="py-2 pr-4">Expediente</th>
                   <th className="py-2 pr-4">Nombre proyecto</th>
-                  <th className="py-2 pr-4">País</th>
+                  <th className="py-2 pr-4">F. Presentación</th>
                   <th className="py-2 pr-4">Estado</th>
                   <th className="py-2 pr-4 text-right">Presupuesto (€)</th>
                 </tr>
@@ -170,10 +194,12 @@ export default function LicitacionesPage() {
                     </td>
                   </tr>
                 ) : (
-                  data.map((lic) => (
+                  data.map((lic) => {
+                    const { urgent } = getUrgencyInfo(lic);
+                    return (
                     <tr
                       key={lic.id_licitacion}
-                      className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                      className={`border-b border-slate-100 last:border-0 hover:bg-slate-50 ${urgent ? "animate-pulse bg-red-50" : ""}`}
                     >
                       <td className="py-2 pr-4 text-xs font-medium text-slate-500">
                         <Link
@@ -191,54 +217,41 @@ export default function LicitacionesPage() {
                           {lic.nombre}
                         </Link>
                       </td>
-                      <td className="py-2 pr-4 text-sm text-slate-600">
-                        {lic.pais ?? "—"}
+                      <td className="py-2 pr-4">
+                        {lic.fecha_presentacion ? (
+                          urgent && lic.fecha_presentacion ? (
+                            <span
+                              className="inline-flex items-center gap-1 rounded border border-red-200 bg-red-100 px-2 py-1 text-xs font-medium text-red-700"
+                              title="¡Menos de 5 días para presentación!"
+                            >
+                              <AlertTriangle
+                                className="h-3.5 w-3.5 shrink-0"
+                                aria-hidden
+                              />
+                              {formatFechaCorta(lic.fecha_presentacion.split("T")[0])}
+                            </span>
+                          ) : (
+                            <span className="text-sm text-slate-600">
+                              {formatFechaCorta(lic.fecha_presentacion.split("T")[0])}
+                            </span>
+                          )
+                        ) : (
+                          <span className="text-slate-400">—</span>
+                        )}
                       </td>
                       <td className="py-2 pr-4">
-                        <select
-                          value={lic.id_estado}
-                          disabled={updatingId === lic.id_licitacion}
-                          onChange={async (e) => {
-                            const newId = Number(e.target.value);
-                            if (!Number.isFinite(newId)) return;
-                            setUpdatingId(lic.id_licitacion);
-                            try {
-                              await TendersService.update(lic.id_licitacion, {
-                                id_estado: newId,
-                              });
-                              await fetchLicitaciones();
-                            } catch {
-                              // Mantener valor actual
-                            } finally {
-                              setUpdatingId(null);
-                            }
-                          }}
-                          className={`h-8 min-w-[140px] rounded-md border px-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:opacity-60 ${getEstadoColorClass(lic.id_estado, estados)}`}
-                          title="Cambiar estado"
+                        <span
+                          className={`inline-block min-w-[130px] rounded-md border px-2.5 py-1 text-center text-sm font-medium ${getEstadoColorClass(lic.id_estado, estados)}`}
                         >
-                          {estados.length === 0 ? (
-                            <option value={lic.id_estado}>Estado {lic.id_estado}</option>
-                          ) : (
-                            <>
-                              {!estados.some((e) => e.id_estado === lic.id_estado) && (
-                                <option value={lic.id_estado}>
-                                  Estado {lic.id_estado}
-                                </option>
-                              )}
-                              {estados.map((est) => (
-                                <option key={est.id_estado} value={est.id_estado}>
-                                  {est.nombre_estado}
-                                </option>
-                              ))}
-                            </>
-                          )}
-                        </select>
+                          {estados.find((e) => e.id_estado === lic.id_estado)?.nombre_estado ??
+                            `Estado ${lic.id_estado}`}
+                        </span>
                       </td>
                       <td className="py-2 pr-4 text-right text-sm font-semibold text-slate-900">
                         {formatEuro(Number(lic.pres_maximo) || 0)}
                       </td>
                     </tr>
-                  ))
+                  );})
                 )}
               </tbody>
             </table>

@@ -19,12 +19,14 @@ const inputCellClass =
 function ProductCellAutocomplete({
   value,
   onSelect,
+  onClear,
   placeholder,
   onKeyDown,
   disabled,
 }: {
   value: { id: number; nombre: string } | null;
   onSelect: (id: number, nombre: string) => void;
+  onClear?: () => void;
   placeholder?: string;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   disabled?: boolean;
@@ -43,7 +45,7 @@ function ProductCellAutocomplete({
     }
   }, [value, open]);
 
-  const displayValue = open ? query : (value ? value.nombre : query);
+  const displayValue = (open ? query : (value ? value.nombre : query)) ?? "";
 
   React.useEffect(() => {
     if (!query.trim()) {
@@ -93,7 +95,7 @@ function ProductCellAutocomplete({
   };
 
   return (
-    <div ref={wrapperRef} className="relative w-full">
+    <div ref={wrapperRef} className="relative flex w-full items-center gap-1">
       <Input
         type="text"
         autoComplete="off"
@@ -102,7 +104,11 @@ function ProductCellAutocomplete({
         placeholder={placeholder}
         disabled={disabled}
         onChange={(e) => {
-          setQuery(e.target.value);
+          const v = e.target.value;
+          setQuery(v);
+          if (v.trim() === "" && value && onClear) {
+            onClear();
+          }
           if (!open) setOpen(true);
         }}
         onFocus={() => {
@@ -130,6 +136,20 @@ function ProductCellAutocomplete({
           onKeyDown?.(e);
         }}
       />
+      {value && onClear && !disabled && (
+        <button
+          type="button"
+          onClick={() => {
+            setQuery("");
+            onClear();
+          }}
+          className="shrink-0 rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+          title="Borrar y elegir otro"
+          aria-label="Borrar producto"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
       {open && (query.trim() || loading) && (
         <div className="absolute left-0 right-0 top-full z-50 mt-0.5 max-h-[200px] overflow-auto rounded-md border border-slate-200 bg-white py-1 shadow-lg">
           {loading ? (
@@ -216,6 +236,10 @@ export interface EditableBudgetTableProps {
   lic: TenderDetail;
   onPartidaAdded: () => void;
   onUniqueLotesChange?: (lotes: string[]) => void;
+  /** Si se especifica, solo muestra/edita partidas de este lote (tabla por lote) */
+  loteFilter?: string;
+  /** Si se especifica, muestra partidas cuyo lote NO está en esta lista (para "Otros") */
+  lotesExcluidos?: string[];
   /** Si true, oculta añadir/editar/eliminar y muestra banner de presupuesto cerrado */
   isLocked?: boolean;
 }
@@ -224,6 +248,8 @@ export function EditableBudgetTable({
   lic,
   onPartidaAdded,
   onUniqueLotesChange,
+  loteFilter,
+  lotesExcluidos,
   isLocked = false,
 }: EditableBudgetTableProps) {
   const tenderId = lic.id_licitacion;
@@ -248,11 +274,17 @@ export function EditableBudgetTable({
   const [deviationByIndex, setDeviationByIndex] = React.useState<Record<number, boolean | null>>({});
 
   const initialRows = React.useMemo(() => {
-    const serverRows = (lic.partidas ?? []).map((p) => ({
+    let partidas = lic.partidas ?? [];
+    if (loteFilter) {
+      partidas = partidas.filter((p) => (p.lote ?? "General") === loteFilter);
+    } else if (lotesExcluidos && lotesExcluidos.length > 0) {
+      partidas = partidas.filter((p) => !lotesExcluidos.includes(p.lote ?? "General"));
+    }
+    const serverRows = partidas.map((p) => ({
       id_detalle: p.id_detalle,
       id_producto: p.id_producto,
       product_nombre: p.product_nombre || "",
-      lote: p.lote || "General",
+      lote: loteFilter ?? (p.lote || "General"),
       unidades: Number(p.unidades) || 0,
       pvu: Number(p.pvu) || 0,
       pcu: Number(p.pcu) || 0,
@@ -260,12 +292,13 @@ export function EditableBudgetTable({
       isSaving: false,
       isDirty: false,
     }));
-    return [...serverRows, { ...ghostRow }];
-  }, [lic.partidas]);
+    const defaultLote = loteFilter ?? (lotesExcluidos ? "General" : "General");
+    return [...serverRows, { ...ghostRow, lote: defaultLote }];
+  }, [lic.partidas, loteFilter, lotesExcluidos]);
 
   const form = useForm<FormValues>({
     defaultValues: { partidas: initialRows },
-    mode: "onChange", 
+    mode: "onChange",
   });
 
   const { fields, append, update, remove } = useFieldArray({
@@ -303,12 +336,13 @@ export function EditableBudgetTable({
 
   const watchedPartidas = form.watch("partidas");
   React.useEffect(() => {
+    if (loteFilter) return;
     const lotes = (watchedPartidas ?? [])
       .map((p) => (p.lote ?? "").trim())
       .filter(Boolean);
     const unique = Array.from(new Set(lotes));
     onUniqueLotesChange?.(unique);
-  }, [watchedPartidas, onUniqueLotesChange]);
+  }, [watchedPartidas, onUniqueLotesChange, loteFilter]);
 
   // Comprobación de desviación de precio por fila (PVU vs histórico): verde = aceptable, rojo = desviado
   const deviationDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -399,7 +433,7 @@ export function EditableBudgetTable({
       if (needsRefetch) {
         onPartidaAdded();
         if (lastRowWasSaved) {
-          const lastLote = form.getValues(`partidas.${lastRowIndex}`).lote || "General";
+          const lastLote = loteFilter ?? ((lotesExcluidos ? "General" : form.getValues(`partidas.${lastRowIndex}`).lote) || "General");
           append({ ...ghostRow, lote: lastLote });
         }
       }
@@ -427,7 +461,7 @@ export function EditableBudgetTable({
       focusRestoreRef.current = document.activeElement as HTMLElement | null;
       shouldRestoreFocusRef.current = true;
       const row = form.getValues(`partidas.${index}`);
-      append({ ...ghostRow, lote: row.lote || "General" });
+      append({ ...ghostRow, lote: loteFilter ?? ((lotesExcluidos ? "General" : row.lote) || "General") });
     }
   };
 
@@ -445,7 +479,7 @@ export function EditableBudgetTable({
       }
     }
     remove(index);
-    if (wasLast) append({ ...ghostRow, lote: row?.lote || "General" });
+    if (wasLast) append({ ...ghostRow, lote: loteFilter ?? ((lotesExcluidos ? "General" : row?.lote) || "General") });
   };
 
   // --- HANDLERS ---
@@ -476,8 +510,7 @@ export function EditableBudgetTable({
         <table className="min-w-full text-left text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
             <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-              <th className="py-3 pl-4 pr-2 font-medium">Producto</th>
-              <th className="w-24 py-3 pr-2 font-medium">Lote</th>
+              <th className="min-w-[280px] py-3 pl-4 pr-2 font-medium">Producto</th>
               <th className="w-24 py-3 pr-2 text-right font-medium">Uds.</th>
               {showPmaxu && (
                 <th className="w-28 py-3 pr-2 text-right font-medium">PMAXU (€)</th>
@@ -508,49 +541,41 @@ export function EditableBudgetTable({
                     key={field.id} 
                     className={`hover:bg-slate-50 ${isGhost ? "bg-emerald-50/20" : ""}`}
                 >
-                  <td className="py-2 pl-4 pr-2 align-middle">
+                  <td className="min-w-[280px] py-2 pl-4 pr-2 align-middle">
                     <ProductCellAutocomplete
-                      value={idProd ? { id: idProd, nombre: prodName } : null}
+                      value={idProd ? { id: idProd, nombre: prodName ?? "" } : null}
                       onSelect={(id, nombre) => handleProductSelect(index, id, nombre)}
+                      onClear={() => {
+                        form.setValue(`partidas.${index}.id_producto`, null);
+                        form.setValue(`partidas.${index}.product_nombre`, "");
+                        markDirty(index);
+                      }}
                       placeholder={isGhost ? "Añadir..." : ""}
                       disabled={isLocked}
                     />
                   </td>
 
-                  <td className="py-2 pr-2 align-middle">
-                    <Input
-                      className={inputCellClass}
-                      {...form.register(`partidas.${index}.lote`)}
-                      disabled={isLocked}
-                      onChange={(e) => {
-                        form.setValue(`partidas.${index}.lote`, e.target.value);
-                        markDirty(index);
-                      }}
-                    />
-                  </td>
 
                   <td className="py-2 pr-2 align-middle">
                     {(() => {
-                      const { ref: regRef, ...unidadesRest } = form.register(
-                        `partidas.${index}.unidades`,
-                        { valueAsNumber: true }
-                      );
+                      const unidadesVal = form.watch(`partidas.${index}.unidades`);
+                      const numVal = unidadesVal != null && !Number.isNaN(Number(unidadesVal)) ? Number(unidadesVal) : 0;
                       return (
                         <Input
-                          type="number"
-                          min={0}
-                          step={1}
+                          type="text"
+                          inputMode="numeric"
                           className={`${inputCellClass} text-right font-medium`}
                           disabled={isLocked}
-                          {...unidadesRest}
+                          placeholder="0"
+                          value={numVal === 0 ? "" : String(numVal)}
+                          onChange={(e) => {
+                            const v = parseDecimalInput(e.target.value);
+                            form.setValue(`partidas.${index}.unidades`, Math.max(0, v));
+                            markDirty(index);
+                          }}
+                          onBlur={() => form.trigger(`partidas.${index}.unidades`)}
                           ref={(el) => {
                             unidadesInputRefs.current[index] = el;
-                            regRef(el);
-                          }}
-                          onChange={(e) => {
-                            unidadesRest.onChange(e);
-                            form.setValue(`partidas.${index}.unidades`, parseFloat(e.target.value) || 0);
-                            markDirty(index);
                           }}
                         />
                       );
@@ -560,14 +585,18 @@ export function EditableBudgetTable({
                   {showPmaxu && (
                     <td className="py-2 pr-2 align-middle">
                       <Input
-                        type="number"
-                        min={0}
-                        step={0.01}
+                        type="text"
+                        inputMode="decimal"
                         className={`${inputCellClass} text-right`}
                         disabled={isLocked}
-                        value={pmaxu != null && !Number.isNaN(Number(pmaxu)) ? Number(pmaxu) : 0}
+                        placeholder="0"
+                        value={
+                          pmaxu != null && !Number.isNaN(Number(pmaxu)) && Number(pmaxu) !== 0
+                            ? String(pmaxu)
+                            : ""
+                        }
                         onChange={(e) => {
-                          const num = parseFloat(e.target.value) || 0;
+                          const num = parseDecimalInput(e.target.value);
                           form.setValue(`partidas.${index}.pmaxu`, num);
                           markDirty(index);
                         }}
@@ -594,6 +623,7 @@ export function EditableBudgetTable({
                     <Input
                       type="text"
                       inputMode="decimal"
+                      placeholder="0"
                       className={`${inputCellClass} text-right`}
                       disabled={isLocked}
                       value={
@@ -607,7 +637,7 @@ export function EditableBudgetTable({
                         setEditingDecimal({
                           index,
                           field: "pvu",
-                          value: pvu !== undefined && pvu !== null && !Number.isNaN(Number(pvu)) ? String(pvu) : "",
+                          value: pvu !== undefined && pvu !== null && !Number.isNaN(Number(pvu)) && Number(pvu) !== 0 ? String(pvu) : "",
                         })
                       }
                       onChange={(e) => {
@@ -630,6 +660,7 @@ export function EditableBudgetTable({
                     <Input
                       type="text"
                       inputMode="decimal"
+                      placeholder="0"
                       className={`${inputCellClass} text-right text-slate-500`}
                       disabled={isLocked}
                       value={
@@ -643,7 +674,7 @@ export function EditableBudgetTable({
                         setEditingDecimal({
                           index,
                           field: "pcu",
-                          value: pcu !== undefined && pcu !== null && !Number.isNaN(Number(pcu)) ? String(pcu) : "",
+                          value: pcu !== undefined && pcu !== null && !Number.isNaN(Number(pcu)) && Number(pcu) !== 0 ? String(pcu) : "",
                         })
                       }
                       onChange={(e) => {
@@ -694,9 +725,9 @@ export function EditableBudgetTable({
                      )}
                   </td>
 
-                  {/* ELIMINAR */}
+                  {/* ELIMINAR - mostrar también para filas con producto pendientes de guardar */}
                   <td className="py-2 pr-4 text-center align-middle">
-                    {!isGhost && !isLocked && (
+                    {(!isGhost || idProd) && !isLocked && (
                       <button
                         type="button"
                         onClick={() => handleRemoveRow(index)}

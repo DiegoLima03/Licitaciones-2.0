@@ -2,7 +2,7 @@
 Dashboard: timeline por adjudicación–finalización y KPIs.
 Endpoints de analítica: material trends, risk pipeline, sweet spots, price deviation.
 
-Estados válidos (única lista en la app): VALORACIÓN, DESCARTADA, EN ANÁLISIS, PRESENTADA,
+Estados válidos (única lista en la app): DESCARTADA, EN ANÁLISIS, PRESENTADA,
 ADJUDICADA, NO ADJUDICADA, TERMINADA. Las comparaciones son insensibles a mayúsculas.
 """
 
@@ -31,17 +31,17 @@ from backend.models import (
 
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-# Estados (solo los 7 del desplegable; comparación por lower())
+# Estados (solo los del desplegable; comparación por lower())
 ESTADOS_OFERTADO = {"Adjudicada", "No Adjudicada", "Presentada", "Terminada"}
 ESTADOS_ADJUDICADAS_TERMINADAS = {"Adjudicada", "Terminada"}
 ESTADOS_DESCARTADA = {"Descartada"}
-ESTADOS_ANALISIS_VALORACION = {"EN ANÁLISIS", "Valoración"}
+ESTADOS_EN_ANALISIS = {"EN ANÁLISIS"}
 
 # Versión en minúsculas para comparación insensible a mayúsculas (tbl_estados puede tener "TERMINADA", etc.)
 ESTADOS_OFERTADO_NORM = {s.lower() for s in ESTADOS_OFERTADO}
 ESTADOS_ADJUDICADAS_TERMINADAS_NORM = {s.lower() for s in ESTADOS_ADJUDICADAS_TERMINADAS}
 ESTADOS_DESCARTADA_NORM = {s.lower() for s in ESTADOS_DESCARTADA}
-ESTADOS_ANALISIS_VALORACION_NORM = {s.lower() for s in ESTADOS_ANALISIS_VALORACION}
+ESTADOS_EN_ANALISIS_NORM = {s.lower() for s in ESTADOS_EN_ANALISIS}
 
 
 def _get_licitaciones_df(org_id: str) -> pd.DataFrame:
@@ -238,9 +238,9 @@ def get_kpis(
     margen_presu = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=True, org_id=org_s)
     margen_real = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=False, org_id=org_s)
 
-    # % descartadas = descartadas / (total - análisis - valoración)
+    # % descartadas = descartadas / (total - en análisis)
     mask_des = df["_estado_norm"].isin(ESTADOS_DESCARTADA_NORM)
-    mask_an_val = df["_estado_norm"].isin(ESTADOS_ANALISIS_VALORACION_NORM)
+    mask_an_val = df["_estado_norm"].isin(ESTADOS_EN_ANALISIS_NORM)
     count_des = mask_des.sum()
     denom = total_oportunidades_uds - mask_an_val.sum()
     pct_descartadas_uds = (count_des / denom * 100) if denom and denom > 0 else None

@@ -474,18 +474,18 @@ export default function Home() {
           />
           <KpiDualWithHelp
             title="Ratio ofertado/oportunidades"
-            valueUds={`${(kpis.ratio_ofertado_oportunidades_uds ?? 0).toFixed(1)} %`}
-            valueEuros={`${(kpis.ratio_ofertado_oportunidades_euros ?? 0).toFixed(1)} %`}
+            valueUds={`${Number(kpis.ratio_ofertado_oportunidades_uds ?? 0).toFixed(1)} %`}
+            valueEuros={`${Number(kpis.ratio_ofertado_oportunidades_euros ?? 0).toFixed(1)} %`}
             help="(Total ofertado / Total oportunidades) × 100. En uds: por número de expedientes. En €: por importe de presupuestos."
           />
           <KpiWithHelp
             title="Ratio (Adj.+Term.)/Total ofertado"
-            value={`${(kpis.ratio_adjudicadas_terminadas_ofertado ?? 0).toFixed(1)} %`}
+            value={`${Number(kpis.ratio_adjudicadas_terminadas_ofertado ?? 0).toFixed(1)} %`}
             help="(Adjudicadas + Terminadas) / Total ofertado × 100 (en número de licitaciones)."
           />
           <KpiWithHelp
             title="Ratio adjudicación"
-            value={(kpis.ratio_adjudicacion ?? 0).toFixed(2)}
+            value={Number(kpis.ratio_adjudicacion ?? 0).toFixed(2)}
             help="(Adjudicadas + Terminadas) / (Adjudicadas + No Adjudicadas + Terminadas). Valor entre 0 y 1."
           />
           <KpiWithHelp
@@ -518,7 +518,7 @@ export default function Home() {
                 ? `${Number(kpis.pct_descartadas_euros).toFixed(1)} %`
                 : "—"
             }
-            help="Uds: (nº licitaciones descartadas) / (total − análisis − valoración) × 100. €: mismo concepto aplicado a la suma de presupuestos."
+            help="Uds: (nº licitaciones descartadas) / (total − en análisis) × 100. €: mismo concepto aplicado a la suma de presupuestos."
           />
         </div>
       </section>

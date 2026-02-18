@@ -6,6 +6,7 @@ Multi-tenant: Todas las operaciones filtran por organization_id del usuario aute
 Flujo de estados: POST /tenders/{id}/change-status con validaciones de negocio.
 """
 
+from decimal import Decimal
 from datetime import date
 from typing import Any, Dict, List, Optional
 
@@ -42,8 +43,11 @@ def _get_tender_or_404(tender_id: int, org_id: str) -> dict:
     return resp.data
 
 
-def _suma_presupuesto_licitacion(tender_id: int, org_id: str) -> float:
-    """Suma de (unidades * pvu) de partidas activas. Para validar PRESENTADA."""
+def _calcular_total_presupuesto(tender_id: int, org_id: str) -> Decimal:
+    """
+    Suma de (unidades * pvu) de partidas activas usando Decimal para precisión.
+    Para validar PRESENTADA: total debe ser > 0.
+    """
     resp = (
         supabase_client.table("tbl_licitaciones_detalle")
         .select("unidades, pvu")
@@ -52,10 +56,10 @@ def _suma_presupuesto_licitacion(tender_id: int, org_id: str) -> float:
         .eq("activo", True)
         .execute()
     )
-    total = 0.0
+    total = Decimal("0")
     for r in resp.data or []:
-        u = float(r.get("unidades") or 0)
-        p = float(r.get("pvu") or 0)
+        u = Decimal(str(r.get("unidades") or 0))
+        p = Decimal(str(r.get("pvu") or 0))
         total += u * p
     return total
 
@@ -179,8 +183,8 @@ def change_tender_status(
     # --- VALIDACIONES DE TRANSICIÓN ---
 
     if nuevo_estado == EstadoLicitacion.PRESENTADA:
-        suma = _suma_presupuesto_licitacion(tender_id, org_id_str)
-        if suma <= 0:
+        suma = _calcular_total_presupuesto(tender_id, org_id_str)
+        if suma <= Decimal("0"):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No se puede presentar a coste cero. La suma del presupuesto (partidas activas) debe ser > 0.",
@@ -199,7 +203,7 @@ def change_tender_status(
     update_data: Dict[str, Any] = {"id_estado": nuevo_id}
 
     if nuevo_estado == EstadoLicitacion.ADJUDICADA and payload.importe_adjudicacion is not None:
-        update_data["pres_maximo"] = payload.importe_adjudicacion
+        update_data["pres_maximo"] = float(payload.importe_adjudicacion)  # DB numeric
     if payload.fecha_adjudicacion is not None:
         update_data["fecha_adjudicacion"] = payload.fecha_adjudicacion.isoformat()
     if nuevo_estado == EstadoLicitacion.PRESENTADA:
@@ -224,10 +228,14 @@ def change_tender_status(
         .update(update_data)
         .eq("id_licitacion", tender_id)
         .eq("organization_id", org_id_str)
+        .eq("id_estado", id_estado_actual)
         .execute()
     )
     if not resp.data:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Licitación no encontrada.")
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Conflicto de concurrencia: el estado de la licitación cambió. Recarga y vuelve a intentar.",
+        )
     return {**resp.data[0], "message": "Estado actualizado correctamente."}
 
 
@@ -270,9 +278,9 @@ def add_partida(tender_id: int, payload: PartidaCreate, current_user: CurrentUse
             "lote": payload.lote or "General",
             "id_producto": payload.id_producto,
             "unidades": payload.unidades if payload.unidades is not None else 1.0,
-            "pvu": payload.pvu or 0.0,
-            "pcu": payload.pcu or 0.0,
-            "pmaxu": payload.pmaxu or 0.0,
+            "pvu": float(payload.pvu) if payload.pvu is not None else 0.0,
+            "pcu": float(payload.pcu) if payload.pcu is not None else 0.0,
+            "pmaxu": float(payload.pmaxu) if payload.pmaxu is not None else 0.0,
             "activo": payload.activo if payload.activo is not None else True,
         }
         response = (
@@ -321,7 +329,7 @@ def update_partida(tender_id: int, detalle_id: int, payload: PartidaUpdate, curr
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Partida no encontrada.",
             )
-        update_data = payload.model_dump(exclude_unset=True)
+        update_data = payload.model_dump(exclude_unset=True, mode="json")
         if not update_data:
             partidas_resp = (
                 supabase_client.table("tbl_licitaciones_detalle")
@@ -390,7 +398,7 @@ def delete_partida(tender_id: int, detalle_id: int, current_user: CurrentUserDep
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
 def create_tender(payload: TenderCreate, current_user: CurrentUserDep) -> dict:
     """
-    Crea una nueva licitación.
+    Crea una nueva licitación. Estado inicial fijo: EN ANÁLISIS.
     organization_id se asigna automáticamente desde el usuario autenticado.
     """
     try:
@@ -399,9 +407,10 @@ def create_tender(payload: TenderCreate, current_user: CurrentUserDep) -> dict:
             "nombre": payload.nombre,
             "pais": payload.pais,
             "numero_expediente": payload.numero_expediente or "",
-            "pres_maximo": payload.pres_maximo or 0.0,
+            "pres_maximo": float(payload.pres_maximo) if payload.pres_maximo is not None else 0.0,
             "descripcion": payload.descripcion or "",
-            "id_estado": payload.id_estado,
+            "enlace_gober": payload.enlace_gober or None,
+            "id_estado": EstadoLicitacion.EN_ANALISIS.value,
             "id_tipolicitacion": payload.id_tipolicitacion,
             "fecha_presentacion": payload.fecha_presentacion,
             "fecha_adjudicacion": payload.fecha_adjudicacion,
@@ -437,7 +446,7 @@ def update_tender(tender_id: int, payload: TenderUpdate, current_user: CurrentUs
     PUT /tenders/{id}
     """
     org_id_str = str(current_user.org_id)
-    update_data = payload.model_dump(exclude_unset=True)
+    update_data = payload.model_dump(exclude_unset=True, mode="json")
     if not update_data:
         return get_tender(tender_id, current_user)
 
@@ -449,7 +458,7 @@ def update_tender(tender_id: int, payload: TenderUpdate, current_user: CurrentUs
                 detail=f"No se pueden modificar campos económicos ni fechas cuando la licitación está presentada o posterior. Use POST /tenders/{{id}}/change-status para cambiar estado. Campos bloqueados enviados: {', '.join(sorted(bloqueados_enviados))}",
             )
         # Solo permitir: descripcion, nombre, numero_expediente, id_tipolicitacion
-        permitidos = {"descripcion", "nombre", "numero_expediente", "id_tipolicitacion"}
+        permitidos = {"descripcion", "nombre", "numero_expediente", "id_tipolicitacion", "enlace_gober", "lotes_config"}
         update_data = {k: v for k, v in update_data.items() if k in permitidos}
 
     try:
@@ -478,38 +487,28 @@ def update_tender(tender_id: int, payload: TenderUpdate, current_user: CurrentUs
 @router.delete("/{tender_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_tender(tender_id: int, current_user: CurrentUserDep) -> None:
     """
-    Borra una licitación y sus datos relacionados (cascade manual).
-    Orden: tbl_licitaciones_real -> tbl_entregas -> tbl_licitaciones_detalle -> tbl_licitaciones.
+    Borra una licitación. Dependencias eliminadas por CASCADE en BD.
+
+    TODO: Ensure DB has ON DELETE CASCADE FK constraints for:
+    - tbl_licitaciones_real.id_licitacion -> tbl_licitaciones
+    - tbl_entregas.id_licitacion -> tbl_licitaciones
+    - tbl_licitaciones_detalle.id_licitacion -> tbl_licitaciones
 
     DELETE /tenders/{id}
     """
     try:
-        # Verificar que existe
-        check = (
+        resp = (
             supabase_client.table("tbl_licitaciones")
-            .select("id_licitacion")
+            .delete()
             .eq("id_licitacion", tender_id)
             .eq("organization_id", str(current_user.org_id))
             .execute()
         )
-        if not check.data:
+        if not resp.data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Licitación no encontrada.",
             )
-        org_id_str = str(current_user.org_id)
-        supabase_client.table("tbl_licitaciones_real").delete().eq(
-            "id_licitacion", tender_id
-        ).eq("organization_id", org_id_str).execute()
-        supabase_client.table("tbl_entregas").delete().eq(
-            "id_licitacion", tender_id
-        ).eq("organization_id", org_id_str).execute()
-        supabase_client.table("tbl_licitaciones_detalle").delete().eq(
-            "id_licitacion", tender_id
-        ).eq("organization_id", org_id_str).execute()
-        supabase_client.table("tbl_licitaciones").delete().eq(
-            "id_licitacion", tender_id
-        ).eq("organization_id", org_id_str).execute()
     except HTTPException:
         raise
     except Exception as e:

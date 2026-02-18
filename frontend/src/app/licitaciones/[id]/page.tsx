@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Edit3, ChevronRight } from "lucide-react";
+import { ArrowLeft, ChevronRight, Edit3, ExternalLink } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -48,6 +48,7 @@ import type {
   EntregaLinea,
   Estado,
   EntregaWithLines,
+  LoteConfigItem,
   TenderDetail,
   TenderPartida,
   TenderStatusChange,
@@ -112,13 +113,41 @@ function agregarPartidas(items: PresupuestoItem[]): PresupuestoItem[] {
   return Array.from(map.values());
 }
 
-/** Schema para el formulario de edición de cabecera (fechas y descripción). Coincide con TenderUpdate. */
-const cabeceraFormSchema = z.object({
-  fecha_presentacion: z.string().optional(),
-  fecha_adjudicacion: z.string().optional(),
-  fecha_finalizacion: z.string().optional(),
-  descripcion: z.string().optional(),
-});
+/** Schema para el formulario de edición de cabecera (fechas, descripción y enlace Gober). Coincide con TenderUpdate. */
+const cabeceraFormSchema = z
+  .object({
+    fecha_presentacion: z.string().optional(),
+    fecha_adjudicacion: z.string().optional(),
+    fecha_finalizacion: z.string().optional(),
+    descripcion: z.string().optional(),
+    enlace_gober: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    const raw = (data.fecha_presentacion ?? "").trim().split("T")[0];
+    if (!raw) return;
+    const [y, m, d] = raw.split("-").map(Number);
+    if (!y || !m || !d) return;
+    const fPresentacion = new Date(y, m - 1, d);
+    const hoy = new Date();
+    hoy.setHours(0, 0, 0, 0);
+    fPresentacion.setHours(0, 0, 0, 0);
+    if (fPresentacion > hoy) {
+      const enlace = (data.enlace_gober ?? "").trim();
+      if (!enlace) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "El enlace a Gober es obligatorio cuando la fecha de presentación es futura",
+          path: ["enlace_gober"],
+        });
+      } else if (!/^https?:\/\/.+/.test(enlace)) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Introduce una URL válida",
+          path: ["enlace_gober"],
+        });
+      }
+    }
+  });
 type CabeceraFormValues = z.infer<typeof cabeceraFormSchema>;
 
 function EstadoLineaCell({
@@ -186,8 +215,11 @@ export default function LicitacionDetallePage() {
   const [lic, setLic] = React.useState<TenderDetail | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
-  const [lotesActivos, setLotesActivos] = React.useState<string[]>([]);
   const [uniqueLotesFromTable, setUniqueLotesFromTable] = React.useState<string[]>([]);
+  const [showLotesConfigPanel, setShowLotesConfigPanel] = React.useState(false);
+  const [numLotesInput, setNumLotesInput] = React.useState("2");
+  const [submittingLotes, setSubmittingLotes] = React.useState(false);
+  const [errorLotes, setErrorLotes] = React.useState<string | null>(null);
   const [entregas, setEntregas] = React.useState<EntregaWithLines[]>([]);
   const [estados, setEstados] = React.useState<Estado[]>([]);
   const [tipos, setTipos] = React.useState<Tipo[]>([]);
@@ -232,6 +264,7 @@ export default function LicitacionDetallePage() {
       fecha_adjudicacion: "",
       fecha_finalizacion: "",
       descripcion: "",
+      enlace_gober: "",
     },
   });
 
@@ -242,6 +275,7 @@ export default function LicitacionDetallePage() {
         fecha_adjudicacion: lic.fecha_adjudicacion ?? "",
         fecha_finalizacion: lic.fecha_finalizacion ?? "",
         descripcion: lic.descripcion ?? "",
+        enlace_gober: lic.enlace_gober ?? "",
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when dialog opens with lic
@@ -274,16 +308,6 @@ export default function LicitacionDetallePage() {
       cancelled = true;
     };
   }, [id]);
-
-  React.useEffect(() => {
-    if (!lic?.partidas?.length) {
-      setLotesActivos([]);
-      return;
-    }
-    const items = mapPartidas(lic.partidas);
-    const lotes = Array.from(new Set(items.map((i) => i.lote)));
-    setLotesActivos(lotes);
-  }, [lic?.id_licitacion, lic?.partidas?.length]);
 
   const refetchEntregas = React.useCallback(() => {
     if (!Number.isFinite(id)) return;
@@ -318,12 +342,6 @@ export default function LicitacionDetallePage() {
       });
   }, []);
 
-  React.useEffect(() => {
-    if (uniqueLotesFromTable.length <= 1) {
-      setLotesActivos((prev) => prev.filter((l) => uniqueLotesFromTable.includes(l)));
-    }
-  }, [uniqueLotesFromTable]);
-
   /** Unidades reales ejecutadas por partida (clave: "lote|descripcion"). */
   const ejecutadoPorPartida = React.useMemo(() => {
     const map: Record<string, number> = {};
@@ -352,7 +370,7 @@ export default function LicitacionDetallePage() {
   const showContent = !showLoading && !showError;
 
   const isLocked = showContent && lic ? ESTADOS_PRESUPUESTO_BLOQUEADO.includes(lic.id_estado) : false;
-  const isEjecucionTabDisabled = showContent && lic ? lic.id_estado < ID_ESTADO_ADJUDICADA : false;
+  const showEjecucionRemainingTabs = showContent && lic ? lic.id_estado >= ID_ESTADO_ADJUDICADA : false;
   const isRechazada = showContent && lic && (lic.id_estado === ID_ESTADO_DESCARTADA || lic.id_estado === ID_ESTADO_NO_ADJUDICADA);
   const motivoRechazo = React.useMemo(() => {
     if (!lic?.descripcion || !isRechazada) return null;
@@ -435,11 +453,50 @@ export default function LicitacionDetallePage() {
 
   const itemsPresupuesto = showContent && lic ? mapPartidas(lic.partidas ?? []) : [];
   const itemsPresupuestoAgregado = agregarPartidas(itemsPresupuesto);
-  const activos = itemsPresupuestoAgregado.filter((i) => i.activo);
+  const lotesConfig = (lic?.lotes_config ?? []) as LoteConfigItem[];
+  const lotesGanados = new Set(lotesConfig.filter((l) => l.ganado).map((l) => l.nombre));
+  const activos = itemsPresupuestoAgregado.filter((i) => {
+    if (lotesConfig.length > 0) {
+      return lotesGanados.has(i.lote);
+    }
+    return i.activo;
+  });
   const presupuestoBase = showContent && lic ? Number(lic.pres_maximo) || 0 : 0;
   const ofertado = activos.reduce((acc, i) => acc + i.unidades * i.pvu, 0);
   const costePrevisto = activos.reduce((acc, i) => acc + i.unidades * i.pcu, 0);
   const beneficioPrevisto = ofertado - costePrevisto;
+
+  const handleGenerarLotes = async () => {
+    if (!lic) return;
+    setErrorLotes(null);
+    const n = parseInt(numLotesInput, 10);
+    if (Number.isNaN(n) || n < 1 || n > 20) {
+      setErrorLotes("Introduce un número entre 1 y 20.");
+      return;
+    }
+    setSubmittingLotes(true);
+    try {
+      const cfg: LoteConfigItem[] = Array.from({ length: n }, (_, i) => ({
+        nombre: `Lote ${i + 1}`,
+        ganado: false,
+      }));
+      const actualizado = await TendersService.update(lic.id_licitacion, { lotes_config: cfg });
+      setLic((prev) => (prev ? { ...prev, ...actualizado, lotes_config: cfg } : null));
+    } catch (e) {
+      setErrorLotes(e instanceof Error ? e.message : "Error al generar lotes. ¿Has ejecutado la migración lotes_config en Supabase?");
+    } finally {
+      setSubmittingLotes(false);
+    }
+  };
+
+  const handleToggleGanado = async (nombreLote: string, ganado: boolean) => {
+    if (!lic?.lotes_config) return;
+    const cfg = (lic.lotes_config as LoteConfigItem[]).map((l) =>
+      l.nombre === nombreLote ? { ...l, ganado } : l
+    );
+    await TendersService.update(lic.id_licitacion, { lotes_config: cfg });
+    refetchLicitacion();
+  };
 
   const handleSubmitAlbaran = async () => {
     if (!showContent || !lic) return;
@@ -542,13 +599,24 @@ export default function LicitacionDetallePage() {
               <span className="font-medium text-slate-700">Expediente:</span>{" "}
               {lic.numero_expediente ?? "—"}
             </span>
+            {lic.enlace_gober && (
+              <a
+                href={lic.enlace_gober}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 font-medium text-emerald-600 hover:text-emerald-700 hover:underline"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                Ver en Gober
+              </a>
+            )}
             <span>
               <span className="font-medium text-slate-700">Tipo:</span>{" "}
               {lic.id_tipolicitacion != null
                 ? (tipos.find((t) => t.id_tipolicitacion === lic.id_tipolicitacion)?.tipo ?? `Tipo ${lic.id_tipolicitacion}`)
                 : "—"}
             </span>
-            <Badge variant="info">
+            <Badge variant="info" className="min-w-[130px] justify-center">
               {estados.find((e) => e.id_estado === lic.id_estado)?.nombre_estado ?? `Estado ${lic.id_estado}`}
             </Badge>
             {transicionesDisponibles.length > 0 && (
@@ -696,6 +764,7 @@ export default function LicitacionDetallePage() {
                           fecha_adjudicacion: values.fecha_adjudicacion?.trim() || null,
                           fecha_finalizacion: values.fecha_finalizacion?.trim() || null,
                           descripcion: values.descripcion?.trim() || null,
+                          enlace_gober: values.enlace_gober?.trim() || null,
                         });
                         refetchLicitacion();
                         setOpenEditarCabecera(false);
@@ -763,6 +832,26 @@ export default function LicitacionDetallePage() {
                         )}
                       />
                     </div>
+                    <FormField
+                      control={cabeceraForm.control}
+                      name="enlace_gober"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs font-medium text-slate-500">
+                            Enlace Gober (obligatorio si F. Presentación es futura)
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              type="url"
+                              placeholder="https://gober.es/..."
+                              {...field}
+                              value={field.value ?? ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
                     <FormField
                       control={cabeceraForm.control}
                       name="descripcion"
@@ -874,81 +963,152 @@ export default function LicitacionDetallePage() {
         <Tabs defaultValue="presupuesto">
           <TabsList>
             <TabsTrigger value="presupuesto">Presupuesto (Oferta)</TabsTrigger>
-            {isEjecucionTabDisabled ? (
-              <span title="Disponible tras adjudicación" className="inline-flex cursor-not-allowed">
-                <TabsTrigger value="ejecucion" disabled>
-                  Ejecución (Real / Albaranes)
-                </TabsTrigger>
-              </span>
-            ) : (
-              <TabsTrigger value="ejecucion">Ejecución (Real / Albaranes)</TabsTrigger>
+            {showEjecucionRemainingTabs && (
+              <>
+                <TabsTrigger value="ejecucion">Ejecución (Real / Albaranes)</TabsTrigger>
+                <TabsTrigger value="remaining">Remaining</TabsTrigger>
+              </>
             )}
-            <TabsTrigger value="remaining">Remaining</TabsTrigger>
           </TabsList>
 
           <TabsContent value="presupuesto" className="flex min-h-[60vh] flex-col">
-            {uniqueLotesFromTable.length > 1 && (
-              <div className="mb-4 grid shrink-0 gap-3 lg:grid-cols-[2fr,3fr]">
-                <Card>
-                  <CardHeader className="pb-3">
-                    <CardTitle className="text-sm font-semibold text-slate-800">
-                      Configuración de Lotes
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="pt-0">
-                    <table className="min-w-full text-left text-sm">
-                      <thead>
-                        <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                          <th className="py-2 pr-3">Lote</th>
-                          <th className="py-2 pr-3 text-right">Activo</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {uniqueLotesFromTable.map((lote) => (
-                          <tr
-                            key={lote}
-                            className="border-b border-slate-100 last:border-0"
-                          >
-                            <td className="py-2 pr-3 text-xs text-slate-900">{lote}</td>
-                            <td className="py-2 pr-3 text-right">
-                              <Switch
-                                checked={lotesActivos.includes(lote)}
-                                disabled={isLocked}
-                                onCheckedChange={(checked) =>
-                                  setLotesActivos((prev) =>
-                                    checked
-                                      ? Array.from(new Set([...prev, lote]))
-                                      : prev.filter((l) => l !== lote)
-                                  )
-                                }
+            {lic && (
+              <>
+                {(!lotesConfig || lotesConfig.length === 0) ? (
+                  <div className="flex flex-col gap-4">
+                    {!showLotesConfigPanel ? (
+                      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        <span className="text-sm text-slate-600">¿Quieres añadir lotes a esta licitación?</span>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setShowLotesConfigPanel(true)}
+                        >
+                          Sí, configurar lotes
+                        </Button>
+                      </div>
+                    ) : (
+                      <Card>
+                        <CardHeader>
+                          <CardTitle className="text-sm font-semibold text-slate-800">
+                            Configurar lotes
+                          </CardTitle>
+                          <p className="text-sm text-slate-600">
+                            Define cuántos lotes tiene esta licitación. Cada lote se mostrará como una tabla separada con su propio presupuesto.
+                          </p>
+                        </CardHeader>
+                        <CardContent className="flex flex-col gap-3">
+                          {errorLotes && (
+                            <p className="text-sm text-red-600">{errorLotes}</p>
+                          )}
+                          <div className="flex flex-row items-end gap-3">
+                            <div className="flex flex-col gap-1">
+                              <label className="text-xs font-medium text-slate-600">¿Cuántos lotes?</label>
+                              <Input
+                                type="number"
+                                min={1}
+                                max={20}
+                                value={numLotesInput}
+                                onChange={(e) => {
+                                  setNumLotesInput(e.target.value);
+                                  setErrorLotes(null);
+                                }}
+                                className="w-24"
                               />
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </CardContent>
-                </Card>
-                <div className="flex flex-col justify-between gap-2">
-                  <p className="text-sm text-slate-600">
-                    Activa o desactiva los lotes que quieres incluir en el análisis.
-                  </p>
-                </div>
-              </div>
+                            </div>
+                            <Button
+                              type="button"
+                              onClick={handleGenerarLotes}
+                              disabled={submittingLotes || !numLotesInput || parseInt(numLotesInput, 10) < 1}
+                            >
+                              {submittingLotes ? "Generando…" : "Generar lotes"}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => setShowLotesConfigPanel(false)}
+                            >
+                              Cancelar
+                            </Button>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    )}
+                    <div className="min-h-0 flex-1">
+                      <EditableBudgetTable
+                        lic={lic}
+                        onPartidaAdded={refetchLicitacion}
+                        onUniqueLotesChange={setUniqueLotesFromTable}
+                        isLocked={isLocked}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {lotesConfig.map((loteItem) => (
+                      <Card key={loteItem.nombre}>
+                        <CardHeader className="flex flex-row items-center justify-between gap-4 pb-3">
+                          <CardTitle className="text-base font-semibold text-slate-800">
+                            {loteItem.nombre}
+                          </CardTitle>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs text-slate-500">Ganado</span>
+                            <Switch
+                              checked={loteItem.ganado}
+                              disabled={isLocked}
+                              onCheckedChange={(checked) => handleToggleGanado(loteItem.nombre, checked)}
+                            />
+                          </div>
+                        </CardHeader>
+                        <CardContent className="pt-0">
+                          <div className="min-h-0 flex-1">
+                            <EditableBudgetTable
+                              key={`lote-${loteItem.nombre}`}
+                              lic={lic}
+                              onPartidaAdded={refetchLicitacion}
+                              loteFilter={loteItem.nombre}
+                              isLocked={isLocked}
+                            />
+                          </div>
+                        </CardContent>
+                      </Card>
+                    ))}
+                    {(() => {
+                      const lotesDefinidos = new Set(lotesConfig.map((l) => l.nombre));
+                      const partidasOtros = (lic.partidas ?? []).filter(
+                        (p) => !lotesDefinidos.has(p.lote ?? "General")
+                      );
+                      if (partidasOtros.length === 0) return null;
+                      return (
+                        <Card>
+                          <CardHeader>
+                            <CardTitle className="text-base font-semibold text-slate-800">
+                              Otros (sin lote definido)
+                            </CardTitle>
+                          </CardHeader>
+                          <CardContent className="pt-0">
+                            <div className="min-h-0 flex-1">
+                              <EditableBudgetTable
+                                key="lote-otros"
+                                lic={lic}
+                                onPartidaAdded={refetchLicitacion}
+                                lotesExcluidos={lotesConfig.map((l) => l.nombre)}
+                                isLocked={isLocked}
+                              />
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })()}
+                  </div>
+                )}
+              </>
             )}
-
-            <div className="min-h-0 flex-1">
-              {lic && (
-                <EditableBudgetTable
-                  lic={lic}
-                  onPartidaAdded={refetchLicitacion}
-                  onUniqueLotesChange={setUniqueLotesFromTable}
-                  isLocked={isLocked}
-                />
-              )}
-            </div>
           </TabsContent>
 
+          {showEjecucionRemainingTabs && (
           <TabsContent value="ejecucion">
             <div className="mb-3 flex items-center justify-between gap-2">
               <p className="text-sm text-slate-600">
@@ -1288,7 +1448,9 @@ export default function LicitacionDetallePage() {
               </DialogContent>
             </Dialog>
           </TabsContent>
+          )}
 
+          {showEjecucionRemainingTabs && (
           <TabsContent value="remaining">
             <p className="mb-3 text-sm text-slate-600">
               Comparativa entre unidades presupuestadas y ejecutadas por partida.
@@ -1307,7 +1469,9 @@ export default function LicitacionDetallePage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {itemsPresupuestoAgregado.map((item) => {
+                    {itemsPresupuestoAgregado
+                      .filter((item) => lotesConfig.length === 0 || lotesGanados.has(item.lote))
+                      .map((item) => {
                       const keyPartida = `${item.lote}|${item.descripcion}`;
                       const ejecutado = ejecutadoPorPartida[keyPartida] ?? 0;
                       const pendiente = Math.max(0, item.unidades - ejecutado);
@@ -1352,6 +1516,7 @@ export default function LicitacionDetallePage() {
               </CardContent>
             </Card>
           </TabsContent>
+          )}
         </Tabs>
       </section>
     </div>

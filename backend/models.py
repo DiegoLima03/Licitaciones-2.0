@@ -1,4 +1,5 @@
 from datetime import date
+from decimal import Decimal
 from enum import IntEnum
 from typing import Any, Dict, List, Literal, Optional
 from uuid import UUID
@@ -14,7 +15,6 @@ PaisLicitacion = Literal["España", "Portugal"]
 class EstadoLicitacion(IntEnum):
     """IDs de estados en tbl_estados. Máquina de estados para flujo de negocio."""
 
-    VALORACION = 1
     DESCARTADA = 2
     EN_ANALISIS = 3
     PRESENTADA = 4
@@ -78,7 +78,7 @@ class TimelineItem(BaseModel):
     fecha_adjudicacion: Optional[str] = None
     fecha_finalizacion: Optional[str] = None
     estado_nombre: Optional[str] = None
-    pres_maximo: Optional[float] = None
+    pres_maximo: Optional[Decimal] = None
 
 
 class KPIDashboard(BaseModel):
@@ -92,43 +92,43 @@ class KPIDashboard(BaseModel):
 
     # Total oportunidades = todas las licitaciones registradas
     total_oportunidades_uds: int = 0
-    total_oportunidades_euros: float = 0.0
+    total_oportunidades_euros: Decimal = Decimal("0")
 
     # Total ofertado = solo Adjudicada, No Adjudicada, Presentada, Terminada
     total_ofertado_uds: int = 0
-    total_ofertado_euros: float = 0.0
+    total_ofertado_euros: Decimal = Decimal("0")
 
     # Ratio ofertado/oportunidades (uds y €)
-    ratio_ofertado_oportunidades_uds: float = 0.0
-    ratio_ofertado_oportunidades_euros: float = 0.0
+    ratio_ofertado_oportunidades_uds: Decimal = Decimal("0")
+    ratio_ofertado_oportunidades_euros: Decimal = Decimal("0")
 
     # Ratio (Adjudicadas+Terminadas) / Total ofertado
-    ratio_adjudicadas_terminadas_ofertado: float = 0.0
+    ratio_adjudicadas_terminadas_ofertado: Decimal = Decimal("0")
 
     # Margen medio ponderado (adjudicadas + terminadas): presupuestado y real
-    margen_medio_ponderado_presupuestado: Optional[float] = None
-    margen_medio_ponderado_real: Optional[float] = None
+    margen_medio_ponderado_presupuestado: Optional[Decimal] = None
+    margen_medio_ponderado_real: Optional[Decimal] = None
 
-    # % descartadas = descartadas / (total - análisis - valoración)
-    pct_descartadas_uds: Optional[float] = None
-    pct_descartadas_euros: Optional[float] = None
+    # % descartadas = descartadas / (total - en análisis)
+    pct_descartadas_uds: Optional[Decimal] = None
+    pct_descartadas_euros: Optional[Decimal] = None
 
     # Ratio adjudicación = (Adjudicadas+Terminadas) / (Adjudicadas+No Adjudicadas+Terminadas)
-    ratio_adjudicacion: float = 0.0
+    ratio_adjudicacion: Decimal = Decimal("0")
 
 
 # ----- Licitaciones (tbl_licitaciones) -----
 
 
 class TenderCreate(BaseModel):
-    """Payload para crear una licitación."""
+    """Payload para crear una licitación. Estado inicial fijo: EN ANÁLISIS."""
 
     nombre: str = Field(..., description="Nombre del proyecto.")
     pais: PaisLicitacion = Field(..., description="País de la licitación: España o Portugal.")
     numero_expediente: Optional[str] = Field(None, description="Nº expediente.")
-    pres_maximo: Optional[float] = Field(0.0, description="Presupuesto máximo (€).")
+    pres_maximo: Optional[Decimal] = Field(Decimal("0"), description="Presupuesto máximo (€).")
     descripcion: Optional[str] = Field(None, description="Notas / descripción.")
-    id_estado: int = Field(..., description="ID del estado.")
+    enlace_gober: Optional[str] = Field(None, description="URL de la licitación en Gober (plataforma de scraping).")
     id_tipolicitacion: Optional[int] = Field(None, description="ID tipo de licitación (FK tbl_tipolicitacion).")
     fecha_presentacion: Optional[str] = Field(None, description="Fecha presentación (YYYY-MM-DD).")
     fecha_adjudicacion: Optional[str] = Field(None, description="Fecha adjudicación (YYYY-MM-DD).")
@@ -141,14 +141,16 @@ class TenderUpdate(BaseModel):
     nombre: Optional[str] = None
     pais: Optional[PaisLicitacion] = None
     numero_expediente: Optional[str] = None
-    pres_maximo: Optional[float] = None
+    pres_maximo: Optional[Decimal] = None
     descripcion: Optional[str] = None
+    enlace_gober: Optional[str] = None
     id_estado: Optional[int] = None
     id_tipolicitacion: Optional[int] = None
     fecha_presentacion: Optional[str] = None
     fecha_adjudicacion: Optional[str] = None
     fecha_finalizacion: Optional[str] = None
-    descuento_global: Optional[float] = None
+    descuento_global: Optional[Decimal] = None
+    lotes_config: Optional[List[Dict[str, Any]]] = None  # [{"nombre":"Lote 1","ganado":false}, ...]
 
 
 class TenderStatusChange(BaseModel):
@@ -161,7 +163,7 @@ class TenderStatusChange(BaseModel):
     motivo_descarte: Optional[str] = Field(None, description="Obligatorio si nuevo_estado == DESCARTADA.")
     motivo_perdida: Optional[str] = Field(None, description="Obligatorio si nuevo_estado == NO_ADJUDICADA/Perdida.")
     competidor_ganador: Optional[str] = Field(None, description="Empresa ganadora si nuevo_estado == Perdida.")
-    importe_adjudicacion: Optional[float] = Field(None, ge=0, description="Obligatorio si nuevo_estado == ADJUDICADA.")
+    importe_adjudicacion: Optional[Decimal] = Field(None, ge=0, description="Obligatorio si nuevo_estado == ADJUDICADA.")
     fecha_adjudicacion: Optional[date] = Field(None, description="Fecha de adjudicación (YYYY-MM-DD).")
 
     @model_validator(mode="after")
@@ -177,7 +179,7 @@ class TenderStatusChange(BaseModel):
                 raise ValueError("motivo_perdida es obligatorio al pasar a PERDIDA.")
             if not (self.competidor_ganador and str(self.competidor_ganador).strip()):
                 raise ValueError("competidor_ganador es obligatorio al pasar a PERDIDA.")
-        if e == EstadoLicitacion.ADJUDICADA and (self.importe_adjudicacion is None or self.importe_adjudicacion <= 0):
+        if e == EstadoLicitacion.ADJUDICADA and (self.importe_adjudicacion is None or self.importe_adjudicacion <= Decimal("0")):
             raise ValueError("importe_adjudicacion es obligatorio y debe ser > 0 al pasar a ADJUDICADA.")
         return self
 
@@ -201,9 +203,9 @@ class PartidaCreate(BaseModel):
     lote: Optional[str] = Field("General", description="Lote / zona.")
     id_producto: int = Field(..., description="ID del producto en tbl_productos.")
     unidades: Optional[float] = Field(1.0, ge=0, description="Unidades.")
-    pvu: Optional[float] = Field(0.0, ge=0, description="Precio venta unitario (€).")
-    pcu: Optional[float] = Field(0.0, ge=0, description="Precio coste unitario (€).")
-    pmaxu: Optional[float] = Field(0.0, ge=0, description="Precio máximo unitario (€).")
+    pvu: Optional[Decimal] = Field(Decimal("0"), ge=0, description="Precio venta unitario (€).")
+    pcu: Optional[Decimal] = Field(Decimal("0"), ge=0, description="Precio coste unitario (€).")
+    pmaxu: Optional[Decimal] = Field(Decimal("0"), ge=0, description="Precio máximo unitario (€).")
     activo: Optional[bool] = Field(True, description="Partida activa en el presupuesto.")
 
 
@@ -213,9 +215,9 @@ class PartidaUpdate(BaseModel):
     lote: Optional[str] = None
     id_producto: Optional[int] = None
     unidades: Optional[float] = Field(None, ge=0)
-    pvu: Optional[float] = Field(None, ge=0)
-    pcu: Optional[float] = Field(None, ge=0)
-    pmaxu: Optional[float] = Field(None, ge=0)
+    pvu: Optional[Decimal] = Field(None, ge=0)
+    pcu: Optional[Decimal] = Field(None, ge=0)
+    pmaxu: Optional[Decimal] = Field(None, ge=0)
     activo: Optional[bool] = None
 
 
@@ -238,7 +240,7 @@ class DeliveryLineCreate(BaseModel):
     id_detalle: Optional[int] = Field(None, description="ID partida presupuesto (tbl_licitaciones_detalle). Null = gasto extraordinario.")
     proveedor: Optional[str] = Field("", description="Proveedor de la línea.")
     cantidad: float = Field(0.0, ge=0, description="Cantidad.")
-    coste_unit: float = Field(0.0, ge=0, description="Coste unitario (€).")
+    coste_unit: Decimal = Field(Decimal("0"), ge=0, description="Coste unitario (€).")
 
 
 # Alias para validación de items en POST /deliveries
@@ -267,8 +269,8 @@ class PrecioReferenciaCreate(BaseModel):
     """Payload para crear una línea de precio de referencia (sin licitación)."""
 
     id_producto: int = Field(..., description="ID del producto en tbl_productos.")
-    pvu: Optional[float] = Field(None, description="Precio venta unitario.")
-    pcu: Optional[float] = Field(None, description="Precio coste unitario.")
+    pvu: Optional[Decimal] = Field(None, description="Precio venta unitario.")
+    pcu: Optional[Decimal] = Field(None, description="Precio coste unitario.")
     unidades: Optional[float] = Field(None, description="Unidades.")
     proveedor: Optional[str] = Field(None, description="Proveedor.")
     notas: Optional[str] = Field(None, description="Notas.")
@@ -281,8 +283,8 @@ class PrecioReferencia(BaseModel):
     id: str = Field(..., description="UUID.")
     id_producto: int = Field(..., description="ID del producto en tbl_productos.")
     product_nombre: Optional[str] = Field(None, description="Nombre del producto (desde join).")
-    pvu: Optional[float] = Field(None, description="Precio venta unitario.")
-    pcu: Optional[float] = Field(None, description="Precio coste unitario.")
+    pvu: Optional[Decimal] = Field(None, description="Precio venta unitario.")
+    pcu: Optional[Decimal] = Field(None, description="Precio coste unitario.")
     unidades: Optional[float] = Field(None, description="Unidades.")
     proveedor: Optional[str] = Field(None, description="Proveedor.")
     notas: Optional[str] = Field(None, description="Notas.")
@@ -297,8 +299,8 @@ class ProductSearchItem(BaseModel):
 
     id_producto: Optional[int] = Field(None, description="ID del producto en tbl_productos (para ficha analíticas).")
     producto: str = Field(..., description="Nombre del producto.")
-    pvu: Optional[float] = Field(None, description="Precio venta unitario.")
-    pcu: Optional[float] = Field(None, description="Precio coste unitario.")
+    pvu: Optional[Decimal] = Field(None, description="Precio venta unitario.")
+    pcu: Optional[Decimal] = Field(None, description="Precio coste unitario.")
     unidades: Optional[float] = Field(None, description="Unidades previstas.")
     licitacion_nombre: Optional[str] = Field(None, description="Nombre del expediente/licitación.")
     numero_expediente: Optional[str] = Field(None, description="Nº expediente.")
@@ -311,7 +313,7 @@ class ProductSearchItem(BaseModel):
 class MaterialTrendPoint(BaseModel):
     """Punto temporal para gráfico de evolución de precios (Lightweight Charts)."""
     time: str = Field(..., description="Fecha en formato YYYY-MM-DD.")
-    value: float = Field(..., description="Precio en esa fecha (PVU o PCU).")
+    value: Decimal = Field(..., description="Precio en esa fecha (PVU o PCU).")
 
 
 class MaterialTrendResponse(BaseModel):
@@ -323,14 +325,14 @@ class MaterialTrendResponse(BaseModel):
 class RiskPipelineItem(BaseModel):
     """Pipeline bruto y ajustado por riesgo por categoría."""
     category: str = Field(..., description="Categoría (ej. tipo de obra/cliente).")
-    pipeline_bruto: float = Field(..., description="Suma de presupuestos máximos.")
-    pipeline_ajustado: float = Field(..., description="Pipeline ajustado por win rate.")
+    pipeline_bruto: Decimal = Field(..., description="Suma de presupuestos máximos.")
+    pipeline_ajustado: Decimal = Field(..., description="Pipeline ajustado por win rate.")
 
 
 class SweetSpotItem(BaseModel):
     """Licitación cerrada para análisis de sweet spots."""
     id: str = Field(..., description="Identificador de la licitación.")
-    presupuesto: float = Field(..., description="Presupuesto máximo.")
+    presupuesto: Decimal = Field(..., description="Presupuesto máximo.")
     estado: str = Field(..., description="Adjudicada o Perdida.")
     cliente: str = Field(..., description="Nombre del expediente/cliente.")
 
@@ -338,8 +340,8 @@ class SweetSpotItem(BaseModel):
 class PriceDeviationResult(BaseModel):
     """Resultado de comprobación de desviación de precio vs histórico."""
     is_deviated: bool = Field(..., description="True si el precio se desvía significativamente.")
-    deviation_percentage: float = Field(..., description="Porcentaje de desviación vs media histórica.")
-    historical_avg: float = Field(..., description="Media del precio en el último año.")
+    deviation_percentage: Decimal = Field(..., description="Porcentaje de desviación vs media histórica.")
+    historical_avg: Decimal = Field(..., description="Media del precio en el último año.")
     recommendation: str = Field(..., description="Recomendación para el usuario.")
 
 
@@ -349,19 +351,19 @@ class PriceDeviationResult(BaseModel):
 class PriceHistoryPoint(BaseModel):
     """Punto de la serie temporal de precios adjudicados (eje X tiempo, eje Y precio)."""
     time: str = Field(..., description="Fecha ISO YYYY-MM-DD.")
-    value: float = Field(..., description="Precio de adjudicación (PVU).")
+    value: Decimal = Field(..., description="Precio de adjudicación (PVU).")
 
 
 class VolumeMetrics(BaseModel):
     """Métricas de volumen para el producto."""
-    total_licitado: float = Field(..., description="Importe total licitado (PVU * unidades).")
+    total_licitado: Decimal = Field(..., description="Importe total licitado (PVU * unidades).")
     cantidad_oferentes_promedio: float = Field(..., description="Promedio de oferentes/licitaciones.")
 
 
 class CompetitorItem(BaseModel):
     """Top empresa/proveedor con precios para este producto."""
     empresa: str = Field(..., description="Nombre del proveedor/empresa.")
-    precio_medio: float = Field(..., description="Precio medio adjudicado.")
+    precio_medio: Decimal = Field(..., description="Precio medio adjudicado.")
     cantidad_adjudicaciones: int = Field(..., description="Número de adjudicaciones.")
 
 
@@ -373,6 +375,6 @@ class ProductAnalytics(BaseModel):
     price_history_pcu: List[PriceHistoryPoint] = Field(default_factory=list, description="Historial PCU (precio coste).")
     volume_metrics: VolumeMetrics = Field(...)
     competitor_analysis: List[CompetitorItem] = Field(default_factory=list)
-    forecast: Optional[float] = Field(None, description="Proyección MA del próximo precio.")
-    precio_referencia_medio: Optional[float] = Field(None, description="Media de precios de referencia.")
+    forecast: Optional[Decimal] = Field(None, description="Proyección MA del próximo precio.")
+    precio_referencia_medio: Optional[Decimal] = Field(None, description="Media de precios de referencia.")
 

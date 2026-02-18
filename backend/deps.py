@@ -3,9 +3,14 @@ Dependencias de seguridad para FastAPI.
 
 Proporciona get_current_user que valida el JWT de Supabase Auth
 y enriquece el usuario con organization_id desde public.profiles.
+
+Caché de profiles por user_id para evitar consultas repetidas en cada request.
 """
 
-from typing import Annotated
+import threading
+import time
+from typing import Annotated, Tuple
+
 from uuid import UUID
 
 import jwt
@@ -19,6 +24,31 @@ from backend.config import SUPABASE_JWT_SECRET
 
 
 security = HTTPBearer(auto_error=False)
+
+# Caché de profiles: user_id -> (org_id, role, expiry_timestamp)
+# TTL 60 segundos para equilibrar rendimiento y actualizaciones de rol/org
+_PROFILE_CACHE: dict[str, Tuple[UUID, str, float]] = {}
+_PROFILE_CACHE_LOCK = threading.Lock()
+_PROFILE_CACHE_TTL_SECONDS = 60
+
+
+def _get_cached_profile(user_id: str) -> Tuple[UUID, str] | None:
+    """Devuelve (org_id, role) si está en caché y no expirado; None si miss."""
+    with _PROFILE_CACHE_LOCK:
+        entry = _PROFILE_CACHE.get(user_id)
+        if not entry:
+            return None
+        org_id, role, expiry = entry
+        if time.monotonic() >= expiry:
+            del _PROFILE_CACHE[user_id]
+            return None
+        return (org_id, role)
+
+
+def _set_cached_profile(user_id: str, org_id: UUID, role: str) -> None:
+    """Guarda profile en caché con TTL."""
+    with _PROFILE_CACHE_LOCK:
+        _PROFILE_CACHE[user_id] = (org_id, role, time.monotonic() + _PROFILE_CACHE_TTL_SECONDS)
 
 
 def _get_dummy_user() -> CurrentUser:
@@ -138,6 +168,17 @@ async def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Caché: evitar consultar profiles en cada request
+    cached = _get_cached_profile(user_id)
+    if cached:
+        org_id, role = cached
+        return CurrentUser(
+            user_id=user_id,
+            email=email,
+            org_id=org_id,
+            role=role,
+        )
+
     # Obtener profile (organization_id, role) desde public.profiles
     try:
         profile_resp = (
@@ -171,6 +212,8 @@ async def get_current_user(
     # org_id puede venir como string UUID desde Supabase
     if isinstance(org_id, str):
         org_id = UUID(org_id)
+
+    _set_cached_profile(user_id, org_id, role)
 
     return CurrentUser(
         user_id=user_id,
