@@ -13,20 +13,20 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-const API_BASE =
-  typeof window !== "undefined"
-    ? (process.env.NEXT_PUBLIC_API_URL ||
-        `${window.location.protocol}//${window.location.hostname}:8000`)
-    : process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+// Usar /api (proxy de Next.js) para evitar Network Error
+const API_AUTH = "/api";
 
 type UserResponse = {
-  id: number | null;
+  id: number | string | null;
   email: string;
   rol: string | null;
+  role?: string | null;
   nombre: string | null;
+  access_token?: string | null;
 };
 
 const STORAGE_KEY = "veraleza_user";
+const TOKEN_KEY = "token";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -41,7 +41,7 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_BASE}/api/auth/login`, {
+      const res = await fetch(`${API_AUTH}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -65,23 +65,25 @@ export default function LoginPage() {
       const user: UserResponse = {
         id: data.id ?? null,
         email: data.email ?? "",
-        rol: data.rol ?? null,
+        rol: data.rol ?? data.role ?? null,
+        role: data.role ?? data.rol ?? null,
         nombre: data.nombre ?? null,
+        access_token: data.access_token ?? null,
       };
 
       if (typeof window !== "undefined") {
         window.localStorage.setItem(STORAGE_KEY, JSON.stringify(user));
+        if (data.access_token) {
+          window.localStorage.setItem(TOKEN_KEY, data.access_token);
+        } else {
+          window.localStorage.removeItem(TOKEN_KEY);
+        }
       }
 
       router.push("/");
     } catch (err) {
-      const base =
-        typeof window !== "undefined"
-          ? (process.env.NEXT_PUBLIC_API_URL ||
-              `${window.location.protocol}//${window.location.hostname}:8000`)
-          : "http://localhost:8000";
       setError(
-        `No se pudo conectar con el backend (${base}). Arranca el servidor en otra terminal desde la raíz del proyecto: uvicorn backend.main:app --reload`
+        "No se pudo conectar con el backend. Comprueba que el backend esté en marcha (arrancar-backend.bat o uvicorn backend.main:app --reload)."
       );
     } finally {
       setLoading(false);

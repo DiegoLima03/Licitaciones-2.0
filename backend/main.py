@@ -1,6 +1,15 @@
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from pathlib import Path
 
+from dotenv import load_dotenv
+
+# Cargar .env antes que nada (por si uvicorn arranca desde otra ruta)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
+
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+
+from backend.config import SKIP_AUTH
 from backend.routers import auth, analytics, tenders, import_data, deliveries, search, estados, tipos, precios_referencia, productos
 
 
@@ -20,6 +29,15 @@ origins = [
     "http://192.168.1.14:3000",
     "http://192.168.1.14:3001",
 ]
+
+# Manejador global: devolver el error real en 500 para facilitar depuración
+@app.exception_handler(Exception)
+async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
+    return JSONResponse(
+        status_code=500,
+        content={"detail": str(exc)},
+    )
+
 
 app.add_middleware(
     CORSMiddleware,
@@ -47,6 +65,13 @@ app.include_router(productos.router, prefix="/api")
 def root() -> dict:
     """Health check sencillo para verificar que el backend está levantado."""
     return {"status": "ok"}
+
+
+@app.on_event("startup")
+def startup():
+    """Log de modo desarrollo al arrancar."""
+    if SKIP_AUTH:
+        print(">>> Modo desarrollo: SKIP_AUTH=true (API acepta peticiones sin token)")
 
 
 __all__ = ["app"]

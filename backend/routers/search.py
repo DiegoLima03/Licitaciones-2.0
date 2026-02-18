@@ -16,41 +16,67 @@ from backend.models import ProductSearchItem
 
 router = APIRouter(prefix="/search", tags=["search"])
 
+def _get_proveedor_display(proveedor_raw: Optional[str], producto: Optional[dict]) -> Optional[str]:
+    """Proveedor: de la línea si existe, si no nombre_proveedor del producto."""
+    if proveedor_raw and str(proveedor_raw).strip():
+        return str(proveedor_raw).strip()
+    prod = producto or {}
+    nom = (prod.get("nombre_proveedor") or "").strip()
+    return nom or None
+
 
 def _producto_ids_con_historico_y_nombre(q: str) -> List[int]:
     """
-    Productos que tienen histórico (referencia o presupuestados en licitaciones)
-    y cuyo nombre coincide con q. Misma lógica que selector de analítica.
+    Productos que coinciden con q (nombre o referencia) y que tienen histórico
+    en precios_referencia o licitaciones_detalle.
+    INVERSIÓN: buscamos en tbl_productos PRIMERO (evita límite 1000 de Supabase
+    al cargar 500k+ filas de precios_referencia).
     """
-    id_productos = set()
+    # 1. Buscar en tbl_productos por nombre o referencia
+    pat = f"%{q}%"
+    by_nombre = (
+        supabase_client.table("tbl_productos")
+        .select("id")
+        .ilike("nombre", pat)
+        .limit(300)
+        .execute()
+    )
+    by_ref = (
+        supabase_client.table("tbl_productos")
+        .select("id")
+        .ilike("referencia", pat)
+        .limit(300)
+        .execute()
+    )
+    candidatos = list({
+        int(r["id"])
+        for r in (by_nombre.data or []) + (by_ref.data or [])
+        if r.get("id") is not None
+    })
+    if not candidatos:
+        return []
+    # 2. Filtrar solo los que tienen datos en precios_referencia o detalle
+    # (consultas con .in_() traen solo esos ids, sin pisar el límite global)
     ref_resp = (
         supabase_client.table("tbl_precios_referencia")
         .select("id_producto")
+        .in_("id_producto", candidatos)
+        .limit(10000)
         .execute()
     )
-    for r in (ref_resp.data or []):
-        if r.get("id_producto") is not None:
-            id_productos.add(int(r["id_producto"]))
     det_resp = (
         supabase_client.table("tbl_licitaciones_detalle")
         .select("id_producto")
+        .in_("id_producto", candidatos)
         .eq("activo", True)
+        .limit(5000)
         .execute()
     )
-    for r in (det_resp.data or []):
+    con_historico = set()
+    for r in (ref_resp.data or []) + (det_resp.data or []):
         if r.get("id_producto") is not None:
-            id_productos.add(int(r["id_producto"]))
-    if not id_productos:
-        return []
-    response = (
-        supabase_client.table("tbl_productos")
-        .select("id")
-        .in_("id", list(id_productos))
-        .ilike("nombre", f"%{q}%")
-        .limit(500)
-        .execute()
-    )
-    return [int(r["id"]) for r in (response.data or []) if r.get("id") is not None]
+            con_historico.add(int(r["id_producto"]))
+    return [pid for pid in candidatos if pid in con_historico]
 
 
 def _search_detalle(id_productos: List[int]) -> List[dict]:
@@ -59,7 +85,7 @@ def _search_detalle(id_productos: List[int]) -> List[dict]:
         return []
     response = (
         supabase_client.table("tbl_licitaciones_detalle")
-        .select("*, tbl_licitaciones(nombre, numero_expediente), tbl_productos(nombre)")
+        .select("*, tbl_licitaciones(nombre, numero_expediente), tbl_productos(nombre, nombre_proveedor)")
         .in_("id_producto", id_productos)
         .eq("activo", True)
         .execute()
@@ -101,7 +127,7 @@ def _search_precios_referencia(id_productos: List[int]) -> List[ProductSearchIte
             return []
         response = (
             supabase_client.table("tbl_precios_referencia")
-            .select("id_producto, pvu, pcu, unidades, proveedor, tbl_productos(nombre)")
+            .select("id_producto, pvu, pcu, unidades, proveedor, tbl_productos(nombre, nombre_proveedor)")
             .in_("id_producto", id_productos)
             .execute()
         )
@@ -115,7 +141,7 @@ def _search_precios_referencia(id_productos: List[int]) -> List[ProductSearchIte
                 unidades=float(r["unidades"]) if r.get("unidades") is not None else None,
                 licitacion_nombre=None,
                 numero_expediente=None,
-                proveedor=r.get("proveedor"),
+                proveedor=_get_proveedor_display(r.get("proveedor"), r.get("tbl_productos")),
             )
             for r in rows
         ]
@@ -143,7 +169,8 @@ def search(
             prod = item.get("tbl_productos") or {}
             id_d = item.get("id_detalle")
             pcu = pcu_by_id.get(id_d) if id_d is not None else None
-            proveedor = proveedor_by_id.get(id_d) if id_d is not None else None
+            prov_raw = proveedor_by_id.get(id_d) if id_d is not None else None
+            proveedor = _get_proveedor_display(prov_raw, prod)
             results.append(
                 ProductSearchItem(
                     id_producto=item.get("id_producto"),

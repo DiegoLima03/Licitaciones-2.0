@@ -1,33 +1,74 @@
+from datetime import date
+from enum import IntEnum
 from typing import Any, Dict, List, Literal, Optional
+from uuid import UUID
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 # Valores permitidos para país de licitación
 PaisLicitacion = Literal["España", "Portugal"]
 
 
-# ----- Auth -----
+# ----- Estados de licitación (tbl_estados) -----
+# IDs según base de datos actual. Extensible si se añaden más estados.
+class EstadoLicitacion(IntEnum):
+    """IDs de estados en tbl_estados. Máquina de estados para flujo de negocio."""
+
+    VALORACION = 1
+    DESCARTADA = 2
+    EN_ANALISIS = 3
+    PRESENTADA = 4
+    ADJUDICADA = 5
+    NO_ADJUDICADA = 6  # Perdida
+    TERMINADA = 7
+    EJECUCION = 8  # Entre ADJUDICADA y TERMINADA (requiere migración si no existe)
+
+
+# Estados a partir de los cuales no se pueden editar campos económicos ni partidas
+ESTADOS_BLOQUEO_EDICION = {EstadoLicitacion.PRESENTADA, EstadoLicitacion.ADJUDICADA, EstadoLicitacion.NO_ADJUDICADA, EstadoLicitacion.TERMINADA, EstadoLicitacion.EJECUCION}
+
+# Estados que permiten imputar entregas (solo adjudicadas o en ejecución)
+ESTADOS_PERMITEN_ENTREGAS = {EstadoLicitacion.ADJUDICADA, EstadoLicitacion.EJECUCION}
+
+
+# ----- Auth (Supabase Auth + profiles) -----
 
 
 class UserLogin(BaseModel):
-    """Credenciales de acceso para el endpoint de autenticación."""
+    """
+    Credenciales para login directo contra Supabase Auth.
+    El frontend normalmente usa signInWithPassword() y pasa el JWT al backend.
+    Este modelo se mantiene por compatibilidad o para un endpoint de verificación.
+    """
 
     email: str = Field(..., description="Correo electrónico del usuario.")
-    password: str = Field(..., description="Contraseña en texto plano.")
+    password: str = Field(..., description="Contraseña (solo si el backend hace login; normalmente el frontend lo hace).")
 
 
 class UserResponse(BaseModel):
     """
-    Representación simplificada del usuario autenticado.
-
-    Se adapta al esquema de la tabla `tbl_usuarios`. Se utilizan campos opcionales
-    para ser tolerantes a ligeras variaciones en la base de datos.
+    Respuesta de autenticación con datos del perfil y organización.
+    Usado en /auth/me y /auth/login (verificación de sesión).
     """
 
-    id: Optional[int] = Field(None, description="Identificador del usuario.")
+    id: str = Field(..., description="UUID del usuario (auth.users.id).")
     email: str = Field(..., description="Correo electrónico del usuario.")
-    rol: Optional[str] = Field(None, description="Rol del usuario.")
-    nombre: Optional[str] = Field(None, description="Nombre para mostrar.")
+    organization_id: UUID = Field(..., description="UUID de la organización del usuario.")
+    role: str = Field(..., description="Rol en la organización (member, admin, etc.).")
+    full_name: Optional[str] = Field(None, description="Nombre completo.")
+    nombre: Optional[str] = Field(None, description="Alias de full_name para compatibilidad.")
+
+
+class CurrentUser(BaseModel):
+    """
+    Usuario autenticado inyectado por get_current_user.
+    Usado internamente en dependencias y routers.
+    """
+
+    user_id: str = Field(..., description="UUID del usuario (auth.users.id).")
+    email: str = Field(..., description="Correo electrónico.")
+    org_id: UUID = Field(..., description="UUID de la organización.")
+    role: str = Field(default="member", description="Rol en la organización.")
 
 
 class TimelineItem(BaseModel):
@@ -108,6 +149,37 @@ class TenderUpdate(BaseModel):
     fecha_adjudicacion: Optional[str] = None
     fecha_finalizacion: Optional[str] = None
     descuento_global: Optional[float] = None
+
+
+class TenderStatusChange(BaseModel):
+    """
+    Payload para cambio de estado (POST /tenders/{id}/change-status).
+    Campos obligatorios según el nuevo estado.
+    """
+
+    nuevo_estado_id: int = Field(..., description="ID del nuevo estado en tbl_estados.")
+    motivo_descarte: Optional[str] = Field(None, description="Obligatorio si nuevo_estado == DESCARTADA.")
+    motivo_perdida: Optional[str] = Field(None, description="Obligatorio si nuevo_estado == NO_ADJUDICADA/Perdida.")
+    competidor_ganador: Optional[str] = Field(None, description="Empresa ganadora si nuevo_estado == Perdida.")
+    importe_adjudicacion: Optional[float] = Field(None, ge=0, description="Obligatorio si nuevo_estado == ADJUDICADA.")
+    fecha_adjudicacion: Optional[date] = Field(None, description="Fecha de adjudicación (YYYY-MM-DD).")
+
+    @model_validator(mode="after")
+    def validar_campos_por_estado(self) -> "TenderStatusChange":
+        try:
+            e = EstadoLicitacion(self.nuevo_estado_id)
+        except ValueError:
+            return self  # ID no reconocido, la validación de transición lo rechazará
+        if e == EstadoLicitacion.DESCARTADA and not (self.motivo_descarte and str(self.motivo_descarte).strip()):
+            raise ValueError("motivo_descarte es obligatorio al pasar a DESCARTADA.")
+        if e == EstadoLicitacion.NO_ADJUDICADA:
+            if not (self.motivo_perdida and str(self.motivo_perdida).strip()):
+                raise ValueError("motivo_perdida es obligatorio al pasar a PERDIDA.")
+            if not (self.competidor_ganador and str(self.competidor_ganador).strip()):
+                raise ValueError("competidor_ganador es obligatorio al pasar a PERDIDA.")
+        if e == EstadoLicitacion.ADJUDICADA and (self.importe_adjudicacion is None or self.importe_adjudicacion <= 0):
+            raise ValueError("importe_adjudicacion es obligatorio y debe ser > 0 al pasar a ADJUDICADA.")
+        return self
 
 
 # ----- Productos (tbl_productos) -----
@@ -297,7 +369,8 @@ class ProductAnalytics(BaseModel):
     """Respuesta de GET /analytics/product/{id}: analíticas avanzadas por producto."""
     product_id: int = Field(..., description="ID del producto en tbl_productos.")
     product_name: str = Field(..., description="Nombre del producto.")
-    price_history: List[PriceHistoryPoint] = Field(default_factory=list)
+    price_history: List[PriceHistoryPoint] = Field(default_factory=list, description="Historial PVU (precio venta).")
+    price_history_pcu: List[PriceHistoryPoint] = Field(default_factory=list, description="Historial PCU (precio coste).")
     volume_metrics: VolumeMetrics = Field(...)
     competitor_analysis: List[CompetitorItem] = Field(default_factory=list)
     forecast: Optional[float] = Field(None, description="Proyección MA del próximo precio.")

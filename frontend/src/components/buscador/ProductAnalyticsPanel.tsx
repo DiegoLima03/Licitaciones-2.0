@@ -134,7 +134,7 @@ function ProductAnalyticsContent({
         </h3>
         <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-2">
           <MaterialTrendChart
-            data={{ pvu: data.price_history ?? [], pcu: [] }}
+            data={{ pvu: data.price_history ?? [], pcu: data.price_history_pcu ?? [] }}
             materialName={data.product_name}
             isLoading={false}
             error={null}

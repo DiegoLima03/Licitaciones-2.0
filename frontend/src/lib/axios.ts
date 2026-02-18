@@ -1,6 +1,6 @@
 /**
  * Cliente HTTP para la API (FastAPI).
- * baseURL desde NEXT_PUBLIC_API_URL o http://localhost:8000/api por defecto.
+ * baseURL = /api (Next.js hace proxy al backend en puerto 8000).
  * Interceptors: inyectar token en requests; en 401 redirigir a /login y borrar token.
  */
 
@@ -8,10 +8,8 @@ import axios, { type AxiosError } from "axios";
 
 const STORAGE_TOKEN_KEY = "token";
 
-const baseURL =
-  typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
-    ? process.env.NEXT_PUBLIC_API_URL
-    : "http://localhost:8000/api";
+// Siempre usar /api: Next.js hace proxy al backend. Evita Network Error.
+const baseURL = "/api";
 
 export const apiClient = axios.create({
   baseURL,
@@ -30,12 +28,21 @@ apiClient.interceptors.request.use((config) => {
   return config;
 });
 
-// Response: en 401 redirigir a /login y borrar token
+// Response: en 401 redirigir a /login (solo si SKIP_LOGIN=false)
+const skipLogin =
+  typeof process !== "undefined" &&
+  process.env.NEXT_PUBLIC_SKIP_LOGIN === "true";
+
 apiClient.interceptors.response.use(
   (response) => response,
   (error: AxiosError) => {
-    if (error.response?.status === 401 && typeof window !== "undefined") {
+    if (
+      !skipLogin &&
+      error.response?.status === 401 &&
+      typeof window !== "undefined"
+    ) {
       localStorage.removeItem(STORAGE_TOKEN_KEY);
+      localStorage.removeItem("veraleza_user");
       window.location.href = "/login";
     }
     return Promise.reject(error);

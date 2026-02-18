@@ -62,17 +62,26 @@ def create_precio_referencia(payload: PrecioReferenciaCreate) -> PrecioReferenci
     try:
         prod_resp = (
             supabase_client.table("tbl_productos")
-            .select("nombre")
+            .select("nombre, organization_id")
             .eq("id", payload.id_producto)
             .limit(1)
             .execute()
         )
         product_nombre = ""
+        org_id = None
         if prod_resp.data and len(prod_resp.data) > 0:
-            product_nombre = (prod_resp.data[0].get("nombre") or "").strip()
+            p0 = prod_resp.data[0]
+            product_nombre = (p0.get("nombre") or "").strip()
+            org_id = p0.get("organization_id")
+        if not org_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El producto no tiene organization_id. No se puede crear la línea de referencia.",
+            ) from None
         row = {
             "id_producto": payload.id_producto,
             "producto": product_nombre or None,
+            "organization_id": org_id,
             "pvu": payload.pvu,
             "pcu": payload.pcu,
             "unidades": payload.unidades,

@@ -3,9 +3,10 @@
 import * as React from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { BarChart3, FolderKanban, LineChart, ListPlus, LogOut, Search } from "lucide-react";
+import { BarChart3, FolderKanban, LineChart, ListPlus, LogOut, Search, Users } from "lucide-react";
 
 const STORAGE_KEY = "veraleza_user";
+const TOKEN_KEY = "token";
 
 /** Si es "true", no se pide login y siempre se muestra el menú (para desarrollo). */
 const SKIP_LOGIN =
@@ -16,6 +17,17 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [user, setUser] = React.useState<string | null>(null);
+  const isAdmin = React.useMemo(() => {
+    if (SKIP_LOGIN) return true; // En modo desarrollo, mostrar siempre el menú Usuarios
+    if (!user) return false;
+    try {
+      const parsed = JSON.parse(user);
+      const role = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
+      return role === "admin";
+    } catch {
+      return false;
+    }
+  }, [user]);
   const [mounted, setMounted] = React.useState(false);
 
   React.useEffect(() => {
@@ -28,8 +40,22 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
     setUser(raw);
   }, [mounted, pathname]);
 
+  // Redirecciones en useEffect para no actualizar Router durante el render
+  React.useEffect(() => {
+    if (!mounted) return;
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const isLoggedIn = SKIP_LOGIN || !!raw;
+
+    if (!SKIP_LOGIN && !isLoggedIn && pathname !== "/login") {
+      router.replace("/login");
+    } else if (isLoggedIn && pathname === "/login") {
+      router.replace("/");
+    }
+  }, [mounted, pathname, router]);
+
   function handleLogout() {
     window.localStorage.removeItem(STORAGE_KEY);
+    window.localStorage.removeItem(TOKEN_KEY);
     setUser(null);
     router.push("/login");
   }
@@ -43,9 +69,11 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
   }
 
   const isLoggedIn = SKIP_LOGIN || !!user;
+  const shouldRedirectToLogin = !SKIP_LOGIN && !isLoggedIn && pathname !== "/login";
+  const shouldRedirectToHome = isLoggedIn && pathname === "/login";
 
-  if (!SKIP_LOGIN && !isLoggedIn && pathname !== "/login") {
-    router.replace("/login");
+  // Mientras se redirige, mostrar mensaje (la redirección ocurre en useEffect)
+  if (shouldRedirectToLogin) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <p className="text-sm text-slate-500">Redirigiendo al login…</p>
@@ -53,8 +81,7 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (isLoggedIn && pathname === "/login") {
-    router.replace("/");
+  if (shouldRedirectToHome) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-slate-50">
         <p className="text-sm text-slate-500">Redirigiendo al menú…</p>
@@ -119,6 +146,15 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
             <LineChart className="h-4 w-4" />
             <span>Analítica</span>
           </Link>
+          {(SKIP_LOGIN || isAdmin) && (
+            <Link
+              href="/usuarios"
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white ${pathname === "/usuarios" ? "bg-slate-800" : ""}`}
+            >
+              <Users className="h-4 w-4" />
+              <span>Usuarios</span>
+            </Link>
+          )}
           {!SKIP_LOGIN && (
             <button
               type="button"

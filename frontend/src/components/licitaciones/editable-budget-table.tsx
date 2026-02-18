@@ -209,16 +209,22 @@ function parseDecimalInput(value: string): number {
 }
 
 // --- COMPONENTE PRINCIPAL ---
+/** Estados que bloquean la edición del presupuesto (presentada o posterior) */
+const ESTADOS_PRESUPUESTO_BLOQUEADO = [2, 4, 5, 6, 7, 8]; // DESCARTADA, PRESENTADA, ADJUDICADA, NO_ADJUDICADA, TERMINADA, EJECUCION
+
 export interface EditableBudgetTableProps {
   lic: TenderDetail;
   onPartidaAdded: () => void;
   onUniqueLotesChange?: (lotes: string[]) => void;
+  /** Si true, oculta añadir/editar/eliminar y muestra banner de presupuesto cerrado */
+  isLocked?: boolean;
 }
 
 export function EditableBudgetTable({
   lic,
   onPartidaAdded,
   onUniqueLotesChange,
+  isLocked = false,
 }: EditableBudgetTableProps) {
   const tenderId = lic.id_licitacion;
   /** Tipo 1 = Unidades y Precio Máximo: mostrar columna PMAXU */
@@ -341,6 +347,7 @@ export function EditableBudgetTable({
 
   // --- GUARDAR TODAS LAS LÍNEAS PENDIENTES ---
   const saveAllPending = React.useCallback(async () => {
+    if (isLocked) return;
     const partidas = form.getValues("partidas");
     const toUpdate: number[] = [];
     const toAdd: number[] = [];
@@ -405,7 +412,7 @@ export function EditableBudgetTable({
     } finally {
       setIsSavingAll(false);
     }
-  }, [tenderId, form, update, append, onPartidaAdded]);
+  }, [tenderId, form, update, append, onPartidaAdded, isLocked]);
 
   saveAllPendingRef.current = saveAllPending;
 
@@ -460,6 +467,11 @@ export function EditableBudgetTable({
 
   return (
     <div className="flex min-h-[500px] w-full flex-1 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
+      {isLocked && (
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
+          Presupuesto cerrado tras presentación. No se pueden modificar partidas.
+        </div>
+      )}
       <div className="flex-1 overflow-auto">
         <table className="min-w-full text-left text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
@@ -479,6 +491,7 @@ export function EditableBudgetTable({
           </thead>
           <tbody className="divide-y divide-slate-100">
             {fields.map((field, index) => {
+              if (isLocked && !field.id_detalle) return <React.Fragment key={field.id} />;
               const isGhost = !field.id_detalle;
               const isSaving = form.watch(`partidas.${index}.isSaving`);
               const pvu = form.watch(`partidas.${index}.pvu`);
@@ -500,6 +513,7 @@ export function EditableBudgetTable({
                       value={idProd ? { id: idProd, nombre: prodName } : null}
                       onSelect={(id, nombre) => handleProductSelect(index, id, nombre)}
                       placeholder={isGhost ? "Añadir..." : ""}
+                      disabled={isLocked}
                     />
                   </td>
 
@@ -507,6 +521,7 @@ export function EditableBudgetTable({
                     <Input
                       className={inputCellClass}
                       {...form.register(`partidas.${index}.lote`)}
+                      disabled={isLocked}
                       onChange={(e) => {
                         form.setValue(`partidas.${index}.lote`, e.target.value);
                         markDirty(index);
@@ -526,6 +541,7 @@ export function EditableBudgetTable({
                           min={0}
                           step={1}
                           className={`${inputCellClass} text-right font-medium`}
+                          disabled={isLocked}
                           {...unidadesRest}
                           ref={(el) => {
                             unidadesInputRefs.current[index] = el;
@@ -548,6 +564,7 @@ export function EditableBudgetTable({
                         min={0}
                         step={0.01}
                         className={`${inputCellClass} text-right`}
+                        disabled={isLocked}
                         value={pmaxu != null && !Number.isNaN(Number(pmaxu)) ? Number(pmaxu) : 0}
                         onChange={(e) => {
                           const num = parseFloat(e.target.value) || 0;
@@ -578,6 +595,7 @@ export function EditableBudgetTable({
                       type="text"
                       inputMode="decimal"
                       className={`${inputCellClass} text-right`}
+                      disabled={isLocked}
                       value={
                         editingDecimal?.index === index && editingDecimal?.field === "pvu"
                           ? editingDecimal.value
@@ -613,6 +631,7 @@ export function EditableBudgetTable({
                       type="text"
                       inputMode="decimal"
                       className={`${inputCellClass} text-right text-slate-500`}
+                      disabled={isLocked}
                       value={
                         editingDecimal?.index === index && editingDecimal?.field === "pcu"
                           ? editingDecimal.value
@@ -677,7 +696,7 @@ export function EditableBudgetTable({
 
                   {/* ELIMINAR */}
                   <td className="py-2 pr-4 text-center align-middle">
-                    {!isGhost && (
+                    {!isGhost && !isLocked && (
                       <button
                         type="button"
                         onClick={() => handleRemoveRow(index)}
@@ -697,10 +716,11 @@ export function EditableBudgetTable({
       
       <div className="border-t border-slate-100 bg-slate-50 px-4 py-2 flex items-center justify-between gap-3">
         <span className="text-xs text-slate-400">
-          Guarda con el botón o se guardará todo automáticamente cada 30 segundos.
+          {isLocked ? "Presupuesto cerrado." : "Guarda con el botón o se guardará todo automáticamente cada 30 segundos."}
         </span>
         <div className="flex items-center gap-2">
-          <span className="text-xs text-slate-400">{fields.length - 1} líneas</span>
+          <span className="text-xs text-slate-400">{fields.filter((f) => f.id_detalle).length} líneas</span>
+          {!isLocked && (
           <Button
             type="button"
             size="sm"
@@ -716,6 +736,7 @@ export function EditableBudgetTable({
               "Guardar todo"
             )}
           </Button>
+          )}
         </div>
       </div>
     </div>

@@ -13,6 +13,10 @@ load_dotenv()
 
 SUPABASE_URL: str | None = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY: str | None = os.environ.get("SUPABASE_KEY")
+SUPABASE_JWT_SECRET: str | None = os.environ.get("SUPABASE_JWT_SECRET")
+
+# Desarrollo: si es "true", la API acepta peticiones sin token (usuario dummy).
+SKIP_AUTH: bool = os.environ.get("SKIP_AUTH", "").lower() in ("true", "1", "yes")
 
 
 def init_connection() -> Client:
@@ -48,8 +52,8 @@ def get_maestros(client: Client) -> Dict[str, Any]:
 
     Lógica adaptada desde `src/config.py::get_maestros`, eliminando dependencias de Streamlit.
     """
-    estados_db = client.table("tbl_estados").select("*").execute().data
-    tipos_db = client.table("tbl_tipolicitacion").select("*").execute().data
+    estados_db = client.table("tbl_estados").select("*").execute().data or []
+    tipos_db = client.table("tbl_tipolicitacion").select("*").execute().data or []
 
     # Mapeos Estados
     mapa_estados_id_a_nombre = {e["id_estado"]: e["nombre_estado"] for e in estados_db}

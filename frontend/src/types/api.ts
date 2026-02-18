@@ -76,6 +76,16 @@ export interface TenderUpdate {
   descuento_global?: number | null;
 }
 
+/** Payload para POST /tenders/{id}/change-status (máquina de estados) */
+export interface TenderStatusChange {
+  nuevo_estado_id: number;
+  motivo_descarte?: string | null;
+  motivo_perdida?: string | null;
+  competidor_ganador?: string | null;
+  importe_adjudicacion?: number | null;
+  fecha_adjudicacion?: string | null; // YYYY-MM-DD
+}
+
 // ----- Productos (tbl_productos) -----
 
 export interface ProductoSearchResult {
@@ -194,6 +204,13 @@ export interface ExcelImportResponse {
   rows_imported: number;
 }
 
+export interface PreciosReferenciaImportResponse {
+  message: string;
+  rows_imported: number;
+  rows_skipped: number;
+  skipped_details?: { articulo: string; precio?: number }[];
+}
+
 // ----- Precios de referencia (tbl_precios_referencia) -----
 
 export interface PrecioReferencia {
@@ -253,6 +270,7 @@ export interface ProductAnalytics {
   product_id: number;
   product_name: string;
   price_history: PriceHistoryPoint[];
+  price_history_pcu?: PriceHistoryPoint[];
   volume_metrics: VolumeMetrics;
   competitor_analysis: CompetitorItem[];
   forecast: number | null;

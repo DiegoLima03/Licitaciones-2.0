@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, Edit3 } from "lucide-react";
+import { ArrowLeft, Edit3, ChevronRight } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -50,8 +50,15 @@ import type {
   EntregaWithLines,
   TenderDetail,
   TenderPartida,
+  TenderStatusChange,
   Tipo,
 } from "@/types/api";
+
+const ID_ESTADO_ADJUDICADA = 5;
+const ID_ESTADO_DESCARTADA = 2;
+const ID_ESTADO_NO_ADJUDICADA = 6;
+const ID_ESTADO_PRESENTADA = 4;
+const ESTADOS_PRESUPUESTO_BLOQUEADO = [2, 4, 5, 6, 7, 8];
 
 const ESTADOS_LINEA_ENTREGA = ["EN ESPERA", "ENTREGADO", "FACTURADO"] as const;
 
@@ -208,6 +215,15 @@ export default function LicitacionDetallePage() {
   const [openEditarCabecera, setOpenEditarCabecera] = React.useState(false);
   const [submittingCabecera, setSubmittingCabecera] = React.useState(false);
   const [updatingLineId, setUpdatingLineId] = React.useState<number | null>(null);
+  const [openCambiarEstado, setOpenCambiarEstado] = React.useState(false);
+  const [submittingEstado, setSubmittingEstado] = React.useState(false);
+  const [errorEstado, setErrorEstado] = React.useState<string | null>(null);
+  const [nuevoEstadoId, setNuevoEstadoId] = React.useState<number | null>(null);
+  const [motivoDescarte, setMotivoDescarte] = React.useState("");
+  const [motivoPerdida, setMotivoPerdida] = React.useState("");
+  const [competidorGanador, setCompetidorGanador] = React.useState("");
+  const [importeAdjudicacion, setImporteAdjudicacion] = React.useState("");
+  const [fechaAdjudicacion, setFechaAdjudicacion] = React.useState(new Date().toISOString().slice(0, 10));
 
   const cabeceraForm = useForm<CabeceraFormValues>({
     resolver: zodResolver(cabeceraFormSchema),
@@ -335,6 +351,88 @@ export default function LicitacionDetallePage() {
   const showError = !showLoading && (!!error || !lic);
   const showContent = !showLoading && !showError;
 
+  const isLocked = showContent && lic ? ESTADOS_PRESUPUESTO_BLOQUEADO.includes(lic.id_estado) : false;
+  const isEjecucionTabDisabled = showContent && lic ? lic.id_estado < ID_ESTADO_ADJUDICADA : false;
+  const isRechazada = showContent && lic && (lic.id_estado === ID_ESTADO_DESCARTADA || lic.id_estado === ID_ESTADO_NO_ADJUDICADA);
+  const motivoRechazo = React.useMemo(() => {
+    if (!lic?.descripcion || !isRechazada) return null;
+    const d = lic.descripcion;
+    const matchDescarte = d.match(/\[MOTIVO DESCARTE\]:\s*(.+?)(?:\n|$)/i);
+    if (matchDescarte) return { tipo: "Descartada" as const, texto: matchDescarte[1].trim() };
+    const matchPerdida = d.match(/\[PERDIDA\]:\s*(.+?)(?:\n|$)/i);
+    if (matchPerdida) return { tipo: "Perdida" as const, texto: matchPerdida[1].trim() };
+    return null;
+  }, [lic?.descripcion, isRechazada]);
+
+  const handleCambiarEstado = async () => {
+    if (!lic || nuevoEstadoId == null) return;
+    setErrorEstado(null);
+    setSubmittingEstado(true);
+    try {
+      const payload: TenderStatusChange = { nuevo_estado_id: nuevoEstadoId };
+      if (nuevoEstadoId === ID_ESTADO_DESCARTADA) {
+        if (!motivoDescarte.trim()) {
+          setErrorEstado("El motivo del descarte es obligatorio.");
+          return;
+        }
+        payload.motivo_descarte = motivoDescarte.trim();
+      }
+      if (nuevoEstadoId === ID_ESTADO_NO_ADJUDICADA) {
+        if (!motivoPerdida.trim()) {
+          setErrorEstado("El motivo de la pérdida es obligatorio.");
+          return;
+        }
+        if (!competidorGanador.trim()) {
+          setErrorEstado("El ganador es obligatorio.");
+          return;
+        }
+        payload.motivo_perdida = motivoPerdida.trim();
+        payload.competidor_ganador = competidorGanador.trim();
+      }
+      if (nuevoEstadoId === ID_ESTADO_ADJUDICADA) {
+        const imp = parseFloat(String(importeAdjudicacion).replace(",", "."));
+        if (!Number.isFinite(imp) || imp <= 0) {
+          setErrorEstado("El importe final adjudicado es obligatorio y debe ser > 0.");
+          return;
+        }
+        payload.importe_adjudicacion = imp;
+        if (fechaAdjudicacion) payload.fecha_adjudicacion = fechaAdjudicacion;
+      }
+      await TendersService.changeStatus(lic.id_licitacion, payload);
+      refetchLicitacion();
+      setOpenCambiarEstado(false);
+      setNuevoEstadoId(null);
+      setMotivoDescarte("");
+      setMotivoPerdida("");
+      setCompetidorGanador("");
+      setImporteAdjudicacion("");
+    } catch (e) {
+      setErrorEstado(e instanceof Error ? e.message : "Error al cambiar estado.");
+    } finally {
+      setSubmittingEstado(false);
+    }
+  };
+
+  const transicionesDisponibles = React.useMemo(() => {
+    if (!lic) return [];
+    const id = lic.id_estado;
+    const trans: { id: number; label: string }[] = [];
+    if (id === 1 || id === 3) {
+      trans.push({ id: ID_ESTADO_PRESENTADA, label: "Presentada" });
+      trans.push({ id: ID_ESTADO_DESCARTADA, label: "Descartar" });
+    }
+    if (id === ID_ESTADO_PRESENTADA) {
+      trans.push({ id: ID_ESTADO_ADJUDICADA, label: "Adjudicada" });
+      trans.push({ id: ID_ESTADO_NO_ADJUDICADA, label: "Marcar como Perdida" });
+    }
+    if (id === ID_ESTADO_ADJUDICADA) {
+      trans.push({ id: 8, label: "Ejecución" });
+      trans.push({ id: 7, label: "Finalizada" });
+    }
+    if (id === 8) trans.push({ id: 7, label: "Finalizada" });
+    return trans;
+  }, [lic?.id_estado]);
+
   const itemsPresupuesto = showContent && lic ? mapPartidas(lic.partidas ?? []) : [];
   const itemsPresupuestoAgregado = agregarPartidas(itemsPresupuesto);
   const activos = itemsPresupuestoAgregado.filter((i) => i.activo);
@@ -453,6 +551,120 @@ export default function LicitacionDetallePage() {
             <Badge variant="info">
               {estados.find((e) => e.id_estado === lic.id_estado)?.nombre_estado ?? `Estado ${lic.id_estado}`}
             </Badge>
+            {transicionesDisponibles.length > 0 && (
+              <Dialog
+                open={openCambiarEstado}
+                onOpenChange={(open) => {
+                  setOpenCambiarEstado(open);
+                  if (!open) {
+                    setNuevoEstadoId(null);
+                    setErrorEstado(null);
+                  }
+                }}
+              >
+                <DialogTrigger asChild>
+                  <Button className="gap-2" size="sm">
+                    <ChevronRight className="h-4 w-4" />
+                    Cambiar Estado
+                  </Button>
+                </DialogTrigger>
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Avanzar estado</DialogTitle>
+                    <DialogDescription>Selecciona el nuevo estado y completa los datos requeridos.</DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 pt-2">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-slate-600">Nuevo estado</label>
+                      <div className="flex flex-wrap gap-2">
+                        {transicionesDisponibles.map((t) => (
+                          <Button
+                            key={t.id}
+                            type="button"
+                            variant={nuevoEstadoId === t.id ? "default" : "outline"}
+                            size="sm"
+                            onClick={() => {
+                              setNuevoEstadoId(t.id);
+                              setErrorEstado(null);
+                            }}
+                          >
+                            {t.label}
+                          </Button>
+                        ))}
+                      </div>
+                    </div>
+                    {nuevoEstadoId === ID_ESTADO_DESCARTADA && (
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-slate-600">Motivo del descarte *</label>
+                        <Textarea
+                          value={motivoDescarte}
+                          onChange={(e) => setMotivoDescarte(e.target.value)}
+                          placeholder="Explica por qué se descarta esta licitación..."
+                          rows={3}
+                          className="w-full"
+                        />
+                      </div>
+                    )}
+                    {nuevoEstadoId === ID_ESTADO_NO_ADJUDICADA && (
+                      <div className="space-y-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Motivo de la pérdida *</label>
+                          <Textarea
+                            value={motivoPerdida}
+                            onChange={(e) => setMotivoPerdida(e.target.value)}
+                            placeholder="¿Por qué no se adjudicó?"
+                            rows={2}
+                            className="w-full"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Ganador / Competidor *</label>
+                          <Input
+                            value={competidorGanador}
+                            onChange={(e) => setCompetidorGanador(e.target.value)}
+                            placeholder="Empresa adjudicataria"
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {nuevoEstadoId === ID_ESTADO_ADJUDICADA && (
+                      <div className="space-y-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Importe Final Adjudicado (€) *</label>
+                          <Input
+                            type="number"
+                            min={0}
+                            step={0.01}
+                            value={importeAdjudicacion}
+                            onChange={(e) => setImporteAdjudicacion(e.target.value)}
+                            placeholder="Ej. 125000"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">Fecha de adjudicación</label>
+                          <Input
+                            type="date"
+                            value={fechaAdjudicacion}
+                            onChange={(e) => setFechaAdjudicacion(e.target.value)}
+                          />
+                        </div>
+                      </div>
+                    )}
+                    {errorEstado && (
+                      <p className="text-sm text-red-600">{errorEstado}</p>
+                    )}
+                    <div className="flex justify-end gap-2 pt-2">
+                      <Button variant="outline" onClick={() => setOpenCambiarEstado(false)} disabled={submittingEstado}>
+                        Cancelar
+                      </Button>
+                      <Button onClick={handleCambiarEstado} disabled={submittingEstado || nuevoEstadoId == null}>
+                        {submittingEstado ? "Guardando…" : "Confirmar cambio"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+            )}
           </div>
         </div>
 
@@ -594,6 +806,15 @@ export default function LicitacionDetallePage() {
         </div>
       </header>
 
+      {motivoRechazo && (
+        <div className="rounded-lg border border-red-200 bg-red-50 p-4">
+          <p className="text-sm font-semibold text-red-800">
+            {motivoRechazo.tipo === "Descartada" ? "Licitación descartada" : "Licitación perdida"}
+          </p>
+          <p className="mt-1 text-sm text-red-700">{motivoRechazo.texto}</p>
+        </div>
+      )}
+
       <section className="grid gap-3 md:grid-cols-4">
         <Card>
           <CardHeader>
@@ -653,7 +874,15 @@ export default function LicitacionDetallePage() {
         <Tabs defaultValue="presupuesto">
           <TabsList>
             <TabsTrigger value="presupuesto">Presupuesto (Oferta)</TabsTrigger>
-            <TabsTrigger value="ejecucion">Ejecución (Real / Albaranes)</TabsTrigger>
+            {isEjecucionTabDisabled ? (
+              <span title="Disponible tras adjudicación" className="inline-flex cursor-not-allowed">
+                <TabsTrigger value="ejecucion" disabled>
+                  Ejecución (Real / Albaranes)
+                </TabsTrigger>
+              </span>
+            ) : (
+              <TabsTrigger value="ejecucion">Ejecución (Real / Albaranes)</TabsTrigger>
+            )}
             <TabsTrigger value="remaining">Remaining</TabsTrigger>
           </TabsList>
 
@@ -684,6 +913,7 @@ export default function LicitacionDetallePage() {
                             <td className="py-2 pr-3 text-right">
                               <Switch
                                 checked={lotesActivos.includes(lote)}
+                                disabled={isLocked}
                                 onCheckedChange={(checked) =>
                                   setLotesActivos((prev) =>
                                     checked
@@ -713,6 +943,7 @@ export default function LicitacionDetallePage() {
                   lic={lic}
                   onPartidaAdded={refetchLicitacion}
                   onUniqueLotesChange={setUniqueLotesFromTable}
+                  isLocked={isLocked}
                 />
               )}
             </div>

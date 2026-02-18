@@ -145,7 +145,7 @@ export function MaterialTrendChart({
     <div className={className}>
       <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
         Evolución de precio — {materialName}
-        {hasPvu && hasPcu && " (Verde: PVU, Gris: PCU)"}
+        {hasPvu && hasPcu && " (Verde: PVU precio venta · Gris: PCU precio coste)"}
       </p>
       <div ref={containerRef} className="rounded-lg" />
     </div>

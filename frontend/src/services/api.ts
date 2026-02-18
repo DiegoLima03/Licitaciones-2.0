@@ -17,6 +17,7 @@ import type {
   PartidaUpdate,
   PrecioReferencia,
   PrecioReferenciaCreate,
+  PreciosReferenciaImportResponse,
   ProductAnalytics,
   ProductoSearchResult,
   SearchResult,
@@ -25,23 +26,49 @@ import type {
   TenderDetail,
   TenderListFilters,
   TenderPartida,
+  TenderStatusChange,
   TenderUpdate,
   Tipo,
 } from "@/types/api";
 
+const CONNECTION_ERROR_MSG =
+  "No se puede conectar con el backend. Comprueba que uvicorn esté en marcha: uvicorn backend.main:app --reload --host 0.0.0.0";
+
 function getMessageFromError(error: unknown): string {
   if (error && typeof error === "object" && "response" in error) {
-    const res = (error as { response?: { data?: { detail?: string | string[] } } }).response;
-    const detail = res?.data?.detail;
+    const res = (error as { response?: { data?: { detail?: string | string[] }; status?: number } }).response;
+    const data = res?.data as Record<string, unknown> | undefined;
+    const detail = data?.detail;
     if (typeof detail === "string") return detail;
     if (Array.isArray(detail)) return detail.join(", ");
     if (detail) return String(detail);
+    if (data && typeof data === "object" && "message" in data && typeof data.message === "string")
+      return data.message;
   }
-  if (error instanceof Error) return error.message;
-  return "Error de conexión con el servidor.";
+  if (error instanceof Error) {
+    const msg = error.message.toLowerCase();
+    if (
+      msg.includes("disconnected") ||
+      msg.includes("network error") ||
+      msg.includes("econnrefused") ||
+      msg.includes("econnreset") ||
+      msg.includes("failed to fetch")
+    ) {
+      return CONNECTION_ERROR_MSG;
+    }
+    return error.message;
+  }
+  return CONNECTION_ERROR_MSG;
 }
 
 // ----- AuthService -----
+
+export type OrgUser = {
+  id: string;
+  email: string | null;
+  full_name: string | null;
+  role: string;
+};
 
 export const AuthService = {
   async login(email: string, password: string): Promise<LoginResponse> {
@@ -54,6 +81,20 @@ export const AuthService = {
     } catch (error) {
       throw new Error(getMessageFromError(error));
     }
+  },
+};
+
+export const UsersService = {
+  async list(): Promise<OrgUser[]> {
+    const { data } = await apiClient.get<OrgUser[]>("/auth/users");
+    return data ?? [];
+  },
+  async updateRole(userId: string, role: string): Promise<{ id: string; role: string }> {
+    const { data } = await apiClient.patch<{ id: string; role: string }>(
+      `/auth/users/${userId}`,
+      { role }
+    );
+    return data!;
   },
 };
 
@@ -178,6 +219,19 @@ export const TendersService = {
     }
   },
 
+  async changeStatus(id: number, payload: TenderStatusChange): Promise<Tender & { message?: string }> {
+    try {
+      const { data } = await apiClient.post<Tender & { message?: string }>(
+        `/tenders/${id}/change-status`,
+        payload
+      );
+      if (!data) throw new Error("No se devolvió la licitación actualizada.");
+      return data;
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+
   async delete(id: number): Promise<void> {
     try {
       await apiClient.delete(`/tenders/${id}`);
@@ -228,6 +282,22 @@ export const TendersService = {
 // ----- ImportService -----
 
 export const ImportService = {
+  async uploadPreciosReferencia(file: File): Promise<PreciosReferenciaImportResponse> {
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const { data } = await apiClient.post<PreciosReferenciaImportResponse>(
+        "/import/precios-referencia",
+        formData,
+        { headers: { "Content-Type": "multipart/form-data" } }
+      );
+      if (!data) throw new Error("No se recibió respuesta del servidor.");
+      return data;
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+
   async uploadExcel(
     licitacionId: number,
     file: File,

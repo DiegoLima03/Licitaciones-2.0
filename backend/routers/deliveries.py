@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
-from backend.models import DeliveryCreate, DeliveryLineUpdate
+from backend.models import DeliveryCreate, DeliveryLineUpdate, ESTADOS_PERMITEN_ENTREGAS
 
 
 router = APIRouter(prefix="/deliveries", tags=["deliveries"])
@@ -88,9 +88,29 @@ def create_delivery(payload: DeliveryCreate) -> dict:
     """
     Crea una entrega (cabecera en tbl_entregas, líneas en tbl_licitaciones_real).
     Si falla la inserción de líneas, hace rollback borrando la cabecera.
+    Solo permitido si la licitación está en ADJUDICADA o EJECUCIÓN.
 
     POST /deliveries
     """
+    # Verificar estado de la licitación
+    lic_resp = (
+        supabase_client.table("tbl_licitaciones")
+        .select("id_estado")
+        .eq("id_licitacion", payload.id_licitacion)
+        .execute()
+    )
+    if not lic_resp.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Licitación no encontrada.",
+        )
+    id_estado = int(lic_resp.data[0].get("id_estado", 0))
+    if id_estado not in {e.value for e in ESTADOS_PERMITEN_ENTREGAS}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pueden imputar entregas a una licitación no adjudicada. El estado debe ser ADJUDICADA o EJECUCIÓN.",
+        )
+
     cabecera = payload.cabecera
     try:
         insert_cab: dict[str, Any] = {

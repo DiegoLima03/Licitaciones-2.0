@@ -56,5 +56,28 @@ Necesitas **dos terminales** (o dos pestañas): una para el backend y otra para 
 
 ## Atajos (Windows)
 
+- **Backend + frontend juntos:** doble clic en `arrancar-todo.bat` (abre dos ventanas).
 - **Solo backend:** doble clic en `arrancar-backend.bat` en la raíz del proyecto.
-- **Frontend:** después abre una terminal, `cd frontend`, `npm run dev` (o `npm run dev -- -p 3001` si quieres usar el puerto 3001).
+- **Solo frontend:** terminal → `cd frontend` → `npm run dev` (o `npm run dev -- -p 3001`).
+
+---
+
+## Modo desarrollo (sin login)
+
+Para desarrollar sin iniciar sesión:
+
+- **Frontend** (`frontend/.env.local`): `NEXT_PUBLIC_SKIP_LOGIN=true`
+- **Backend** (`.env` en la raíz): `SKIP_AUTH=true`
+
+Con ambos activados, entras directo al dashboard y la API acepta peticiones sin token.
+
+---
+
+## Problemas frecuentes
+
+| Problema | Solución |
+|----------|----------|
+| "Python no encontrado" | Instala Python o añádelo al PATH. |
+| "uvicorn no está instalado" | En la raíz del proyecto: `pip install -r requirements.txt` |
+| "ModuleNotFoundError: backend" | Ejecuta desde la **raíz del proyecto** (donde está la carpeta `backend`). |
+| Puerto 8000 en uso | Cierra otras instancias del backend o usa otro puerto: `uvicorn backend.main:app --reload --port 8001` |

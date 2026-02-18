@@ -65,6 +65,7 @@ export function TabsTrigger({
   className,
   value,
   children,
+  disabled,
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & { value: string }) {
   const { value: active, setValue } = useTabsContext("TabsTrigger");
@@ -73,15 +74,17 @@ export function TabsTrigger({
   return (
     <button
       type="button"
+      disabled={disabled}
       className={cn(
         "inline-flex items-center justify-center whitespace-nowrap rounded-md px-3 py-1 text-xs font-medium transition-colors",
         selected
           ? "bg-white text-slate-900 shadow-sm"
           : "text-slate-600 hover:text-slate-900",
+        disabled && "cursor-not-allowed opacity-60",
         className
       )}
       aria-selected={selected}
-      onClick={() => setValue(value)}
+      onClick={() => !disabled && setValue(value)}
       {...props}
     >
       {children}

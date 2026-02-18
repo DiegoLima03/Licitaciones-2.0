@@ -96,13 +96,15 @@ export default function BuscadorHistoricoPage() {
         ),
       },
       {
-        accessorKey: "unidades",
-        header: () => <span className="text-right">Unidades</span>,
+        accessorKey: "pvu",
+        header: () => (
+          <span className="text-right text-emerald-700 dark:text-emerald-400">
+            PVU (Venta)
+          </span>
+        ),
         cell: ({ getValue }) => (
-          <span className="block text-right text-slate-900 dark:text-slate-100">
-            {getValue() != null
-              ? Number(getValue()).toLocaleString("es-ES")
-              : "—"}
+          <span className="block text-right font-semibold text-emerald-700 dark:text-emerald-400">
+            {getValue() != null ? formatEuro(Number(getValue())) : "—"}
           </span>
         ),
       },
@@ -116,15 +118,13 @@ export default function BuscadorHistoricoPage() {
         ),
       },
       {
-        accessorKey: "pvu",
-        header: () => (
-          <span className="text-right text-emerald-700 dark:text-emerald-400">
-            PVU (Venta)
-          </span>
-        ),
+        accessorKey: "unidades",
+        header: () => <span className="text-right">Unidades</span>,
         cell: ({ getValue }) => (
-          <span className="block text-right font-semibold text-emerald-700 dark:text-emerald-400">
-            {getValue() != null ? formatEuro(Number(getValue())) : "—"}
+          <span className="block text-right text-slate-900 dark:text-slate-100">
+            {getValue() != null
+              ? Number(getValue()).toLocaleString("es-ES")
+              : "—"}
           </span>
         ),
       },

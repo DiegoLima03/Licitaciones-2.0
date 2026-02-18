@@ -140,8 +140,15 @@ def get_kpis(
     Opcional: ?fecha_adjudicacion_desde=2024-01-01&fecha_adjudicacion_hasta=2024-12-31
     para filtrar por rango de fecha de adjudicación.
     """
-    maestros = get_maestros(supabase_client)
-    df = _get_licitaciones_df()
+    try:
+        maestros = get_maestros(supabase_client)
+        df = _get_licitaciones_df()
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error inicializando KPIs: {e!s}",
+        ) from e
+
     if df.empty:
         return KPIDashboard(
             timeline=[],
@@ -185,8 +192,14 @@ def get_kpis(
                 ratio_adjudicacion=0.0,
             )
 
-    df = _enriquecer_estados(df, maestros)
-    timeline_records = _build_timeline_all(df)
+    try:
+        df = _enriquecer_estados(df, maestros)
+        timeline_records = _build_timeline_all(df)
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error procesando KPIs: {e!s}",
+        ) from e
 
     # Normalizar nombre de estado para comparación insensible a mayúsculas (ej. "TERMINADA" en BD)
     df["_estado_norm"] = df["estado_nombre"].astype(str).str.strip().str.lower()
@@ -741,16 +754,16 @@ def get_product_analytics(product_id: int) -> ProductAnalytics:
                 if lid is not None and f:
                     lic_fechas[int(lid)] = str(f).split("T")[0][:10]
 
-        # Precios de referencia (con fecha_presupuesto)
+        # Precios de referencia (pvu y pcu con fecha_presupuesto)
         ref_resp = (
             supabase_client.table("tbl_precios_referencia")
-            .select("pvu, fecha_presupuesto")
+            .select("pvu, pcu, fecha_presupuesto")
             .eq("id_producto", product_id)
             .execute()
         )
         ref_rows = ref_resp.data or []
 
-        # Construir price_history con Pandas
+        # Construir price_history (PVU) y price_history_pcu (PCU) con Pandas
         hist_rows: List[Dict[str, Any]] = []
         for r in det_rows:
             pvu = r.get("pvu")
@@ -783,6 +796,61 @@ def get_product_analytics(product_id: int) -> ProductAnalytics:
         price_history = [
             PriceHistoryPoint(time=row["time"], value=round(float(row["value"]), 2))
             for _, row in df_hist.iterrows()
+        ]
+
+        # PCU history: precios_referencia (pcu) + licitaciones_real (pcu con fecha de entrega)
+        hist_pcu_rows: List[Dict[str, Any]] = []
+        for r in ref_rows:
+            pcu = r.get("pcu")
+            fecha = r.get("fecha_presupuesto")
+            if pcu is None or not fecha:
+                continue
+            try:
+                value = float(pcu)
+            except (TypeError, ValueError):
+                continue
+            time_str = str(fecha).split("T")[0][:10]
+            hist_pcu_rows.append({"time": time_str, "value": value})
+        if id_detalles:
+            real_resp = (
+                supabase_client.table("tbl_licitaciones_real")
+                .select("id_detalle, id_entrega, pcu")
+                .in_("id_detalle", id_detalles)
+                .execute()
+            )
+            real_rows = real_resp.data or []
+            id_entregas = list({r["id_entrega"] for r in real_rows if r.get("id_entrega") is not None})
+            entrega_fechas: Dict[Any, str] = {}
+            if id_entregas:
+                ent_resp = (
+                    supabase_client.table("tbl_entregas")
+                    .select("id_entrega, fecha_entrega")
+                    .in_("id_entrega", id_entregas)
+                    .execute()
+                )
+                for row in (ent_resp.data or []):
+                    eid = row.get("id_entrega")
+                    t = _norm_date(row.get("fecha_entrega"))
+                    if eid is not None and t:
+                        entrega_fechas[eid] = t
+            for r in real_rows:
+                pcu = r.get("pcu")
+                id_ent = r.get("id_entrega")
+                if pcu is None or id_ent is None:
+                    continue
+                time_str = entrega_fechas.get(id_ent)
+                if not time_str:
+                    continue
+                try:
+                    hist_pcu_rows.append({"time": time_str, "value": float(pcu)})
+                except (TypeError, ValueError):
+                    pass
+        df_pcu = pd.DataFrame(hist_pcu_rows)
+        if not df_pcu.empty:
+            df_pcu = df_pcu.sort_values("time").drop_duplicates(subset=["time"], keep="last")
+        price_history_pcu = [
+            PriceHistoryPoint(time=row["time"], value=round(float(row["value"]), 2))
+            for _, row in df_pcu.iterrows()
         ]
 
         # Volume metrics: total licitado (sum pvu*unidades), oferentes promedio (distinct licitaciones / count)
@@ -846,6 +914,7 @@ def get_product_analytics(product_id: int) -> ProductAnalytics:
             product_id=product_id,
             product_name=product_name,
             price_history=price_history,
+            price_history_pcu=price_history_pcu,
             volume_metrics=volume_metrics,
             competitor_analysis=competitor_analysis,
             forecast=forecast_val,
