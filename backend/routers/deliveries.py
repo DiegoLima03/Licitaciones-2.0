@@ -9,14 +9,20 @@ from typing import Any, Dict, List, Optional
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
-from backend.models import DeliveryCreate, DeliveryLineUpdate, ESTADOS_PERMITEN_ENTREGAS
+from backend.deps import CurrentUserDep
+from backend.models import CurrentUser, DeliveryCreate, DeliveryLineUpdate, ESTADOS_PERMITEN_ENTREGAS
 
 
 router = APIRouter(prefix="/deliveries", tags=["deliveries"])
 
 
+def _org_str(user: CurrentUser) -> str:
+    return str(user.org_id)
+
+
 @router.get("", response_model=List[dict])
 def list_deliveries(
+    current_user: CurrentUserDep,
     licitacion_id: Optional[int] = Query(None, description="Filtrar por licitación."),
 ) -> List[dict]:
     """
@@ -30,6 +36,7 @@ def list_deliveries(
         query = (
             supabase_client.table("tbl_entregas")
             .select("*")
+            .eq("organization_id", _org_str(current_user))
             .order("fecha_entrega", desc=True)
         )
         if licitacion_id is not None:
@@ -43,6 +50,7 @@ def list_deliveries(
                 supabase_client.table("tbl_licitaciones_real")
                 .select("*, tbl_productos(nombre)")
                 .eq("id_entrega", id_e)
+                .eq("organization_id", _org_str(current_user))
                 .order("id_real")
                 .execute()
             )
@@ -66,12 +74,13 @@ def list_deliveries(
         ) from e
 
 
-def _get_mapa_id_detalle_by_id_producto(licitacion_id: int) -> Dict[int, int]:
+def _get_mapa_id_detalle_by_id_producto(licitacion_id: int, org_id: str) -> Dict[int, int]:
     """Obtiene mapa id_producto -> id_detalle (primera partida con ese producto) para la licitación."""
     response = (
         supabase_client.table("tbl_licitaciones_detalle")
         .select("id_detalle, id_producto")
         .eq("id_licitacion", licitacion_id)
+        .eq("organization_id", org_id)
         .eq("activo", True)
         .execute()
     )
@@ -84,7 +93,7 @@ def _get_mapa_id_detalle_by_id_producto(licitacion_id: int) -> Dict[int, int]:
 
 
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
-def create_delivery(payload: DeliveryCreate) -> dict:
+def create_delivery(payload: DeliveryCreate, current_user: CurrentUserDep) -> dict:
     """
     Crea una entrega (cabecera en tbl_entregas, líneas en tbl_licitaciones_real).
     Si falla la inserción de líneas, hace rollback borrando la cabecera.
@@ -92,11 +101,12 @@ def create_delivery(payload: DeliveryCreate) -> dict:
 
     POST /deliveries
     """
-    # Verificar estado de la licitación
+    # Verificar licitación existe y pertenece a la org del usuario
     lic_resp = (
         supabase_client.table("tbl_licitaciones")
-        .select("id_estado")
+        .select("id_estado, organization_id")
         .eq("id_licitacion", payload.id_licitacion)
+        .eq("organization_id", _org_str(current_user))
         .execute()
     )
     if not lic_resp.data:
@@ -115,6 +125,7 @@ def create_delivery(payload: DeliveryCreate) -> dict:
     try:
         insert_cab: dict[str, Any] = {
             "id_licitacion": payload.id_licitacion,
+            "organization_id": _org_str(current_user),
             "fecha_entrega": cabecera.fecha,
             "codigo_albaran": cabecera.codigo_albaran,
             "observaciones": cabecera.observaciones or "",
@@ -140,7 +151,7 @@ def create_delivery(payload: DeliveryCreate) -> dict:
             detail=f"Error creando cabecera: {e!s}",
         ) from e
 
-    mapa_id_detalle = _get_mapa_id_detalle_by_id_producto(payload.id_licitacion)
+    mapa_id_detalle = _get_mapa_id_detalle_by_id_producto(payload.id_licitacion, _org_str(current_user))
     lineas_a_insertar: List[dict[str, Any]] = []
 
     for line in payload.lineas:
@@ -153,6 +164,7 @@ def create_delivery(payload: DeliveryCreate) -> dict:
         prov_linea = (line.proveedor or "").strip()
         lineas_a_insertar.append({
             "id_licitacion": payload.id_licitacion,
+            "organization_id": _org_str(current_user),
             "id_entrega": new_id_entrega,
             "id_detalle": id_detalle,
             "id_producto": id_producto,
@@ -194,7 +206,7 @@ def create_delivery(payload: DeliveryCreate) -> dict:
 
 
 @router.patch("/lines/{id_real}", response_model=dict)
-def update_delivery_line(id_real: int, payload: DeliveryLineUpdate) -> dict:
+def update_delivery_line(id_real: int, payload: DeliveryLineUpdate, current_user: CurrentUserDep) -> dict:
     """
     Actualiza estado y/o cobrado de una línea de entrega (tbl_licitaciones_real).
     PATCH /deliveries/lines/{id_real}
@@ -211,6 +223,7 @@ def update_delivery_line(id_real: int, payload: DeliveryLineUpdate) -> dict:
             supabase_client.table("tbl_licitaciones_real")
             .update(updates)
             .eq("id_real", id_real)
+            .eq("organization_id", _org_str(current_user))
             .execute()
         )
         return {"id_real": id_real, "message": "Línea actualizada."}
@@ -222,18 +235,19 @@ def update_delivery_line(id_real: int, payload: DeliveryLineUpdate) -> dict:
 
 
 @router.delete("/{delivery_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_delivery(delivery_id: int) -> None:
+def delete_delivery(delivery_id: int, current_user: CurrentUserDep) -> None:
     """
     Elimina una entrega y sus líneas (cascade manual).
     DELETE /deliveries/{id}
     """
     try:
+        org_s = _org_str(current_user)
         supabase_client.table("tbl_licitaciones_real").delete().eq(
             "id_entrega", delivery_id
-        ).execute()
+        ).eq("organization_id", org_s).execute()
         supabase_client.table("tbl_entregas").delete().eq(
             "id_entrega", delivery_id
-        ).execute()
+        ).eq("organization_id", org_s).execute()
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

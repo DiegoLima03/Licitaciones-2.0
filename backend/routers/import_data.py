@@ -16,6 +16,7 @@ import pandas as pd
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 
 from backend.config import supabase_client
+from backend.deps import CurrentUserDep
 from backend.utils import get_clean_number, normalize_excel_columns
 
 # Para .xlsx pandas usa openpyxl; asegurar que esté instalado: pip install openpyxl
@@ -205,6 +206,7 @@ def _analizar_excel_licitacion(
 @router.post("/excel/{licitacion_id}", status_code=status.HTTP_201_CREATED)
 def import_excel(
     licitacion_id: int,
+    current_user: CurrentUserDep,
     file: UploadFile = File(...),
     tipo_id: int = 1,
 ) -> dict:
@@ -232,12 +234,27 @@ def import_excel(
         )
 
     df: pd.DataFrame = result
+    # Verificar licitación pertenece a la org del usuario
+    lic_resp = (
+        supabase_client.table("tbl_licitaciones")
+        .select("organization_id")
+        .eq("id_licitacion", licitacion_id)
+        .eq("organization_id", str(current_user.org_id))
+        .execute()
+    )
+    if not lic_resp.data:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Licitación no encontrada o no pertenece a tu organización.",
+        )
+    org_id = str(current_user.org_id)
     records = df.to_dict("records")
     count = 0
     try:
         for row in records:
             supabase_client.table("tbl_licitaciones_detalle").insert({
                 "id_licitacion": licitacion_id,
+                "organization_id": org_id,
                 "lote": row["lote"],
                 "producto": row["producto"],
                 "unidades": row["unidades"],
@@ -260,7 +277,7 @@ def import_excel(
     }
 
 
-def _build_producto_maps() -> Tuple[Dict[str, int], Dict[str, int]]:
+def _build_producto_maps(org_id: str) -> Tuple[Dict[str, int], Dict[str, int]]:
     """
     Carga productos y devuelve mapas: referencia -> id_producto, nombre -> id_producto.
     Prioridad: referencia (exacto), luego nombre (strip, case-insensitive para búsqueda).
@@ -268,6 +285,7 @@ def _build_producto_maps() -> Tuple[Dict[str, int], Dict[str, int]]:
     resp = (
         supabase_client.table("tbl_productos")
         .select("id, nombre, referencia")
+        .eq("organization_id", org_id)
         .execute()
     )
     ref_map: Dict[str, int] = {}
@@ -288,6 +306,7 @@ def _build_producto_maps() -> Tuple[Dict[str, int], Dict[str, int]]:
 
 @router.post("/precios-referencia", status_code=status.HTTP_201_CREATED)
 def import_precios_referencia(
+    current_user: CurrentUserDep,
     file: UploadFile = File(...),
 ) -> dict:
     """
@@ -314,7 +333,8 @@ def import_precios_referencia(
         )
 
     df: pd.DataFrame = result
-    ref_map, nom_map = _build_producto_maps()
+    org_s = str(current_user.org_id)
+    ref_map, nom_map = _build_producto_maps(org_s)
     records = df.to_dict("records")
 
     count = 0
@@ -342,6 +362,7 @@ def import_precios_referencia(
                 supabase_client.table("tbl_productos")
                 .select("nombre, organization_id")
                 .eq("id", id_producto)
+                .eq("organization_id", org_s)
                 .limit(1)
                 .execute()
             )

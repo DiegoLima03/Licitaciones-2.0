@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Tuple
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
+from backend.deps import CurrentUserDep
 from backend.models import ProductSearchItem
 
 
@@ -25,18 +26,19 @@ def _get_proveedor_display(proveedor_raw: Optional[str], producto: Optional[dict
     return nom or None
 
 
-def _producto_ids_con_historico_y_nombre(q: str) -> List[int]:
+def _producto_ids_con_historico_y_nombre(q: str, org_id: str) -> List[int]:
     """
     Productos que coinciden con q (nombre o referencia) y que tienen histórico
     en precios_referencia o licitaciones_detalle.
     INVERSIÓN: buscamos en tbl_productos PRIMERO (evita límite 1000 de Supabase
     al cargar 500k+ filas de precios_referencia).
     """
-    # 1. Buscar en tbl_productos por nombre o referencia
+    # 1. Buscar en tbl_productos por nombre o referencia (solo org del usuario)
     pat = f"%{q}%"
     by_nombre = (
         supabase_client.table("tbl_productos")
         .select("id")
+        .eq("organization_id", org_id)
         .ilike("nombre", pat)
         .limit(300)
         .execute()
@@ -44,6 +46,7 @@ def _producto_ids_con_historico_y_nombre(q: str) -> List[int]:
     by_ref = (
         supabase_client.table("tbl_productos")
         .select("id")
+        .eq("organization_id", org_id)
         .ilike("referencia", pat)
         .limit(300)
         .execute()
@@ -55,11 +58,11 @@ def _producto_ids_con_historico_y_nombre(q: str) -> List[int]:
     })
     if not candidatos:
         return []
-    # 2. Filtrar solo los que tienen datos en precios_referencia o detalle
-    # (consultas con .in_() traen solo esos ids, sin pisar el límite global)
+    # 2. Filtrar solo los que tienen datos en precios_referencia o detalle (org-scoped)
     ref_resp = (
         supabase_client.table("tbl_precios_referencia")
         .select("id_producto")
+        .eq("organization_id", org_id)
         .in_("id_producto", candidatos)
         .limit(10000)
         .execute()
@@ -67,6 +70,7 @@ def _producto_ids_con_historico_y_nombre(q: str) -> List[int]:
     det_resp = (
         supabase_client.table("tbl_licitaciones_detalle")
         .select("id_producto")
+        .eq("organization_id", org_id)
         .in_("id_producto", candidatos)
         .eq("activo", True)
         .limit(5000)
@@ -79,13 +83,14 @@ def _producto_ids_con_historico_y_nombre(q: str) -> List[int]:
     return [pid for pid in candidatos if pid in con_historico]
 
 
-def _search_detalle(id_productos: List[int]) -> List[dict]:
+def _search_detalle(id_productos: List[int], org_id: str) -> List[dict]:
     """Busca en tbl_licitaciones_detalle por id_producto (solo partidas activas)."""
     if not id_productos:
         return []
     response = (
         supabase_client.table("tbl_licitaciones_detalle")
         .select("*, tbl_licitaciones(nombre, numero_expediente), tbl_productos(nombre, nombre_proveedor)")
+        .eq("organization_id", org_id)
         .in_("id_producto", id_productos)
         .eq("activo", True)
         .execute()
@@ -93,7 +98,7 @@ def _search_detalle(id_productos: List[int]) -> List[dict]:
     return response.data or []
 
 
-def _get_pcu_and_proveedor_from_real(id_detalles: List[int]) -> Tuple[Dict[int, float], Dict[int, Optional[str]]]:
+def _get_pcu_and_proveedor_from_real(id_detalles: List[int], org_id: str) -> Tuple[Dict[int, float], Dict[int, Optional[str]]]:
     """
     Obtiene PCU y proveedor desde tbl_licitaciones_real.
     Por cada id_detalle devuelve el último pcu y proveedor (orden por id_real desc).
@@ -103,6 +108,7 @@ def _get_pcu_and_proveedor_from_real(id_detalles: List[int]) -> Tuple[Dict[int, 
     response = (
         supabase_client.table("tbl_licitaciones_real")
         .select("id_detalle, pcu, proveedor")
+        .eq("organization_id", org_id)
         .in_("id_detalle", id_detalles)
         .order("id_real", desc=True)
         .execute()
@@ -120,7 +126,7 @@ def _get_pcu_and_proveedor_from_real(id_detalles: List[int]) -> Tuple[Dict[int, 
     return pcu_by_id, proveedor_by_id
 
 
-def _search_precios_referencia(id_productos: List[int]) -> List[ProductSearchItem]:
+def _search_precios_referencia(id_productos: List[int], org_id: str) -> List[ProductSearchItem]:
     """Busca en tbl_precios_referencia por id_producto."""
     try:
         if not id_productos:
@@ -128,6 +134,7 @@ def _search_precios_referencia(id_productos: List[int]) -> List[ProductSearchIte
         response = (
             supabase_client.table("tbl_precios_referencia")
             .select("id_producto, pvu, pcu, unidades, proveedor, tbl_productos(nombre, nombre_proveedor)")
+            .eq("organization_id", org_id)
             .in_("id_producto", id_productos)
             .execute()
         )
@@ -151,6 +158,7 @@ def _search_precios_referencia(id_productos: List[int]) -> List[ProductSearchIte
 
 @router.get("", response_model=List[ProductSearchItem])
 def search(
+    current_user: CurrentUserDep,
     q: str = Query(..., min_length=1, description="Texto de búsqueda por producto."),
 ) -> List[ProductSearchItem]:
     """
@@ -158,10 +166,11 @@ def search(
     GET /search?q=Planta
     """
     try:
-        id_productos = _producto_ids_con_historico_y_nombre(q)
-        data = _search_detalle(id_productos)
+        org_s = str(current_user.org_id)
+        id_productos = _producto_ids_con_historico_y_nombre(q, org_s)
+        data = _search_detalle(id_productos, org_s)
         id_detalles = list({item["id_detalle"] for item in data if item.get("id_detalle") is not None})
-        pcu_by_id, proveedor_by_id = _get_pcu_and_proveedor_from_real(id_detalles)
+        pcu_by_id, proveedor_by_id = _get_pcu_and_proveedor_from_real(id_detalles, org_s)
 
         results: List[ProductSearchItem] = []
         for item in data:
@@ -183,7 +192,7 @@ def search(
                     proveedor=proveedor,
                 )
             )
-        results.extend(_search_precios_referencia(id_productos))
+        results.extend(_search_precios_referencia(id_productos, org_s))
         return results
     except HTTPException:
         raise
@@ -196,10 +205,11 @@ def search(
 
 @router.get("/products", response_model=List[ProductSearchItem])
 def search_products(
+    current_user: CurrentUserDep,
     q: str = Query(..., min_length=1, description="Texto de búsqueda en producto."),
 ) -> List[ProductSearchItem]:
     """
     Misma búsqueda por producto (compatibilidad).
     GET /search/products?q=Planta
     """
-    return search(q=q)
+    return search(q=q, current_user=current_user)

@@ -180,5 +180,21 @@ async def get_current_user(
     )
 
 
-# Alias para inyección en routers
-CurrentUserDep = Annotated[CurrentUser, Depends(get_current_user)]
+async def get_current_active_user_with_org(
+    user: Annotated[CurrentUser, Depends(get_current_user)],
+) -> CurrentUser:
+    """
+    Garantiza que el usuario tiene organización activa.
+    get_current_user ya rechaza usuarios sin org_id, este wrapper es explícito
+    para endpoints que requieren multi-tenancy estricto.
+    """
+    if not user.org_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Usuario sin organización asignada.",
+        )
+    return user
+
+
+# Alias para inyección en routers (multi-tenant)
+CurrentUserDep = Annotated[CurrentUser, Depends(get_current_active_user_with_org)]

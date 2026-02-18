@@ -13,6 +13,7 @@ import pandas as pd
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client, get_maestros
+from backend.deps import CurrentUserDep
 from backend.models import (
     CompetitorItem,
     KPIDashboard,
@@ -43,12 +44,12 @@ ESTADOS_DESCARTADA_NORM = {s.lower() for s in ESTADOS_DESCARTADA}
 ESTADOS_ANALISIS_VALORACION_NORM = {s.lower() for s in ESTADOS_ANALISIS_VALORACION}
 
 
-def _get_licitaciones_df() -> pd.DataFrame:
-    """Todas las licitaciones con columnas necesarias."""
+def _get_licitaciones_df(org_id: str) -> pd.DataFrame:
+    """Licitaciones de la organización con columnas necesarias."""
     response = supabase_client.table("tbl_licitaciones").select(
         "id_licitacion, nombre, pres_maximo, id_estado, "
         "fecha_presentacion, fecha_adjudicacion, fecha_finalizacion"
-    ).execute()
+    ).eq("organization_id", org_id).execute()
     data = response.data or []
     return pd.DataFrame(data)
 
@@ -73,6 +74,7 @@ def _compute_margen_ponderado(
     client: Any,
     id_licitaciones: List[int],
     presupuestado: bool,
+    org_id: str,
 ) -> Optional[float]:
     """Margen medio ponderado: venta-weighted. presupuestado=True usa detalle (pvu,pcu,unidades); False usa real."""
     if not id_licitaciones:
@@ -81,7 +83,7 @@ def _compute_margen_ponderado(
         # Sum (pvu*ud - pcu*ud) / Sum(pvu*ud) por licitación, luego ponderar por venta total
         det = client.table("tbl_licitaciones_detalle").select(
             "id_licitacion, unidades, pvu, pcu"
-        ).in_("id_licitacion", id_licitaciones).eq("activo", True).execute()
+        ).eq("organization_id", org_id).in_("id_licitacion", id_licitaciones).eq("activo", True).execute()
         rows = det.data or []
         if not rows:
             return None
@@ -100,7 +102,7 @@ def _compute_margen_ponderado(
         # Real: tbl_licitaciones_real cantidad, pcu; venta aproximada con pvu de detalle por id_detalle
         real = client.table("tbl_licitaciones_real").select(
             "id_licitacion, id_detalle, cantidad, pcu"
-        ).in_("id_licitacion", id_licitaciones).execute()
+        ).eq("organization_id", org_id).in_("id_licitacion", id_licitaciones).execute()
         real_rows = real.data or []
         if not real_rows:
             return None
@@ -112,7 +114,7 @@ def _compute_margen_ponderado(
         id_detalles = df_real["id_detalle"].dropna().unique().tolist()
         if not id_detalles:
             return None
-        det = client.table("tbl_licitaciones_detalle").select("id_detalle, pvu").in_("id_detalle", id_detalles).execute()
+        det = client.table("tbl_licitaciones_detalle").select("id_detalle, pvu").eq("organization_id", org_id).in_("id_detalle", id_detalles).execute()
         pvu_map = {r["id_detalle"]: float(r.get("pvu") or 0) for r in (det.data or [])}
         df_real["pvu"] = df_real["id_detalle"].map(pvu_map).fillna(0)
         df_real["venta_real"] = df_real["cantidad"] * df_real["pvu"]
@@ -125,6 +127,7 @@ def _compute_margen_ponderado(
 
 @router.get("/kpis", response_model=KPIDashboard)
 def get_kpis(
+    current_user: CurrentUserDep,
     fecha_adjudicacion_desde: Optional[str] = Query(
         None,
         description="Filtrar licitaciones con fecha_adjudicación >= esta fecha (YYYY-MM-DD).",
@@ -142,7 +145,7 @@ def get_kpis(
     """
     try:
         maestros = get_maestros(supabase_client)
-        df = _get_licitaciones_df()
+        df = _get_licitaciones_df(str(current_user.org_id))
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -231,8 +234,9 @@ def get_kpis(
 
     # Margen medio ponderado (adjudicadas + terminadas)
     ids_adj_ter = df.loc[mask_adj_ter, "id_licitacion"].astype(int).tolist()
-    margen_presu = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=True)
-    margen_real = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=False)
+    org_s = str(current_user.org_id)
+    margen_presu = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=True, org_id=org_s)
+    margen_real = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=False, org_id=org_s)
 
     # % descartadas = descartadas / (total - análisis - valoración)
     mask_des = df["_estado_norm"].isin(ESTADOS_DESCARTADA_NORM)
@@ -300,16 +304,18 @@ def _norm_date(fecha: Any) -> Optional[str]:
 
 
 @router.get("/material-trends/{material_name}", response_model=MaterialTrendResponse)
-def get_material_trends(material_name: str) -> MaterialTrendResponse:
+def get_material_trends(material_name: str, current_user: CurrentUserDep) -> MaterialTrendResponse:
     """
     GET /analytics/material-trends/{material_name}
     Histórico temporal de precios: PVU desde precios_referencia + licitaciones_detalle;
     PCU desde precios_referencia + licitaciones_real (fecha vía tbl_entregas).
     """
     try:
+        org_s = str(current_user.org_id)
         prod_resp = (
             supabase_client.table("tbl_productos")
             .select("id")
+            .eq("organization_id", org_s)
             .ilike("nombre", f"%{material_name}%")
             .execute()
         )
@@ -324,6 +330,7 @@ def get_material_trends(material_name: str) -> MaterialTrendResponse:
         ref_resp = (
             supabase_client.table("tbl_precios_referencia")
             .select("id_producto, pvu, pcu, fecha_presupuesto")
+            .eq("organization_id", org_s)
             .in_("id_producto", product_ids)
             .order("fecha_presupuesto")
             .execute()
@@ -347,6 +354,7 @@ def get_material_trends(material_name: str) -> MaterialTrendResponse:
         det_resp = (
             supabase_client.table("tbl_licitaciones_detalle")
             .select("id_licitacion, pvu, unidades")
+            .eq("organization_id", org_s)
             .in_("id_producto", product_ids)
             .eq("activo", True)
             .execute()
@@ -358,6 +366,7 @@ def get_material_trends(material_name: str) -> MaterialTrendResponse:
             lic_resp = (
                 supabase_client.table("tbl_licitaciones")
                 .select("id_licitacion, fecha_presentacion, fecha_adjudicacion")
+                .eq("organization_id", org_s)
                 .in_("id_licitacion", id_lics)
                 .execute()
             )
@@ -386,6 +395,7 @@ def get_material_trends(material_name: str) -> MaterialTrendResponse:
         det_for_real = (
             supabase_client.table("tbl_licitaciones_detalle")
             .select("id_detalle")
+            .eq("organization_id", org_s)
             .in_("id_producto", product_ids)
             .execute()
         )
@@ -396,6 +406,7 @@ def get_material_trends(material_name: str) -> MaterialTrendResponse:
             real_resp = (
                 supabase_client.table("tbl_licitaciones_real")
                 .select("id_detalle, id_entrega, pcu")
+                .eq("organization_id", org_s)
                 .in_("id_detalle", id_detalles)
                 .execute()
             )
@@ -406,6 +417,7 @@ def get_material_trends(material_name: str) -> MaterialTrendResponse:
                 ent_resp = (
                     supabase_client.table("tbl_entregas")
                     .select("id_entrega, fecha_entrega")
+                    .eq("organization_id", org_s)
                     .in_("id_entrega", id_entregas)
                     .execute()
                 )
@@ -446,7 +458,7 @@ def get_material_trends(material_name: str) -> MaterialTrendResponse:
 
 
 @router.get("/risk-adjusted-pipeline", response_model=List[RiskPipelineItem])
-def get_risk_adjusted_pipeline() -> List[RiskPipelineItem]:
+def get_risk_adjusted_pipeline(current_user: CurrentUserDep) -> List[RiskPipelineItem]:
     """
     GET /analytics/risk-adjusted-pipeline
     Comparativa solo para licitaciones EN ANÁLISIS: barra 1 = suma (pvu*unidades) del detalle;
@@ -466,9 +478,11 @@ def get_risk_adjusted_pipeline() -> List[RiskPipelineItem]:
             return [
                 RiskPipelineItem(category="Comparativa", pipeline_bruto=0.0, pipeline_ajustado=0.0),
             ]
+        org_s = str(current_user.org_id)
         lic_resp = (
             supabase_client.table("tbl_licitaciones")
             .select("id_licitacion")
+            .eq("organization_id", org_s)
             .eq("id_estado", id_estado_analisis)
             .execute()
         )
@@ -482,6 +496,7 @@ def get_risk_adjusted_pipeline() -> List[RiskPipelineItem]:
         det_resp = (
             supabase_client.table("tbl_licitaciones_detalle")
             .select("id_producto, pvu, unidades")
+            .eq("organization_id", org_s)
             .eq("activo", True)
             .in_("id_licitacion", id_licitaciones_analisis)
             .execute()
@@ -512,6 +527,7 @@ def get_risk_adjusted_pipeline() -> List[RiskPipelineItem]:
         ref_resp = (
             supabase_client.table("tbl_precios_referencia")
             .select("id_producto, pvu")
+            .eq("organization_id", org_s)
             .in_("id_producto", product_ids)
             .execute()
         )
@@ -551,7 +567,7 @@ def get_risk_adjusted_pipeline() -> List[RiskPipelineItem]:
 
 
 @router.get("/sweet-spots", response_model=List[SweetSpotItem])
-def get_sweet_spots() -> List[SweetSpotItem]:
+def get_sweet_spots(current_user: CurrentUserDep) -> List[SweetSpotItem]:
     """
     GET /analytics/sweet-spots
     Licitaciones cerradas (Adjudicada, No Adjudicada, Terminada) con presupuesto y estado para scatter.
@@ -573,6 +589,7 @@ def get_sweet_spots() -> List[SweetSpotItem]:
         lic_resp = (
             supabase_client.table("tbl_licitaciones")
             .select("id_licitacion, nombre, numero_expediente, pres_maximo, id_estado")
+            .eq("organization_id", str(current_user.org_id))
             .in_("id_estado", ids_cerrados)
             .execute()
         )
@@ -602,6 +619,7 @@ def get_sweet_spots() -> List[SweetSpotItem]:
 
 @router.get("/price-deviation-check", response_model=PriceDeviationResult)
 def get_price_deviation_check(
+    current_user: CurrentUserDep,
     material_name: str = Query(..., description="Nombre del material/insumo."),
     current_price: float = Query(..., ge=0, description="Precio actual a comparar (PVU o PCU)."),
 ) -> PriceDeviationResult:
@@ -610,9 +628,11 @@ def get_price_deviation_check(
     Compara el precio actual con la media histórica del último año (referencia + detalle + real).
     """
     try:
+        org_s = str(current_user.org_id)
         prod_resp = (
             supabase_client.table("tbl_productos")
             .select("id")
+            .eq("organization_id", org_s)
             .ilike("nombre", f"%{material_name}%")
             .execute()
         )
@@ -632,6 +652,7 @@ def get_price_deviation_check(
         ref_resp = (
             supabase_client.table("tbl_precios_referencia")
             .select("pvu, pcu, fecha_presupuesto")
+            .eq("organization_id", org_s)
             .in_("id_producto", product_ids)
             .execute()
         )
@@ -650,6 +671,7 @@ def get_price_deviation_check(
         det_resp = (
             supabase_client.table("tbl_licitaciones_detalle")
             .select("id_licitacion, pvu")
+            .eq("organization_id", org_s)
             .in_("id_producto", product_ids)
             .eq("activo", True)
             .execute()
@@ -707,17 +729,19 @@ MA_WINDOW = 5  # Ventana para Moving Average del forecast
 
 
 @router.get("/product/{product_id}", response_model=ProductAnalytics)
-def get_product_analytics(product_id: int) -> ProductAnalytics:
+def get_product_analytics(product_id: int, current_user: CurrentUserDep) -> ProductAnalytics:
     """
     GET /analytics/product/{id}
     Analíticas avanzadas por producto: price_history, volume_metrics, competitor_analysis, forecast.
     """
     try:
-        # Nombre del producto
+        org_s = str(current_user.org_id)
+        # Nombre del producto (verificar pertenece a la org)
         prod_resp = (
             supabase_client.table("tbl_productos")
             .select("id, nombre")
             .eq("id", product_id)
+            .eq("organization_id", org_s)
             .single()
             .execute()
         )
@@ -732,6 +756,7 @@ def get_product_analytics(product_id: int) -> ProductAnalytics:
         det_resp = (
             supabase_client.table("tbl_licitaciones_detalle")
             .select("id_detalle, id_licitacion, pvu, unidades")
+            .eq("organization_id", org_s)
             .eq("id_producto", product_id)
             .execute()
         )
@@ -745,6 +770,7 @@ def get_product_analytics(product_id: int) -> ProductAnalytics:
             lic_resp = (
                 supabase_client.table("tbl_licitaciones")
                 .select("id_licitacion, fecha_adjudicacion")
+                .eq("organization_id", org_s)
                 .in_("id_licitacion", id_licitaciones)
                 .execute()
             )
@@ -758,6 +784,7 @@ def get_product_analytics(product_id: int) -> ProductAnalytics:
         ref_resp = (
             supabase_client.table("tbl_precios_referencia")
             .select("pvu, pcu, fecha_presupuesto")
+            .eq("organization_id", org_s)
             .eq("id_producto", product_id)
             .execute()
         )
@@ -815,6 +842,7 @@ def get_product_analytics(product_id: int) -> ProductAnalytics:
             real_resp = (
                 supabase_client.table("tbl_licitaciones_real")
                 .select("id_detalle, id_entrega, pcu")
+                .eq("organization_id", org_s)
                 .in_("id_detalle", id_detalles)
                 .execute()
             )
@@ -825,6 +853,7 @@ def get_product_analytics(product_id: int) -> ProductAnalytics:
                 ent_resp = (
                     supabase_client.table("tbl_entregas")
                     .select("id_entrega, fecha_entrega")
+                    .eq("organization_id", org_s)
                     .in_("id_entrega", id_entregas)
                     .execute()
                 )
@@ -876,6 +905,7 @@ def get_product_analytics(product_id: int) -> ProductAnalytics:
             real_resp = (
                 supabase_client.table("tbl_licitaciones_real")
                 .select("id_detalle, proveedor, pcu")
+                .eq("organization_id", org_s)
                 .in_("id_detalle", id_detalles)
                 .execute()
             )

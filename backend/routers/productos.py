@@ -7,6 +7,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
+from backend.deps import CurrentUserDep
 from backend.models import ProductoSearchResult
 
 
@@ -15,6 +16,7 @@ router = APIRouter(prefix="/productos", tags=["productos"])
 
 @router.get("/search", response_model=List[ProductoSearchResult])
 def search_productos(
+    current_user: CurrentUserDep,
     q: str = Query(..., min_length=1, description="Texto para buscar por nombre o referencia."),
     limit: int = Query(30, ge=1, le=100, description="Máximo de resultados."),
     only_with_precios_referencia: bool = Query(
@@ -30,11 +32,13 @@ def search_productos(
     GET /productos/search?q=Planta&only_with_precios_referencia=true  (con datos para tendencia/desviación: referencia o presupuestados en licitaciones)
     """
     try:
+        org_s = str(current_user.org_id)
         if only_with_precios_referencia:
             # Productos con precios de referencia
             ref_resp = (
                 supabase_client.table("tbl_precios_referencia")
                 .select("id_producto")
+                .eq("organization_id", org_s)
                 .execute()
             )
             id_productos = set()
@@ -45,6 +49,7 @@ def search_productos(
             det_resp = (
                 supabase_client.table("tbl_licitaciones_detalle")
                 .select("id_producto")
+                .eq("organization_id", org_s)
                 .eq("activo", True)
                 .execute()
             )
@@ -57,6 +62,7 @@ def search_productos(
                 supabase_client.table("tbl_productos")
                 .select("id, nombre")
                 .in_("id", list(id_productos))
+                .eq("organization_id", org_s)
                 .ilike("nombre", f"%{q}%")
                 .limit(limit)
                 .order("nombre")
@@ -66,6 +72,7 @@ def search_productos(
             response = (
                 supabase_client.table("tbl_productos")
                 .select("id, nombre")
+                .eq("organization_id", org_s)
                 .ilike("nombre", f"%{q}%")
                 .limit(limit)
                 .order("nombre")

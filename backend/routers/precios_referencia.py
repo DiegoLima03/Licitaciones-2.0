@@ -9,6 +9,7 @@ from typing import List
 from fastapi import APIRouter, HTTPException, status
 
 from backend.config import supabase_client
+from backend.deps import CurrentUserDep
 from backend.models import PrecioReferencia, PrecioReferenciaCreate
 
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/precios-referencia", tags=["precios-referencia"])
 
 
 @router.get("", response_model=List[PrecioReferencia])
-def list_precios_referencia() -> List[PrecioReferencia]:
+def list_precios_referencia(current_user: CurrentUserDep) -> List[PrecioReferencia]:
     """
     Lista todas las líneas de precios de referencia.
 
@@ -26,6 +27,7 @@ def list_precios_referencia() -> List[PrecioReferencia]:
         response = (
             supabase_client.table("tbl_precios_referencia")
             .select("id, id_producto, pvu, pcu, unidades, proveedor, notas, fecha_presupuesto, tbl_productos(nombre)")
+            .eq("organization_id", str(current_user.org_id))
             .order("fecha_presupuesto", desc=True)
             .execute()
         )
@@ -52,7 +54,7 @@ def list_precios_referencia() -> List[PrecioReferencia]:
 
 
 @router.post("", response_model=PrecioReferencia, status_code=status.HTTP_201_CREATED)
-def create_precio_referencia(payload: PrecioReferenciaCreate) -> PrecioReferencia:
+def create_precio_referencia(payload: PrecioReferenciaCreate, current_user: CurrentUserDep) -> PrecioReferencia:
     """
     Crea una línea de precio de referencia (producto, PVU, PCU, etc.).
     No está asociada a ninguna licitación; aparecerá en el buscador histórico.
@@ -64,6 +66,7 @@ def create_precio_referencia(payload: PrecioReferenciaCreate) -> PrecioReferenci
             supabase_client.table("tbl_productos")
             .select("nombre, organization_id")
             .eq("id", payload.id_producto)
+            .eq("organization_id", str(current_user.org_id))
             .limit(1)
             .execute()
         )
@@ -75,8 +78,8 @@ def create_precio_referencia(payload: PrecioReferenciaCreate) -> PrecioReferenci
             org_id = p0.get("organization_id")
         if not org_id:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El producto no tiene organization_id. No se puede crear la línea de referencia.",
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Producto no encontrado o no pertenece a tu organización.",
             ) from None
         row = {
             "id_producto": payload.id_producto,
