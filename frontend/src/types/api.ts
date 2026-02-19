@@ -100,6 +100,7 @@ export interface TenderStatusChange {
 export interface ProductoSearchResult {
   id: number;
   nombre: string;
+  nombre_proveedor?: string | null;
 }
 
 // Partida de presupuesto (tbl_licitaciones_detalle)
@@ -108,6 +109,7 @@ export interface TenderPartida {
   id_licitacion: number;
   id_producto: number;
   product_nombre?: string | null;
+  nombre_proveedor?: string | null;
   lote?: string | null;
   unidades?: number | null;
   pvu?: number | null;
@@ -153,10 +155,19 @@ export interface DeliveryHeaderCreate {
   cliente?: string | null;
 }
 
+export interface TipoGasto {
+  id: number;
+  codigo: string;
+  nombre: string;
+}
+
 export interface DeliveryItem {
-  id_producto: number;
+  /** Null si la línea es gasto extraordinario (id_tipo_gasto en su lugar). */
+  id_producto?: number | null;
   /** Si es null = gasto extraordinario (no presupuestado). */
   id_detalle?: number | null;
+  /** Si no null, línea es gasto extraordinario (concepto desde tbl_tipos_gasto). */
+  id_tipo_gasto?: number | null;
   proveedor?: string | null;
   cantidad: number;
   coste_unit: number;

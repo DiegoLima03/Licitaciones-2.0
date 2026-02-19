@@ -29,6 +29,7 @@ import type {
   TenderStatusChange,
   TenderUpdate,
   Tipo,
+  TipoGasto,
 } from "@/types/api";
 
 const CONNECTION_ERROR_MSG =
@@ -370,6 +371,19 @@ export const AnalyticsService = {
       const { data } = await apiClient.get<DashboardKPIs>("/analytics/kpis", { params });
       if (!data) throw new Error("No se devolvieron los KPIs.");
       return data;
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+};
+
+// ----- TiposGastoService -----
+
+export const TiposGastoService = {
+  async getTipos(): Promise<TipoGasto[]> {
+    try {
+      const { data } = await apiClient.get<TipoGasto[]>("/tipos-gasto");
+      return data ?? [];
     } catch (error) {
       throw new Error(getMessageFromError(error));
     }

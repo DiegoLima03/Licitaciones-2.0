@@ -48,7 +48,7 @@ def list_deliveries(
             id_e = ent.get("id_entrega")
             lineas_resp = (
                 supabase_client.table("tbl_licitaciones_real")
-                .select("*, tbl_productos(nombre)")
+                .select("*, tbl_productos(nombre), tbl_tipos_gasto(nombre)")
                 .eq("id_entrega", id_e)
                 .eq("organization_id", _org_str(current_user))
                 .order("id_real")
@@ -58,9 +58,10 @@ def list_deliveries(
             lineas: List[dict] = []
             for lin in raw_lineas:
                 prod = lin.get("tbl_productos") or {}
+                tipo_gasto = lin.get("tbl_tipos_gasto") or {}
                 lineas.append({
-                    **{k: v for k, v in lin.items() if k != "tbl_productos"},
-                    "product_nombre": prod.get("nombre"),
+                    **{k: v for k, v in lin.items() if k not in ("tbl_productos", "tbl_tipos_gasto")},
+                    "product_nombre": prod.get("nombre") or tipo_gasto.get("nombre"),
                 })
             result.append({
                 **ent,
@@ -159,22 +160,30 @@ def create_delivery(payload: DeliveryCreate, current_user: CurrentUserDep) -> di
         cost = float(line.coste_unit)
         if qty == 0 and cost == 0:
             continue
-        id_producto = int(line.id_producto)
+        is_extraordinario = line.id_tipo_gasto is not None
+        id_producto = int(line.id_producto) if line.id_producto is not None else None
+        if not is_extraordinario and id_producto is None:
+            continue
         id_detalle = line.id_detalle
         prov_linea = (line.proveedor or "").strip()
-        lineas_a_insertar.append({
+        row: Dict[str, Any] = {
             "id_licitacion": payload.id_licitacion,
             "organization_id": _org_str(current_user),
             "id_entrega": new_id_entrega,
             "id_detalle": id_detalle,
-            "id_producto": id_producto,
             "fecha_entrega": cabecera.fecha,
             "cantidad": qty,
             "pcu": cost,
             "proveedor": prov_linea,
             "estado": "EN ESPERA",
             "cobrado": False,
-        })
+        }
+        if is_extraordinario:
+            row["id_tipo_gasto"] = line.id_tipo_gasto
+            row["id_producto"] = None
+        else:
+            row["id_producto"] = id_producto
+        lineas_a_insertar.append(row)
 
     if not lineas_a_insertar:
         supabase_client.table("tbl_entregas").delete().eq(

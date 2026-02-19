@@ -10,7 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from backend.config import SKIP_AUTH
-from backend.routers import auth, analytics, tenders, import_data, deliveries, search, estados, tipos, precios_referencia, productos
+from backend.routers import auth, analytics, tenders, import_data, deliveries, search, estados, tipos, tipos_gasto, precios_referencia, productos, expenses
 
 
 app = FastAPI(
@@ -57,8 +57,10 @@ app.include_router(deliveries.router, prefix="/api")
 app.include_router(search.router, prefix="/api")
 app.include_router(estados.router, prefix="/api")
 app.include_router(tipos.router, prefix="/api")
+app.include_router(tipos_gasto.router, prefix="/api")
 app.include_router(precios_referencia.router, prefix="/api")
 app.include_router(productos.router, prefix="/api")
+app.include_router(expenses.router, prefix="/api")
 
 
 @app.get("/")

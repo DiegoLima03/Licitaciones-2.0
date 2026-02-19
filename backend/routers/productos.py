@@ -60,7 +60,7 @@ def search_productos(
                 return []
             response = (
                 supabase_client.table("tbl_productos")
-                .select("id, nombre")
+                .select("id, nombre, nombre_proveedor")
                 .in_("id", list(id_productos))
                 .eq("organization_id", org_s)
                 .ilike("nombre", f"%{q}%")
@@ -71,7 +71,7 @@ def search_productos(
         else:
             response = (
                 supabase_client.table("tbl_productos")
-                .select("id, nombre")
+                .select("id, nombre, nombre_proveedor")
                 .eq("organization_id", org_s)
                 .ilike("nombre", f"%{q}%")
                 .limit(limit)
@@ -83,6 +83,7 @@ def search_productos(
             ProductoSearchResult(
                 id=int(r["id"]),
                 nombre=r.get("nombre") or "",
+                nombre_proveedor=(r.get("nombre_proveedor") or "").strip() or None,
             )
             for r in rows
         ]

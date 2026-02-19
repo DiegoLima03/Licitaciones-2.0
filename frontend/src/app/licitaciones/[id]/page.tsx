@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { z } from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { ArrowLeft, ChevronRight, Edit3, ExternalLink } from "lucide-react";
+import { ArrowLeft, ChevronRight, Edit3, ExternalLink, Trash2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,7 +43,7 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { ProductAutocompleteInput } from "@/components/producto-autocomplete-input";
 import { EditableBudgetTable } from "@/components/licitaciones/editable-budget-table";
-import { DeliveriesService, EstadosService, TendersService, TiposService } from "@/services/api";
+import { DeliveriesService, EstadosService, TendersService, TiposGastoService, TiposService } from "@/services/api";
 import type {
   EntregaLinea,
   Estado,
@@ -223,25 +223,30 @@ export default function LicitacionDetallePage() {
   const [entregas, setEntregas] = React.useState<EntregaWithLines[]>([]);
   const [estados, setEstados] = React.useState<Estado[]>([]);
   const [tipos, setTipos] = React.useState<Tipo[]>([]);
+  const [tiposGasto, setTiposGasto] = React.useState<{ id: number; codigo: string; nombre: string }[]>([]);
   const [openAlbaran, setOpenAlbaran] = React.useState(false);
   type LineaTipo = "presupuestada" | "extraordinario";
+
+  const nuevaLineaVacia = () => ({
+    id_producto: null as number | null,
+    id_detalle: null as number | null,
+    id_tipo_gasto: null as number | null,
+    productNombre: "",
+    tipoGastoNombre: "",
+    proveedor: "",
+    cantidad: "",
+    coste_unit: "",
+  });
 
   const [albaranForm, setAlbaranForm] = React.useState({
     fecha: new Date().toISOString().slice(0, 10),
     codigo_albaran: "",
     observaciones: "",
-    lineas: [
-      {
-        tipo: "presupuestada" as LineaTipo,
-        id_producto: null as number | null,
-        id_detalle: null as number | null,
-        productNombre: "",
-        proveedor: "",
-        cantidad: "",
-        coste_unit: "",
-      },
-    ],
+    tipoLinea: "presupuestada" as LineaTipo,
+    lineas: [nuevaLineaVacia(), nuevaLineaVacia(), nuevaLineaVacia()],
   });
+
+  const tipoLinea = albaranForm.tipoLinea;
   const [submittingAlbaran, setSubmittingAlbaran] = React.useState(false);
   const [albaranError, setAlbaranError] = React.useState<string | null>(null);
   const [openEditarCabecera, setOpenEditarCabecera] = React.useState(false);
@@ -331,16 +336,30 @@ export default function LicitacionDetallePage() {
   }, [id, lic?.id_licitacion, refetchEntregas]);
 
   React.useEffect(() => {
-    Promise.all([EstadosService.getAll(), TiposService.getAll()])
-      .then(([e, t]) => {
-        setEstados(e ?? []);
-        setTipos(t ?? []);
-      })
-      .catch(() => {
-        setEstados([]);
-        setTipos([]);
-      });
+    Promise.allSettled([
+      EstadosService.getAll(),
+      TiposService.getAll(),
+      TiposGastoService.getTipos(),
+    ]).then(([e, t, tg]) => {
+      setEstados( e.status === "fulfilled" ? (e.value ?? []) : [] );
+      setTipos( t.status === "fulfilled" ? (t.value ?? []) : [] );
+      setTiposGasto( tg.status === "fulfilled" ? (tg.value ?? []) : [] );
+    });
   }, []);
+
+  /** Unidades ya entregadas por id_detalle (solo entregas guardadas, sin el formulario en curso). */
+  const unidadesEntregadasPorDetalle = React.useMemo(() => {
+    const map = new Map<number, number>();
+    for (const ent of entregas) {
+      for (const lin of ent.lineas) {
+        const idDet = lin.id_detalle;
+        if (idDet != null) {
+          map.set(idDet, (map.get(idDet) ?? 0) + Number(lin.cantidad));
+        }
+      }
+    }
+    return map;
+  }, [entregas]);
 
   /** Unidades reales ejecutadas por partida (clave: "lote|descripcion"). */
   const ejecutadoPorPartida = React.useMemo(() => {
@@ -371,6 +390,7 @@ export default function LicitacionDetallePage() {
 
   const isLocked = showContent && lic ? ESTADOS_PRESUPUESTO_BLOQUEADO.includes(lic.id_estado) : false;
   const showEjecucionRemainingTabs = showContent && lic ? lic.id_estado >= ID_ESTADO_ADJUDICADA : false;
+  const puedeMarcarLotesGanados = showContent && lic ? lic.id_estado >= ID_ESTADO_ADJUDICADA : false;
   const isRechazada = showContent && lic && (lic.id_estado === ID_ESTADO_DESCARTADA || lic.id_estado === ID_ESTADO_NO_ADJUDICADA);
   const motivoRechazo = React.useMemo(() => {
     if (!lic?.descripcion || !isRechazada) return null;
@@ -444,10 +464,8 @@ export default function LicitacionDetallePage() {
       trans.push({ id: ID_ESTADO_NO_ADJUDICADA, label: "Marcar como Perdida" });
     }
     if (id === ID_ESTADO_ADJUDICADA) {
-      trans.push({ id: 8, label: "Ejecución" });
       trans.push({ id: 7, label: "Finalizada" });
     }
-    if (id === 8) trans.push({ id: 7, label: "Finalizada" });
     return trans;
   }, [lic?.id_estado]);
 
@@ -503,18 +521,55 @@ export default function LicitacionDetallePage() {
     setAlbaranError(null);
     setSubmittingAlbaran(true);
     try {
+      const partidasMap = new Map<number, number>();
+      for (const p of lic.partidas ?? []) {
+        partidasMap.set(p.id_detalle, Number(p.unidades) || 0);
+      }
+      const allocPorDetalle = new Map<number, number>();
+
       const lineas = albaranForm.lineas
-        .filter((l) => l.id_producto != null)
-        .map((l) => ({
-          id_producto: l.id_producto as number,
-          id_detalle: l.tipo === "extraordinario" ? null : (l.id_detalle ?? null),
-          proveedor: l.proveedor.trim() || undefined,
-          cantidad: parseFloat(String(l.cantidad)) || 0,
-          coste_unit: parseFloat(String(l.coste_unit)) || 0,
-        }))
+        .filter((l) =>
+          tipoLinea === "extraordinario"
+            ? l.id_tipo_gasto != null
+            : l.id_producto != null
+        )
+        .map((l) => {
+          let cantidad = tipoLinea === "extraordinario" ? 0 : parseFloat(String(l.cantidad)) || 0;
+          if (tipoLinea === "presupuestada" && l.id_detalle != null) {
+            const presu = partidasMap.get(l.id_detalle) ?? 0;
+            const entregadas = unidadesEntregadasPorDetalle.get(l.id_detalle) ?? 0;
+            const yaAlloc = allocPorDetalle.get(l.id_detalle) ?? 0;
+            const maxPermitido = Math.max(0, presu - entregadas - yaAlloc);
+            cantidad = Math.min(cantidad, maxPermitido);
+            allocPorDetalle.set(l.id_detalle, yaAlloc + cantidad);
+          }
+          const coste = parseFloat(String(l.coste_unit)) || 0;
+          if (tipoLinea === "extraordinario") {
+            return {
+              id_producto: null as number | null,
+              id_detalle: null,
+              id_tipo_gasto: l.id_tipo_gasto ?? null,
+              proveedor: undefined,
+              cantidad: 0,
+              coste_unit: coste,
+            };
+          }
+          return {
+            id_producto: l.id_producto as number,
+            id_detalle: l.id_detalle ?? null,
+            id_tipo_gasto: null as number | null,
+            proveedor: l.proveedor?.trim() || undefined,
+            cantidad,
+            coste_unit: coste,
+          };
+        })
         .filter((l) => l.cantidad > 0 || l.coste_unit > 0);
       if (lineas.length === 0) {
-        setAlbaranError("Añade al menos una línea con producto seleccionado.");
+        setAlbaranError(
+          tipoLinea === "extraordinario"
+            ? "Añade al menos una línea con tipo de gasto y coste."
+            : "Añade al menos una línea con producto seleccionado."
+        );
         setSubmittingAlbaran(false);
         return;
       }
@@ -533,17 +588,8 @@ export default function LicitacionDetallePage() {
         fecha: new Date().toISOString().slice(0, 10),
         codigo_albaran: "",
         observaciones: "",
-        lineas: [
-          {
-            tipo: "presupuestada",
-            id_producto: null,
-            id_detalle: null,
-            productNombre: "",
-            proveedor: "",
-            cantidad: "",
-            coste_unit: "",
-          },
-        ],
+        tipoLinea: "presupuestada",
+        lineas: [nuevaLineaVacia(), nuevaLineaVacia(), nuevaLineaVacia()],
       });
     } catch (e) {
       setAlbaranError(e instanceof Error ? e.message : "Error al registrar albarán.");
@@ -965,7 +1011,7 @@ export default function LicitacionDetallePage() {
             <TabsTrigger value="presupuesto">Presupuesto (Oferta)</TabsTrigger>
             {showEjecucionRemainingTabs && (
               <>
-                <TabsTrigger value="ejecucion">Ejecución (Real / Albaranes)</TabsTrigger>
+                <TabsTrigger value="ejecucion">Entregas (Real / Albaranes)</TabsTrigger>
                 <TabsTrigger value="remaining">Remaining</TabsTrigger>
               </>
             )}
@@ -1057,7 +1103,8 @@ export default function LicitacionDetallePage() {
                             <span className="text-xs text-slate-500">Ganado</span>
                             <Switch
                               checked={loteItem.ganado}
-                              disabled={isLocked}
+                              disabled={!puedeMarcarLotesGanados}
+                              title={puedeMarcarLotesGanados ? "Marcar si este lote se adjudicó" : "Disponible tras la adjudicación"}
                               onCheckedChange={(checked) => handleToggleGanado(loteItem.nombre, checked)}
                             />
                           </div>
@@ -1233,200 +1280,242 @@ export default function LicitacionDetallePage() {
                   </div>
                   <div>
                     <p className="mb-2 text-xs font-medium text-slate-600">Líneas</p>
-                    <div className="space-y-2">
-                      {albaranForm.lineas.map((lin, idx) => (
-                        <div
-                          key={idx}
-                          className="flex flex-col gap-2 rounded border border-slate-200 bg-slate-50/50 p-2"
+                    <div className="mb-3 flex items-center gap-2">
+                      <span className="text-xs text-slate-500">Tipo de línea:</span>
+                      <div className="flex rounded-md border border-slate-200 bg-slate-100 p-0.5" role="group">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAlbaranForm((f) => ({
+                              ...f,
+                              tipoLinea: "presupuestada",
+                              lineas: f.lineas.map(() => nuevaLineaVacia()),
+                            }))
+                          }
+                          className={
+                            "rounded px-3 py-1.5 text-xs font-medium transition-colors " +
+                            (tipoLinea === "presupuestada"
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-600 hover:text-slate-900")
+                          }
                         >
-                          <Tabs
-                            value={lin.tipo}
-                            onValueChange={(v) => {
-                              const nextTipo = v as LineaTipo;
-                              setAlbaranForm((f) => ({
-                                ...f,
-                                lineas: f.lineas.map((l, i) =>
-                                  i === idx
-                                    ? {
-                                        ...l,
-                                        tipo: nextTipo,
-                                        id_producto: null,
-                                        id_detalle: null,
-                                        productNombre: "",
-                                      }
-                                    : l
-                                ),
-                              }));
-                            }}
-                            defaultValue="presupuestada"
-                          >
-                            <TabsList className="h-8 w-full max-w-[320px]">
-                              <TabsTrigger value="presupuestada" className="flex-1 text-xs">
-                                Línea presupuestada
-                              </TabsTrigger>
-                              <TabsTrigger value="extraordinario" className="flex-1 text-xs">
-                                Gasto extraordinario
-                              </TabsTrigger>
-                            </TabsList>
-                            <TabsContent value="presupuestada" className="mt-2">
-                              <label className="mb-1 block text-xs font-medium text-slate-600">
-                                Producto del presupuesto
-                              </label>
-                              <select
-                                className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                                value={
-                                  lin.id_detalle != null
-                                    ? String(lin.id_detalle)
-                                    : ""
-                                }
-                                onChange={(e) => {
-                                  const idDet = e.target.value ? Number(e.target.value) : null;
-                                  const partida = lic?.partidas?.find(
-                                    (p) => p.id_detalle === idDet
-                                  );
-                                  if (!partida || idDet == null) return;
-                                  setAlbaranForm((f) => ({
-                                    ...f,
-                                    lineas: f.lineas.map((l, i) =>
-                                      i === idx
-                                        ? {
-                                            ...l,
-                                            id_detalle: idDet,
-                                            id_producto: partida.id_producto,
-                                            productNombre: partida.product_nombre ?? "",
-                                          }
-                                        : l
-                                    ),
-                                  }));
-                                }}
-                              >
-                                <option value="">Selecciona partida…</option>
-                                {(lic?.partidas ?? []).map((p) => (
-                                  <option key={p.id_detalle} value={p.id_detalle}>
-                                    {[p.lote ?? "General", p.product_nombre].filter(Boolean).join(" – ")}
-                                  </option>
-                                ))}
-                              </select>
-                            </TabsContent>
-                            <TabsContent value="extraordinario" className="mt-2">
-                              <label className="mb-1 block text-xs font-medium text-slate-600">
-                                Producto (catálogo global)
-                              </label>
-                              <ProductAutocompleteInput
-                                value={
-                                  lin.id_producto != null && lin.productNombre
-                                    ? { id: lin.id_producto, nombre: lin.productNombre }
-                                    : null
-                                }
-                                onSelect={(id, nombre) =>
-                                  setAlbaranForm((f) => ({
-                                    ...f,
-                                    lineas: f.lineas.map((l, i) =>
-                                      i === idx
-                                        ? {
-                                            ...l,
-                                            id_producto: id,
-                                            id_detalle: null,
-                                            productNombre: nombre,
-                                          }
-                                        : l
-                                    ),
-                                  }))
-                                }
-                                placeholder="Ej. Hotel, Gasolina, Dietas…"
-                              />
-                            </TabsContent>
-                          </Tabs>
-                          <div className="flex flex-wrap items-end gap-2">
-                          <Input
-                            placeholder="Proveedor"
-                            className="max-w-[140px]"
-                            value={lin.proveedor}
-                            onChange={(e) =>
-                              setAlbaranForm((f) => ({
-                                ...f,
-                                lineas: f.lineas.map((l, i) =>
-                                  i === idx ? { ...l, proveedor: e.target.value } : l
-                                ),
-                              }))
-                            }
-                          />
-                          <Input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            placeholder="Cant."
-                            className="w-20"
-                            value={lin.cantidad}
-                            onChange={(e) =>
-                              setAlbaranForm((f) => ({
-                                ...f,
-                                lineas: f.lineas.map((l, i) =>
-                                  i === idx ? { ...l, cantidad: e.target.value } : l
-                                ),
-                              }))
-                            }
-                          />
-                          <Input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            placeholder="Coste €"
-                            className="w-24"
-                            value={lin.coste_unit}
-                            onChange={(e) =>
-                              setAlbaranForm((f) => ({
-                                ...f,
-                                lineas: f.lineas.map((l, i) =>
-                                  i === idx ? { ...l, coste_unit: e.target.value } : l
-                                ),
-                              }))
-                            }
-                          />
-                          {albaranForm.lineas.length > 1 && (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="text-red-600"
-                              onClick={() =>
-                                setAlbaranForm((f) => ({
-                                  ...f,
-                                  lineas: f.lineas.filter((_, i) => i !== idx),
-                                }))
-                              }
-                            >
-                              Quitar
-                            </Button>
-                          )}
-                          </div>
-                        </div>
-                      ))}
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() =>
-                          setAlbaranForm((f) => ({
-                            ...f,
-                            lineas: [
-                              ...f.lineas,
-                              {
-                                tipo: "presupuestada",
-                                id_producto: null,
-                                id_detalle: null,
-                                productNombre: "",
-                                proveedor: "",
-                                cantidad: "",
-                                coste_unit: "",
-                              },
-                            ],
-                          }))
-                        }
-                      >
-                        Añadir línea
-                      </Button>
+                          Presupuestada
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAlbaranForm((f) => ({
+                              ...f,
+                              tipoLinea: "extraordinario",
+                              lineas: f.lineas.map(() => nuevaLineaVacia()),
+                            }))
+                          }
+                          className={
+                            "rounded px-3 py-1.5 text-xs font-medium transition-colors " +
+                            (tipoLinea === "extraordinario"
+                              ? "bg-white text-slate-900 shadow-sm"
+                              : "text-slate-600 hover:text-slate-900")
+                          }
+                        >
+                          Gasto extraordinario
+                        </button>
+                      </div>
                     </div>
+                    <div className="overflow-x-auto rounded border border-slate-200">
+                      <table className="min-w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                            <th className="min-w-[180px] py-2 pl-3 pr-2">Concepto</th>
+                            {tipoLinea === "presupuestada" && (
+                              <th className="w-16 py-2 pr-2 text-right">Cant.</th>
+                            )}
+                            <th className="w-20 py-2 pr-2 text-right">Coste €</th>
+                            <th className="w-10 py-2 pr-3"></th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {albaranForm.lineas.map((lin, idx) => (
+                            <tr key={idx} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
+                              <td className="py-1.5 pl-3 pr-2 align-top">
+                                {tipoLinea === "presupuestada" ? (
+                                  <select
+                                    className="h-8 w-full min-w-[160px] rounded border border-slate-200 bg-white px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                                    value={lin.id_detalle != null ? String(lin.id_detalle) : ""}
+                                    onChange={(e) => {
+                                      const idDet = e.target.value ? Number(e.target.value) : null;
+                                      const partida = idDet != null ? lic?.partidas?.find((p) => p.id_detalle === idDet) : undefined;
+                                      setAlbaranForm((f) => ({
+                                        ...f,
+                                        lineas: f.lineas.map((l, i) =>
+                                          i === idx
+                                            ? {
+                                                ...l,
+                                                id_detalle: idDet ?? null,
+                                                id_producto: partida?.id_producto ?? null,
+                                                productNombre: partida?.product_nombre ?? "",
+                                                proveedor: partida?.nombre_proveedor ?? "",
+                                              }
+                                            : l
+                                        ),
+                                      }));
+                                    }}
+                                  >
+                                    <option value="">Selecciona partida…</option>
+                                    {(lic?.partidas ?? []).map((p) => (
+                                      <option key={p.id_detalle} value={p.id_detalle}>
+                                        {[p.lote ?? "General", p.product_nombre].filter(Boolean).join(" – ")}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <select
+                                    className="h-8 w-full min-w-[160px] rounded border border-slate-200 bg-white px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                                    value={lin.id_tipo_gasto != null ? String(lin.id_tipo_gasto) : ""}
+                                    onChange={(e) => {
+                                      const idTipo = e.target.value ? Number(e.target.value) : null;
+                                      const tipo = idTipo != null ? tiposGasto.find((t) => t.id === idTipo) : undefined;
+                                      setAlbaranForm((f) => ({
+                                        ...f,
+                                        lineas: f.lineas.map((l, i) =>
+                                          i === idx
+                                            ? {
+                                                ...l,
+                                                id_tipo_gasto: idTipo,
+                                                tipoGastoNombre: tipo?.nombre ?? "",
+                                                id_producto: null,
+                                                productNombre: "",
+                                              }
+                                            : l
+                                        ),
+                                      }));
+                                    }}
+                                  >
+                                    <option value="">Tipo de gasto…</option>
+                                    {tiposGasto.map((t, idx) => (
+                                      <option key={t.id ?? idx} value={t.id ?? ""}>
+                                        {t.nombre ?? t.codigo ?? ""}
+                                      </option>
+                                    ))}
+                                  </select>
+                                )}
+                              </td>
+                              {tipoLinea === "presupuestada" && (
+                                <td className="py-1.5 pr-2 text-right align-top">
+                                    {(() => {
+                                      const partida =
+                                        lin.id_detalle != null
+                                          ? lic?.partidas?.find((p) => p.id_detalle === lin.id_detalle)
+                                          : undefined;
+                                      const unidadesPresu = partida?.unidades != null ? Number(partida.unidades) : 0;
+                                      const yaEntregadas = lin.id_detalle != null ? unidadesEntregadasPorDetalle.get(lin.id_detalle) ?? 0 : 0;
+                                      const enOtrasLineas =
+                                        lin.id_detalle != null
+                                          ? albaranForm.lineas.reduce(
+                                              (sum, l, i) =>
+                                                i !== idx && l.id_detalle === lin.id_detalle
+                                                  ? sum + (parseFloat(String(l.cantidad)) || 0)
+                                                  : sum,
+                                              0
+                                            )
+                                          : 0;
+                                      const restantes = Math.max(0, unidadesPresu - yaEntregadas - enOtrasLineas);
+                                      const showGhost = partida && !String(lin.cantidad).trim() && restantes >= 0;
+                                      return (
+                                        <div className="relative w-20">
+                                          <Input
+                                            type="number"
+                                            min={0}
+                                            max={restantes}
+                                            step={0.01}
+                                            className="h-8 w-20 text-right text-xs"
+                                            value={lin.cantidad}
+                                            placeholder={partida && restantes >= 0 ? " " : "Cant."}
+                                          onChange={(e) =>
+                                            setAlbaranForm((f) => ({
+                                              ...f,
+                                              lineas: f.lineas.map((l, i) =>
+                                                i === idx ? { ...l, cantidad: e.target.value } : l
+                                              ),
+                                            }))
+                                          }
+                                          onBlur={(e) => {
+                                            const v = parseFloat(String(lin.cantidad));
+                                            if (Number.isFinite(v) && v > restantes) {
+                                              setAlbaranForm((f) => ({
+                                                ...f,
+                                                lineas: f.lineas.map((l, i) =>
+                                                  i === idx ? { ...l, cantidad: restantes > 0 ? String(restantes) : "" } : l
+                                                ),
+                                              }));
+                                            }
+                                          }}
+                                          />
+                                          {showGhost && (
+                                            <span
+                                              className="pointer-events-none absolute inset-0 flex items-center justify-end pr-2 text-xs text-slate-400"
+                                              aria-hidden
+                                            >
+                                              {restantes}
+                                            </span>
+                                          )}
+                                        </div>
+                                      );
+                                    })()}
+                                </td>
+                              )}
+                              <td className="py-1.5 pr-2 text-right align-top">
+                                <Input
+                                  type="number"
+                                  min={0}
+                                  step={0.01}
+                                  className="h-8 w-16 text-right text-xs"
+                                  value={lin.coste_unit}
+                                  onChange={(e) =>
+                                    setAlbaranForm((f) => ({
+                                      ...f,
+                                      lineas: f.lineas.map((l, i) =>
+                                        i === idx ? { ...l, coste_unit: e.target.value } : l
+                                      ),
+                                    }))
+                                  }
+                                />
+                              </td>
+                              <td className="py-1.5 pr-3 align-top">
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="h-8 w-8 p-0 text-red-500 hover:bg-red-50 hover:text-red-700"
+                                  onClick={() =>
+                                    setAlbaranForm((f) => ({
+                                      ...f,
+                                      lineas: f.lineas.filter((_, i) => i !== idx),
+                                    }))
+                                  }
+                                  aria-label="Quitar línea"
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-2"
+                      onClick={() =>
+                        setAlbaranForm((f) => ({
+                          ...f,
+                          lineas: [...f.lineas, nuevaLineaVacia()],
+                        }))
+                      }
+                    >
+                      + Añadir fila
+                    </Button>
                   </div>
                   {albaranError && (
                     <p className="text-sm text-red-600">{albaranError}</p>

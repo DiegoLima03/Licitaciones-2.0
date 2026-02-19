@@ -11,8 +11,8 @@ import { cn } from "@/lib/utils";
 const DEBOUNCE_MS = 280;
 
 export interface ProductAutocompleteInputProps {
-  value: { id: number; nombre: string } | null;
-  onSelect: (id: number, nombre: string) => void;
+  value: { id: number; nombre: string; nombre_proveedor?: string | null } | null;
+  onSelect: (id: number, nombre: string, nombreProveedor?: string | null) => void;
   /** Llámalo para limpiar la selección (p. ej. botón X o borrar todo el texto). */
   onClear?: () => void;
   placeholder?: string;
@@ -88,7 +88,7 @@ export function ProductAutocompleteInput({
 
   const select = React.useCallback(
     (opt: ProductoSearchResult) => {
-      onSelect(opt.id, opt.nombre);
+      onSelect(opt.id, opt.nombre, opt.nombre_proveedor ?? null);
       setQuery("");
       setOpen(false);
       setOptions([]);

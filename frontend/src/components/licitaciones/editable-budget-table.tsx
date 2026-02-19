@@ -230,7 +230,7 @@ function parseDecimalInput(value: string): number {
 
 // --- COMPONENTE PRINCIPAL ---
 /** Estados que bloquean la edición del presupuesto (presentada o posterior) */
-const ESTADOS_PRESUPUESTO_BLOQUEADO = [2, 4, 5, 6, 7, 8]; // DESCARTADA, PRESENTADA, ADJUDICADA, NO_ADJUDICADA, TERMINADA, EJECUCION
+const ESTADOS_PRESUPUESTO_BLOQUEADO = [2, 4, 5, 6, 7]; // DESCARTADA, PRESENTADA, ADJUDICADA, NO_ADJUDICADA, TERMINADA
 
 export interface EditableBudgetTableProps {
   lic: TenderDetail;

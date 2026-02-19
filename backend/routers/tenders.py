@@ -121,7 +121,7 @@ def get_tender(tender_id: int, current_user: CurrentUserDep) -> dict:
 
         partidas_resp = (
             supabase_client.table("tbl_licitaciones_detalle")
-            .select("*, tbl_productos(nombre)")
+            .select("*, tbl_productos(nombre, nombre_proveedor)")
             .eq("id_licitacion", tender_id)
             .eq("organization_id", str(current_user.org_id))
             .order("lote")
@@ -135,6 +135,7 @@ def get_tender(tender_id: int, current_user: CurrentUserDep) -> dict:
             partidas.append({
                 **{k: v for k, v in p.items() if k != "tbl_productos"},
                 "product_nombre": prod.get("nombre"),
+                "nombre_proveedor": (prod.get("nombre_proveedor") or "").strip() or None,
             })
 
         return {
@@ -188,13 +189,6 @@ def change_tender_status(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="No se puede presentar a coste cero. La suma del presupuesto (partidas activas) debe ser > 0.",
-            )
-
-    if nuevo_estado == EstadoLicitacion.EJECUCION:
-        if id_estado_actual != EstadoLicitacion.ADJUDICADA.value:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Solo se puede pasar a EJECUCIÓN desde ADJUDICADA.",
             )
 
     # Validaciones de payload (motivo_descarte, motivo_perdida, etc.) ya las hace Pydantic
