@@ -1,10 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { useQuery } from "@tanstack/react-query";
 import { Bar, BarChart, XAxis, YAxis, ResponsiveContainer, Cell } from "recharts";
-import { AnalyticsService } from "@/services/api";
 import type { ProductAnalytics } from "@/types/api";
+import { useProductAnalytics } from "@/hooks/useProductAnalytics";
 import { MaterialTrendChart } from "@/components/analytics/MaterialTrendChart";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -26,16 +25,7 @@ export function ProductAnalyticsPanel({
   productId: number;
   onClose: () => void;
 }) {
-  const {
-    data,
-    isLoading,
-    error,
-    isFetching,
-  } = useQuery({
-    queryKey: ["product-analytics", productId],
-    queryFn: () => AnalyticsService.getProductAnalytics(productId),
-    enabled: productId > 0,
-  });
+  const { data, isLoading, error, isFetching } = useProductAnalytics(productId);
 
   const trendBadge = React.useMemo(() => {
     if (!data || data.price_history.length < 2) return null;

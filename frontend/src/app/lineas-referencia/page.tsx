@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import Link from "next/link";
-import { ArrowLeft, FileSpreadsheet, Plus } from "lucide-react";
+import { ArrowLeft, Plus } from "lucide-react";
 
 import { ProductAutocompleteInput } from "@/components/producto-autocomplete-input";
 import { Button } from "@/components/ui/button";
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { ImportService, PreciosReferenciaService } from "@/services/api";
+import { PreciosReferenciaService } from "@/services/api";
 import type { PrecioReferencia, PrecioReferenciaCreate } from "@/types/api";
 
 function formatEuro(value: number) {
@@ -29,7 +29,6 @@ const initialForm = {
   pvu: null as number | null,
   pcu: null as number | null,
   unidades: null as number | null,
-  proveedor: "",
   notas: "",
   fecha_presupuesto: "" as string,
 };
@@ -44,13 +43,6 @@ export default function LineasReferenciaPage() {
     nombre: string;
   } | null>(null);
   const [form, setForm] = React.useState(initialForm);
-  const [importing, setImporting] = React.useState(false);
-  const [importResult, setImportResult] = React.useState<{
-    message: string;
-    rows_imported: number;
-    rows_skipped: number;
-    skipped_details?: { articulo: string; precio?: number }[];
-  } | null>(null);
 
   const fetchList = React.useCallback(async () => {
     setLoading(true);
@@ -77,33 +69,6 @@ export default function LineasReferenciaPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
-  async function handleImportExcel(e: React.FormEvent<HTMLFormElement>) {
-    e.preventDefault();
-    const input = (e.target as HTMLFormElement).querySelector<HTMLInputElement>('input[type="file"]');
-    const file = input?.files?.[0];
-    if (!file) {
-      setError("Selecciona un archivo Excel (.xlsx).");
-      return;
-    }
-    if (!file.name.toLowerCase().endsWith(".xlsx") && !file.name.toLowerCase().endsWith(".xls")) {
-      setError("El archivo debe ser Excel (.xlsx o .xls).");
-      return;
-    }
-    setImporting(true);
-    setError(null);
-    setImportResult(null);
-    try {
-      const res = await ImportService.uploadPreciosReferencia(file);
-      setImportResult(res);
-      await fetchList();
-      input.value = "";
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Error al importar.");
-    } finally {
-      setImporting(false);
-    }
-  }
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!selectedProduct) {
@@ -118,7 +83,6 @@ export default function LineasReferenciaPage() {
         pvu: form.pvu != null ? Number(form.pvu) : null,
         pcu: form.pcu != null ? Number(form.pcu) : null,
         unidades: form.unidades != null ? Number(form.unidades) : null,
-        proveedor: form.proveedor?.trim() || null,
         notas: form.notas?.trim() || null,
         fecha_presupuesto: form.fecha_presupuesto?.trim() || null,
       };
@@ -152,55 +116,6 @@ export default function LineasReferenciaPage() {
           </Button>
         </Link>
       </header>
-
-      <Card>
-        <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-slate-800">
-            Importar albaranes de compra
-          </CardTitle>
-          <p className="text-xs text-slate-500 mt-1">
-            Sube un Excel con columnas: Fecha, Nº Albarán, Ref. Artículo, Artículo, Cantidad, Precio.
-            Se crearán líneas de precios de referencia (PCU = Precio). Los productos deben existir en la base.
-          </p>
-        </CardHeader>
-        <CardContent className="pt-0">
-          <form onSubmit={handleImportExcel} className="flex flex-wrap items-end gap-3">
-            <div className="flex-1 min-w-[200px]">
-              <label className="block text-xs font-medium text-slate-600 mb-1">Archivo Excel</label>
-              <Input
-                type="file"
-                accept=".xlsx,.xls"
-                disabled={importing}
-                className="cursor-pointer"
-              />
-            </div>
-            <Button type="submit" variant="secondary" disabled={importing} className="gap-2">
-              <FileSpreadsheet className="h-4 w-4" />
-              {importing ? "Importando…" : "Importar"}
-            </Button>
-          </form>
-          {importResult && (
-            <div className={`mt-4 rounded-md px-3 py-2 text-sm ${
-              importResult.rows_skipped > 0 ? "bg-amber-50 text-amber-800" : "bg-emerald-50 text-emerald-800"
-            }`}>
-              <p>{importResult.message}</p>
-              {importResult.skipped_details && importResult.skipped_details.length > 0 && (
-                <details className="mt-2">
-                  <summary className="cursor-pointer text-xs">Ver líneas omitidas ({importResult.skipped_details.length})</summary>
-                  <ul className="mt-1 text-xs list-disc list-inside space-y-0.5">
-                    {importResult.skipped_details.slice(0, 15).map((s, i) => (
-                      <li key={i}>{s.articulo} {s.precio != null ? `(PCU: ${s.precio} €)` : ""}</li>
-                    ))}
-                    {importResult.skipped_details.length > 15 && (
-                      <li>… y {importResult.skipped_details.length - 15} más</li>
-                    )}
-                  </ul>
-                </details>
-              )}
-            </div>
-          )}
-        </CardContent>
-      </Card>
 
       <Card>
         <CardHeader className="pb-3">
@@ -304,20 +219,6 @@ export default function LineasReferenciaPage() {
                     )
                   }
                   placeholder="—"
-                />
-              </div>
-              <div className="sm:col-span-2 lg:col-span-3">
-                <label
-                  htmlFor="proveedor"
-                  className="mb-1 block text-xs font-medium text-slate-600"
-                >
-                  Proveedor
-                </label>
-                <Input
-                  id="proveedor"
-                  value={form.proveedor ?? ""}
-                  onChange={(e) => handleChange("proveedor", e.target.value)}
-                  placeholder="Nombre del proveedor"
                 />
               </div>
             </div>

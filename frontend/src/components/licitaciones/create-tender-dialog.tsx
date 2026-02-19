@@ -27,11 +27,11 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
+import Image from "next/image";
+import { ChevronDown } from "lucide-react";
+import { PAIS_FLAG_SRC, PAIS_LABEL, PAISES_OPCIONES } from "@/lib/paises";
 import { TiposService, TendersService } from "@/services/api";
 import type { PaisLicitacion, Tipo } from "@/types/api";
-
-const PAISES_OPCIONES: PaisLicitacion[] = ["España", "Portugal"];
-const PAIS_LABEL: Record<PaisLicitacion, string> = { España: "🇪🇸 España", Portugal: "🇵🇹 Portugal" };
 
 type CreateTenderDialogProps = {
   triggerLabel?: string;
@@ -93,6 +93,7 @@ export function CreateTenderDialog({
   const [submitting, setSubmitting] = React.useState(false);
   const [tipos, setTipos] = React.useState<Tipo[]>([]);
   const [loadingMaestros, setLoadingMaestros] = React.useState(false);
+  const [paisPopoverOpen, setPaisPopoverOpen] = React.useState(false);
   const [openDatePopover, setOpenDatePopover] = React.useState<
     "f_presentacion" | "f_adjudicacion" | "f_finalizacion" | null
   >(null);
@@ -313,18 +314,58 @@ export function CreateTenderDialog({
                   <FormItem>
                     <FormLabel>País</FormLabel>
                     <FormControl>
-                      <select
-                        className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:opacity-50"
-                        value={field.value ?? ""}
-                        onChange={(e) => field.onChange(e.target.value as PaisLicitacion)}
-                      >
-                        <option value="">Selecciona el país</option>
-                        {PAISES_OPCIONES.map((p) => (
-                          <option key={p} value={p}>
-                            {PAIS_LABEL[p]}
-                          </option>
-                        ))}
-                      </select>
+                      <Popover open={paisPopoverOpen} onOpenChange={setPaisPopoverOpen}>
+                        <PopoverTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex h-9 w-full items-center justify-between gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2"
+                          >
+                            <span className="flex items-center gap-2">
+                              {field.value ? (
+                                <>
+                                  <Image
+                                    src={PAIS_FLAG_SRC[field.value]}
+                                    alt=""
+                                    width={32}
+                                    height={20}
+                                    unoptimized
+                                    className="h-5 w-8 rounded object-cover object-center"
+                                  />
+                                  <span>{PAIS_LABEL[field.value]}</span>
+                                </>
+                              ) : (
+                                <span className="text-slate-400">Selecciona el país</span>
+                              )}
+                            </span>
+                            <ChevronDown className="h-4 w-4 text-slate-400" />
+                          </button>
+                        </PopoverTrigger>
+                        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+                          <div className="py-1">
+                            {PAISES_OPCIONES.map((p) => (
+                              <button
+                                key={p}
+                                type="button"
+                                onClick={() => {
+                                  field.onChange(p);
+                                  setPaisPopoverOpen(false);
+                                }}
+                                className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-900 hover:bg-slate-100"
+                              >
+                                <Image
+                                  src={PAIS_FLAG_SRC[p]}
+                                  alt=""
+                                  width={32}
+                                  height={20}
+                                  unoptimized
+                                  className="h-5 w-8 rounded object-cover object-center"
+                                />
+                                <span>{PAIS_LABEL[p]}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </PopoverContent>
+                      </Popover>
                     </FormControl>
                     <FormMessage />
                   </FormItem>

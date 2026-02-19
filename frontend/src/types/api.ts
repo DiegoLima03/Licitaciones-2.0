@@ -1,6 +1,10 @@
 /**
  * Tipos de la API (equivalentes a backend/models.py y backend/schemas.py).
  * Mantener alineados con los modelos Pydantic del backend.
+ *
+ * Tipos generados: Ejecutar `npm run generate-types` (backend en 127.0.0.1:8000)
+ * para generar src/generated/api.d.ts desde OpenAPI. Los tipos que coincidan
+ * con el esquema pueden sustituirse progresivamente por los generados para evitar duplicados.
  */
 
 // ----- Auth -----

@@ -253,8 +253,14 @@ export function EditableBudgetTable({
   isLocked = false,
 }: EditableBudgetTableProps) {
   const tenderId = lic.id_licitacion;
-  /** Tipo 1 = Unidades y Precio Máximo: mostrar columna PMAXU */
-  const showPmaxu = lic.id_tipolicitacion === 1;
+  const isTipo2 = lic.id_tipolicitacion === 2;
+  const isTipo4 = lic.id_tipolicitacion === 4;
+  const isTipo5 = lic.id_tipolicitacion === 5;
+  const isTipoDescuento = isTipo2 || isTipo5;
+  /** Tipos 1, 2, 4 y 5 = muestran columna PMAXU */
+  const showPmaxu = lic.id_tipolicitacion === 1 || isTipo2 || isTipo4 || isTipo5;
+  /** En tipos 2 y 4 no hay unidades */
+  const showUnidades = !(isTipo2 || isTipo4);
 
   // Restaurar foco después de añadir línea para no saltar a la nueva fila
   const focusRestoreRef = React.useRef<HTMLElement | null>(null);
@@ -267,11 +273,14 @@ export function EditableBudgetTable({
   // Texto en edición para PVU/PCU (permite escribir "1," o "1." sin que se borre al parsear)
   const [editingDecimal, setEditingDecimal] = React.useState<{
     index: number;
-    field: "pvu" | "pcu";
+    field: "pvu" | "pcu" | "pmaxu";
     value: string;
   } | null>(null);
   /** Por cada índice de fila: si el PVU tiene desviación aceptable (verde) o no (rojo). null = sin datos o cargando. */
   const [deviationByIndex, setDeviationByIndex] = React.useState<Record<number, boolean | null>>({});
+  /** Descuento global para tipo 5 (sobre PMAXU → PVU) */
+  const [globalDiscountPct, setGlobalDiscountPct] = React.useState<number>(0);
+  const initialDiscountSetRef = React.useRef(false);
 
   const initialRows = React.useMemo(() => {
     let partidas = lic.partidas ?? [];
@@ -378,6 +387,31 @@ export function EditableBudgetTable({
       if (deviationDebounceRef.current) clearTimeout(deviationDebounceRef.current);
     };
   }, [watchedPartidas]);
+
+  // Inicializar el descuento global al entrar en una licitación sin unidades (tipo 2),
+  // deduciéndolo de PMAXU y PVU para que el input muestre el valor real usado.
+  React.useEffect(() => {
+    if (!isTipo2) return;
+    if (initialDiscountSetRef.current) return;
+    const partidas = lic.partidas ?? [];
+    const valid = partidas.filter(
+      (p) => (p.pmaxu ?? 0) > 0 && (p.pvu ?? 0) > 0
+    );
+    if (valid.length === 0) return;
+    const totalPmaxu = valid.reduce(
+      (acc, p) => acc + (Number(p.pmaxu) || 0),
+      0
+    );
+    const totalPvu = valid.reduce(
+      (acc, p) => acc + (Number(p.pvu) || 0),
+      0
+    );
+    if (totalPmaxu <= 0) return;
+    const factor = Math.max(0, Math.min(1, totalPvu / totalPmaxu));
+    const pct = (1 - factor) * 100;
+    setGlobalDiscountPct(Math.round(pct * 10) / 10);
+    initialDiscountSetRef.current = true;
+  }, [isTipo2, lic.partidas]);
 
   // --- GUARDAR TODAS LAS LÍNEAS PENDIENTES ---
   const saveAllPending = React.useCallback(async () => {
@@ -499,6 +533,23 @@ export function EditableBudgetTable({
     }, 0);
   };
 
+  const applyGlobalDiscount = async () => {
+    if (!isTipoDescuento) return;
+    const pct = Number.isFinite(globalDiscountPct) ? Math.max(0, globalDiscountPct) : 0;
+    const partidas = form.getValues("partidas") ?? [];
+    partidas.forEach((row, index) => {
+      const base = Number(row.pmaxu);
+      if (!row.id_producto || !Number.isFinite(base) || base <= 0) return;
+      const pvuCalc = Math.round(base * (1 - pct / 100) * 100) / 100;
+      form.setValue(`partidas.${index}.pvu`, pvuCalc);
+      markDirty(index);
+    });
+    // Guardar inmediatamente las líneas para que los KPIs de cabecera se actualicen
+    await saveAllPending();
+    // Fuerza refetch de la licitación (actualiza tarjetas superiores)
+    onPartidaAdded();
+  };
+
   return (
     <div className="flex min-h-[500px] w-full flex-1 flex-col overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm">
       {isLocked && (
@@ -506,12 +557,43 @@ export function EditableBudgetTable({
           Presupuesto cerrado tras presentación. No se pueden modificar partidas.
         </div>
       )}
+      {!isLocked && isTipoDescuento && (
+        <div className="flex items-center justify-between gap-3 border-b border-slate-100 bg-slate-50 px-4 py-2 text-xs text-slate-700">
+          <span className="font-medium">Descuentos sobre precio máximo</span>
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] uppercase tracking-wide text-slate-500">Descuento global</span>
+            <Input
+              type="number"
+              inputMode="decimal"
+              className="h-7 w-20 border-slate-300 px-2 text-right text-xs"
+              value={Number.isNaN(globalDiscountPct) ? "" : globalDiscountPct}
+              onChange={(e) => {
+                const v = parseFloat(e.target.value.replace(",", "."));
+                setGlobalDiscountPct(Number.isNaN(v) ? 0 : v);
+              }}
+              placeholder="0"
+            />
+            <span className="text-xs text-slate-500">%</span>
+            <Button
+              type="button"
+              size="sm"
+              className="h-7 px-3 text-xs"
+              variant="outline"
+              onClick={applyGlobalDiscount}
+            >
+              Aplicar a PVU
+            </Button>
+          </div>
+        </div>
+      )}
       <div className="flex-1 overflow-auto">
         <table className="min-w-full text-left text-sm">
           <thead className="sticky top-0 z-10 bg-slate-50 shadow-sm">
             <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
               <th className="min-w-[280px] py-3 pl-4 pr-2 font-medium">Producto</th>
-              <th className="w-24 py-3 pr-2 text-right font-medium">Uds.</th>
+              {showUnidades && (
+                <th className="w-24 py-3 pr-2 text-right font-medium">Uds.</th>
+              )}
               {showPmaxu && (
                 <th className="w-28 py-3 pr-2 text-right font-medium">PMAXU (€)</th>
               )}
@@ -530,7 +612,11 @@ export function EditableBudgetTable({
               const pvu = form.watch(`partidas.${index}.pvu`);
               const pcu = form.watch(`partidas.${index}.pcu`);
               const pmaxu = form.watch(`partidas.${index}.pmaxu`);
-              const beneficio = Number(pvu) - Number(pcu);
+              const beneficioBase = Number(pvu) - Number(pcu);
+              const beneficio =
+                isTipoDescuento && (!pvu || Number(pvu) <= 0)
+                  ? 0
+                  : beneficioBase;
 
               // Observadores para renderizado
               const idProd = form.watch(`partidas.${index}.id_producto`);
@@ -556,31 +642,33 @@ export function EditableBudgetTable({
                   </td>
 
 
-                  <td className="py-2 pr-2 align-middle">
-                    {(() => {
-                      const unidadesVal = form.watch(`partidas.${index}.unidades`);
-                      const numVal = unidadesVal != null && !Number.isNaN(Number(unidadesVal)) ? Number(unidadesVal) : 0;
-                      return (
-                        <Input
-                          type="text"
-                          inputMode="numeric"
-                          className={`${inputCellClass} text-right font-medium`}
-                          disabled={isLocked}
-                          placeholder="0"
-                          value={numVal === 0 ? "" : String(numVal)}
-                          onChange={(e) => {
-                            const v = parseDecimalInput(e.target.value);
-                            form.setValue(`partidas.${index}.unidades`, Math.max(0, v));
-                            markDirty(index);
-                          }}
-                          onBlur={() => form.trigger(`partidas.${index}.unidades`)}
-                          ref={(el) => {
-                            unidadesInputRefs.current[index] = el;
-                          }}
-                        />
-                      );
-                    })()}
-                  </td>
+                  {showUnidades && (
+                    <td className="py-2 pr-2 align-middle">
+                      {(() => {
+                        const unidadesVal = form.watch(`partidas.${index}.unidades`);
+                        const numVal = unidadesVal != null && !Number.isNaN(Number(unidadesVal)) ? Number(unidadesVal) : 0;
+                        return (
+                          <Input
+                            type="text"
+                            inputMode="numeric"
+                            className={`${inputCellClass} text-right font-medium`}
+                            disabled={isLocked}
+                            placeholder="0"
+                            value={numVal === 0 ? "" : String(numVal)}
+                            onChange={(e) => {
+                              const v = parseDecimalInput(e.target.value);
+                              form.setValue(`partidas.${index}.unidades`, Math.max(0, v));
+                              markDirty(index);
+                            }}
+                            onBlur={() => form.trigger(`partidas.${index}.unidades`)}
+                            ref={(el) => {
+                              unidadesInputRefs.current[index] = el;
+                            }}
+                          />
+                        );
+                      })()}
+                    </td>
+                  )}
 
                   {showPmaxu && (
                     <td className="py-2 pr-2 align-middle">
@@ -591,14 +679,40 @@ export function EditableBudgetTable({
                         disabled={isLocked}
                         placeholder="0"
                         value={
-                          pmaxu != null && !Number.isNaN(Number(pmaxu)) && Number(pmaxu) !== 0
-                            ? String(pmaxu)
-                            : ""
+                          editingDecimal?.index === index && editingDecimal?.field === "pmaxu"
+                            ? editingDecimal.value
+                            : pmaxu != null && !Number.isNaN(Number(pmaxu)) && Number(pmaxu) !== 0
+                              ? String(pmaxu)
+                              : ""
+                        }
+                        onFocus={() =>
+                          setEditingDecimal({
+                            index,
+                            field: "pmaxu",
+                            value:
+                              pmaxu != null && !Number.isNaN(Number(pmaxu)) && Number(pmaxu) !== 0
+                                ? String(pmaxu)
+                                : "",
+                          })
                         }
                         onChange={(e) => {
-                          const num = parseDecimalInput(e.target.value);
-                          form.setValue(`partidas.${index}.pmaxu`, num);
-                          markDirty(index);
+                          if (editingDecimal?.index === index && editingDecimal?.field === "pmaxu") {
+                            setEditingDecimal({ ...editingDecimal, value: e.target.value });
+                          } else {
+                            setEditingDecimal({
+                              index,
+                              field: "pmaxu",
+                              value: e.target.value,
+                            });
+                          }
+                        }}
+                        onBlur={() => {
+                          if (editingDecimal?.index === index && editingDecimal?.field === "pmaxu") {
+                            const num = parseDecimalInput(editingDecimal.value);
+                            form.setValue(`partidas.${index}.pmaxu`, num);
+                            markDirty(index);
+                            setEditingDecimal(null);
+                          }
                         }}
                       />
                     </td>
@@ -620,40 +734,54 @@ export function EditableBudgetTable({
                           : undefined
                     }
                   >
-                    <Input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="0"
-                      className={`${inputCellClass} text-right`}
-                      disabled={isLocked}
-                      value={
-                        editingDecimal?.index === index && editingDecimal?.field === "pvu"
-                          ? editingDecimal.value
-                          : pvu !== undefined && pvu !== null && !Number.isNaN(Number(pvu))
-                            ? (Number(pvu) === 0 ? "" : String(pvu))
-                            : ""
-                      }
-                      onFocus={() =>
-                        setEditingDecimal({
-                          index,
-                          field: "pvu",
-                          value: pvu !== undefined && pvu !== null && !Number.isNaN(Number(pvu)) && Number(pvu) !== 0 ? String(pvu) : "",
-                        })
-                      }
-                      onChange={(e) => {
-                        if (editingDecimal?.index === index && editingDecimal?.field === "pvu") {
-                          setEditingDecimal({ ...editingDecimal, value: e.target.value });
+                    {isTipoDescuento ? (
+                      <div className={`${inputCellClass} text-right text-slate-900`}>
+                        {pvu != null && !Number.isNaN(Number(pvu)) && Number(pvu) !== 0
+                          ? String(pvu)
+                          : ""}
+                      </div>
+                    ) : (
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        className={`${inputCellClass} text-right`}
+                        disabled={isLocked}
+                        value={
+                          editingDecimal?.index === index && editingDecimal?.field === "pvu"
+                            ? editingDecimal.value
+                            : pvu !== undefined && pvu !== null && !Number.isNaN(Number(pvu))
+                              ? (Number(pvu) === 0 ? "" : String(pvu))
+                              : ""
                         }
-                      }}
-                      onBlur={() => {
-                        if (editingDecimal?.index === index && editingDecimal?.field === "pvu") {
-                          const num = parseDecimalInput(editingDecimal.value);
-                          form.setValue(`partidas.${index}.pvu`, num);
-                          markDirty(index);
-                          setEditingDecimal(null);
+                        onFocus={() =>
+                          setEditingDecimal({
+                            index,
+                            field: "pvu",
+                            value:
+                              pvu !== undefined &&
+                              pvu !== null &&
+                              !Number.isNaN(Number(pvu)) &&
+                              Number(pvu) !== 0
+                                ? String(pvu)
+                                : "",
+                          })
                         }
-                      }}
-                    />
+                        onChange={(e) => {
+                          if (editingDecimal?.index === index && editingDecimal?.field === "pvu") {
+                            setEditingDecimal({ ...editingDecimal, value: e.target.value });
+                          }
+                        }}
+                        onBlur={() => {
+                          if (editingDecimal?.index === index && editingDecimal?.field === "pvu") {
+                            const num = parseDecimalInput(editingDecimal.value);
+                            form.setValue(`partidas.${index}.pvu`, num);
+                            markDirty(index);
+                            setEditingDecimal(null);
+                          }
+                        }}
+                      />
+                    )}
                   </td>
 
                   <td className="py-2 pr-2 align-middle">

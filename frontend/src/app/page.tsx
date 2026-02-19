@@ -328,6 +328,7 @@ export default function Home() {
   const [error, setError] = React.useState<string | null>(null);
   const [fechaDesde, setFechaDesde] = React.useState<string>("");
   const [fechaHasta, setFechaHasta] = React.useState<string>("");
+   const [selectedEstados, setSelectedEstados] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -359,6 +360,55 @@ export default function Home() {
       cancelled = true;
     };
   }, [fechaDesde, fechaHasta]);
+
+  const allEstados = React.useMemo(() => {
+    if (!kpis) return [] as string[];
+    const set = new Set<string>();
+    for (const item of kpis.timeline ?? []) {
+      const name = (item.estado_nombre ?? "").trim();
+      if (name) set.add(name);
+    }
+    return Array.from(set).sort();
+  }, [kpis]);
+
+  React.useEffect(() => {
+    if (!kpis) return;
+    if (allEstados.length === 0) return;
+    if (selectedEstados.length > 0) {
+      // Mantener solo estados válidos cuando cambian los datos
+      setSelectedEstados((prev) => {
+        const valid = prev.filter((e) => allEstados.includes(e));
+        return valid.length ? valid : prev;
+      });
+      return;
+    }
+    // Selección por defecto: solo "Adjudicada" si existe; si no, todos
+    const adjudicada = allEstados.find((e) =>
+      e.toLowerCase().includes("adjudicad")
+    );
+    setSelectedEstados(adjudicada ? [adjudicada] : allEstados);
+  }, [kpis, allEstados, selectedEstados.length]);
+
+  const filteredTimeline = React.useMemo(() => {
+    if (!kpis) return [] as TimelineItem[];
+    if (selectedEstados.length === 0) return kpis.timeline;
+    return (kpis.timeline ?? []).filter((item) => {
+      const name = (item.estado_nombre ?? "").trim();
+      if (!name) return false;
+      return selectedEstados.includes(name);
+    });
+  }, [kpis, selectedEstados]);
+
+  const toggleEstado = React.useCallback((estado: string) => {
+    setSelectedEstados((prev) => {
+      const exists = prev.includes(estado);
+      if (exists) {
+        if (prev.length === 1) return prev; // al menos un estado seleccionado
+        return prev.filter((e) => e !== estado);
+      }
+      return [...prev, estado];
+    });
+  }, []);
 
   if (loading) {
     return (
@@ -448,9 +498,30 @@ export default function Home() {
           <p className="text-xs text-slate-500">
             Cada barra representa una licitación desde la fecha de adjudicación hasta la fecha de finalización.
           </p>
+          {allEstados.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {allEstados.map((estado) => {
+                const active = selectedEstados.includes(estado);
+                return (
+                  <button
+                    key={estado}
+                    type="button"
+                    onClick={() => toggleEstado(estado)}
+                    className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                      active
+                        ? "border-emerald-500 bg-emerald-50 text-emerald-800"
+                        : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+                    }`}
+                  >
+                    {estado}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </CardHeader>
         <CardContent>
-          <TimelineChart items={kpis.timeline} />
+          <TimelineChart items={filteredTimeline} />
         </CardContent>
       </Card>
 

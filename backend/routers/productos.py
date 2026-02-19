@@ -60,7 +60,7 @@ def search_productos(
                 return []
             response = (
                 supabase_client.table("tbl_productos")
-                .select("id, nombre, nombre_proveedor")
+                .select("id, nombre, id_proveedor, nombre_proveedor")
                 .in_("id", list(id_productos))
                 .eq("organization_id", org_s)
                 .ilike("nombre", f"%{q}%")
@@ -71,19 +71,56 @@ def search_productos(
         else:
             response = (
                 supabase_client.table("tbl_productos")
-                .select("id, nombre, nombre_proveedor")
+                .select("id, nombre, id_proveedor, nombre_proveedor")
                 .eq("organization_id", org_s)
                 .ilike("nombre", f"%{q}%")
                 .limit(limit)
                 .order("nombre")
                 .execute()
             )
+
         rows = response.data or []
+
+        # Resolver nombre de proveedor a partir de id_proveedor y tbl_proveedores.
+        # Si algo falla (tabla/columna no existe), hacemos fallback a nombre_proveedor de tbl_productos.
+        proveedor_ids = {
+            int(r["id_proveedor"])
+            for r in rows
+            if r.get("id_proveedor") is not None
+        }
+        proveedores_by_id: dict[int, str | None] = {}
+        if proveedor_ids:
+            try:
+                prov_resp = (
+                    supabase_client.table("tbl_proveedores")
+                    .select("id, nombre")
+                    .eq("organization_id", org_s)
+                    .in_("id", list(proveedor_ids))
+                    .execute()
+                )
+                for p in prov_resp.data or []:
+                    try:
+                        pid = int(p["id"])
+                    except Exception:
+                        continue
+                    nombre = (p.get("nombre") or "").strip() or None
+                    proveedores_by_id[pid] = nombre
+            except Exception:
+                proveedores_by_id = {}
+
         return [
             ProductoSearchResult(
                 id=int(r["id"]),
                 nombre=r.get("nombre") or "",
-                nombre_proveedor=(r.get("nombre_proveedor") or "").strip() or None,
+                nombre_proveedor=(
+                    (
+                        proveedores_by_id.get(int(r["id_proveedor"]))
+                        if r.get("id_proveedor") is not None
+                        else None
+                    )
+                    or (r.get("nombre_proveedor") or "").strip()
+                    or None
+                ),
             )
             for r in rows
         ]

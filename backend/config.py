@@ -18,6 +18,9 @@ SUPABASE_JWT_SECRET: str | None = os.environ.get("SUPABASE_JWT_SECRET")
 # Desarrollo: si es "true", la API acepta peticiones sin token (usuario dummy).
 SKIP_AUTH: bool = os.environ.get("SKIP_AUTH", "").lower() in ("true", "1", "yes")
 
+# Producción: si False, los 500 no exponen el detail real (solo "Internal Server Error").
+DEBUG: bool = os.environ.get("DEBUG", "").lower() in ("true", "1", "yes")
+
 
 def init_connection() -> Client:
     """

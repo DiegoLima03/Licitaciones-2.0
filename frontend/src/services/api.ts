@@ -71,6 +71,15 @@ export type OrgUser = {
   role: string;
 };
 
+export type MeResponse = {
+  id: string;
+  email: string;
+  organization_id: string;
+  role: string;
+  full_name?: string | null;
+  nombre?: string | null;
+};
+
 export const AuthService = {
   async login(email: string, password: string): Promise<LoginResponse> {
     try {
@@ -83,6 +92,31 @@ export const AuthService = {
       throw new Error(getMessageFromError(error));
     }
   },
+  async getMe(): Promise<MeResponse> {
+    const { data } = await apiClient.get<MeResponse>("/auth/me");
+    if (!data) throw new Error("No se pudo obtener el perfil.");
+    return data;
+  },
+  async updateMyPassword(password: string): Promise<{ message: string }> {
+    const { data } = await apiClient.patch<{ message: string }>("/auth/me/password", {
+      password,
+    });
+    if (!data) throw new Error("No se devolvió respuesta.");
+    return data;
+  },
+};
+
+export type CreateUserPayload = {
+  email: string;
+  password: string;
+  full_name?: string | null;
+  role?: string | null;
+};
+
+export type CreateUserResponse = {
+  id: string;
+  email: string;
+  message: string;
 };
 
 export const UsersService = {
@@ -90,12 +124,28 @@ export const UsersService = {
     const { data } = await apiClient.get<OrgUser[]>("/auth/users");
     return data ?? [];
   },
+  async create(payload: CreateUserPayload): Promise<CreateUserResponse> {
+    const { data } = await apiClient.post<CreateUserResponse>("/auth/users", payload);
+    if (!data) throw new Error("No se devolvió el usuario creado.");
+    return data;
+  },
   async updateRole(userId: string, role: string): Promise<{ id: string; role: string }> {
     const { data } = await apiClient.patch<{ id: string; role: string }>(
       `/auth/users/${userId}`,
       { role }
     );
     return data!;
+  },
+  async updatePassword(userId: string, password: string): Promise<{ id: string; message: string }> {
+    const { data } = await apiClient.patch<{ id: string; message: string }>(
+      `/auth/users/${userId}/password`,
+      { password }
+    );
+    if (!data) throw new Error("No se devolvió respuesta.");
+    return data;
+  },
+  async delete(userId: string): Promise<void> {
+    await apiClient.delete(`/auth/users/${userId}`);
   },
 };
 

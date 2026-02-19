@@ -61,14 +61,18 @@ export function MaterialTrendChart({
       timeScale: { timeVisible: true, secondsVisible: false },
       rightPriceScale: { borderVisible: true },
     });
+    const toPoint = (d: { time: string; value: unknown }) => ({
+      time: d.time as string,
+      value: Number(d.value) || 0,
+    });
     if (deps[1]) {
       const pvuSeries = chart.addSeries(LineSeries, { color: "#059669", lineWidth: 2 });
-      pvuSeries.setData(pvuList.map((d) => ({ time: d.time as string, value: d.value })));
+      pvuSeries.setData(pvuList.map(toPoint));
       pvuSeriesRef.current = pvuSeries;
     }
     if (deps[2]) {
       const pcuSeries = chart.addSeries(LineSeries, { color: "#64748b", lineWidth: 2 });
-      pcuSeries.setData(pcuList.map((d) => ({ time: d.time as string, value: d.value })));
+      pcuSeries.setData(pcuList.map(toPoint));
       pcuSeriesRef.current = pcuSeries;
     }
     chartRef.current = chart;
@@ -83,11 +87,15 @@ export function MaterialTrendChart({
   React.useEffect(() => {
     if (!chartRef.current || !deps[0]) return;
     const { pvu, pcu } = dataRef.current;
+    const toPoint = (d: { time: string; value: unknown }) => ({
+      time: d.time as string,
+      value: Number(d.value) || 0,
+    });
     if (deps[1] && pvuSeriesRef.current && pvu?.length) {
-      pvuSeriesRef.current.setData(pvu.map((d) => ({ time: d.time as string, value: d.value })));
+      pvuSeriesRef.current.setData(pvu.map(toPoint));
     }
     if (deps[2] && pcuSeriesRef.current && pcu?.length) {
-      pcuSeriesRef.current.setData(pcu.map((d) => ({ time: d.time as string, value: d.value })));
+      pcuSeriesRef.current.setData(pcu.map(toPoint));
     }
   }, deps);
 

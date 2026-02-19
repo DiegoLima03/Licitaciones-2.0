@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "generate-types": "openapi-typescript http://127.0.0.1:8000/openapi.json -o src/generated/api.d.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -33,6 +34,7 @@
     "babel-plugin-react-compiler": "1.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
+    "openapi-typescript": "^7.4.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

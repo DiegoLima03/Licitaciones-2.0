@@ -1,54 +1,24 @@
 """
 Dependencias de seguridad para FastAPI.
 
-Proporciona get_current_user que valida el JWT de Supabase Auth
-y enriquece el usuario con organization_id desde public.profiles.
-
-Caché de profiles por user_id para evitar consultas repetidas en cada request.
+Valida el JWT de Supabase Auth y enriquece el usuario con organization_id
+y role desde public.profiles. Sin caché en proceso (stateless; cada request
+consulta Supabase). Para alto tráfico puede añadirse caché externo (Redis) o
+functools.lru_cache con TTL según necesidad.
 """
 
-import threading
-import time
-from typing import Annotated, Tuple
-
+from typing import Annotated
 from uuid import UUID
 
 import jwt
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from backend.config import supabase_client, SKIP_AUTH
+from backend.config import SKIP_AUTH, SUPABASE_JWT_SECRET, supabase_client
 from backend.models import CurrentUser
-
-from backend.config import SUPABASE_JWT_SECRET
-
+from backend.roles import normalize_role
 
 security = HTTPBearer(auto_error=False)
-
-# Caché de profiles: user_id -> (org_id, role, expiry_timestamp)
-# TTL 60 segundos para equilibrar rendimiento y actualizaciones de rol/org
-_PROFILE_CACHE: dict[str, Tuple[UUID, str, float]] = {}
-_PROFILE_CACHE_LOCK = threading.Lock()
-_PROFILE_CACHE_TTL_SECONDS = 60
-
-
-def _get_cached_profile(user_id: str) -> Tuple[UUID, str] | None:
-    """Devuelve (org_id, role) si está en caché y no expirado; None si miss."""
-    with _PROFILE_CACHE_LOCK:
-        entry = _PROFILE_CACHE.get(user_id)
-        if not entry:
-            return None
-        org_id, role, expiry = entry
-        if time.monotonic() >= expiry:
-            del _PROFILE_CACHE[user_id]
-            return None
-        return (org_id, role)
-
-
-def _set_cached_profile(user_id: str, org_id: UUID, role: str) -> None:
-    """Guarda profile en caché con TTL."""
-    with _PROFILE_CACHE_LOCK:
-        _PROFILE_CACHE[user_id] = (org_id, role, time.monotonic() + _PROFILE_CACHE_TTL_SECONDS)
 
 
 def _get_dummy_user() -> CurrentUser:
@@ -140,12 +110,11 @@ async def get_current_user(
                 headers={"WWW-Authenticate": "Bearer"},
             )
 
-    # Token legacy: org_id viene en el payload
     if payload.get("aud") == "veraleza-legacy":
         user_id = payload.get("sub", "")
         email = payload.get("email", "")
         org_id = payload.get("org_id")
-        role = payload.get("role", "member")
+        role = normalize_role(payload.get("role"))
         if not org_id:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -166,17 +135,6 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token malformado: falta sub.",
             headers={"WWW-Authenticate": "Bearer"},
-        )
-
-    # Caché: evitar consultar profiles en cada request
-    cached = _get_cached_profile(user_id)
-    if cached:
-        org_id, role = cached
-        return CurrentUser(
-            user_id=user_id,
-            email=email,
-            org_id=org_id,
-            role=role,
         )
 
     # Obtener profile (organization_id, role) desde public.profiles
@@ -201,7 +159,7 @@ async def get_current_user(
 
     profile = profile_resp.data[0]
     org_id = profile.get("organization_id")
-    role = profile.get("role") or "member"
+    role = normalize_role(profile.get("role"))
 
     if not org_id:
         raise HTTPException(
@@ -209,11 +167,8 @@ async def get_current_user(
             detail="Usuario sin organización asignada.",
         )
 
-    # org_id puede venir como string UUID desde Supabase
     if isinstance(org_id, str):
         org_id = UUID(org_id)
-
-    _set_cached_profile(user_id, org_id, role)
 
     return CurrentUser(
         user_id=user_id,

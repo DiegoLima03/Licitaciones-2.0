@@ -54,7 +54,7 @@ class UserResponse(BaseModel):
     id: str = Field(..., description="UUID del usuario (auth.users.id).")
     email: str = Field(..., description="Correo electrónico del usuario.")
     organization_id: UUID = Field(..., description="UUID de la organización del usuario.")
-    role: str = Field(..., description="Rol en la organización (member, admin, etc.).")
+    role: str = Field(..., description="Rol: admin, admin_planta, admin_licitaciones, member_planta, member_licitaciones.")
     full_name: Optional[str] = Field(None, description="Nombre completo.")
     nombre: Optional[str] = Field(None, description="Alias de full_name para compatibilidad.")
 
@@ -68,7 +68,7 @@ class CurrentUser(BaseModel):
     user_id: str = Field(..., description="UUID del usuario (auth.users.id).")
     email: str = Field(..., description="Correo electrónico.")
     org_id: UUID = Field(..., description="UUID de la organización.")
-    role: str = Field(default="member", description="Rol en la organización.")
+    role: str = Field(default="member_licitaciones", description="Rol en la organización.")
 
 
 class TimelineItem(BaseModel):

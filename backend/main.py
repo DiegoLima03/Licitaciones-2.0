@@ -9,7 +9,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from backend.config import SKIP_AUTH
+from backend.config import DEBUG, SKIP_AUTH
 from backend.routers import auth, analytics, tenders, import_data, deliveries, search, estados, tipos, tipos_gasto, precios_referencia, productos, expenses
 
 
@@ -30,13 +30,11 @@ origins = [
     "http://192.168.1.14:3001",
 ]
 
-# Manejador global: devolver el error real en 500 para facilitar depuración
+# Manejador global: en producción no exponer detail del 500; solo si DEBUG=true
 @app.exception_handler(Exception)
 async def global_exception_handler(_request: Request, exc: Exception) -> JSONResponse:
-    return JSONResponse(
-        status_code=500,
-        content={"detail": str(exc)},
-    )
+    detail = str(exc) if DEBUG else "Internal Server Error"
+    return JSONResponse(status_code=500, content={"detail": detail})
 
 
 app.add_middleware(

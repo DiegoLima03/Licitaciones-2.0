@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
+import Image from "next/image";
 import Link from "next/link";
-import { AlertTriangle, Search } from "lucide-react";
+import { AlertTriangle, ChevronDown, Search } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -12,14 +13,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { CreateTenderDialog } from "@/components/licitaciones/create-tender-dialog";
+import { PAIS_FLAG_SRC, PAIS_LABEL, PAISES_OPCIONES } from "@/lib/paises";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { EstadosService, TendersService } from "@/services/api";
 import type { Estado, PaisLicitacion, Tender } from "@/types/api";
-
-const PAISES_FILTRO: { value: "" | PaisLicitacion; label: string }[] = [
-  { value: "", label: "Todos los países" },
-  { value: "España", label: "🇪🇸 España" },
-  { value: "Portugal", label: "🇵🇹 Portugal" },
-];
 
 const ESTADO_COLOR_CLASSES = [
   "bg-sky-100 text-sky-800 border-sky-200",      // info
@@ -77,6 +74,7 @@ export default function LicitacionesPage() {
   const [searchNombre, setSearchNombre] = React.useState("");
   const [filterEstadoId, setFilterEstadoId] = React.useState<number | "">("");
   const [filterPais, setFilterPais] = React.useState<"" | PaisLicitacion>("");
+  const [paisDropdownOpen, setPaisDropdownOpen] = React.useState(false);
 
   React.useEffect(() => {
     EstadosService.getAll().then(setEstados).catch(() => setEstados([]));
@@ -107,6 +105,21 @@ export default function LicitacionesPage() {
     fetchLicitaciones();
   }, [fetchLicitaciones]);
 
+  const sortedData = React.useMemo(() => {
+    if (!data || data.length === 0) return [];
+    return [...data].sort((a, b) => {
+      const ua = getUrgencyInfo(a).urgent ? 1 : 0;
+      const ub = getUrgencyInfo(b).urgent ? 1 : 0;
+      if (ua !== ub) return ub - ua; // urgentes primero
+
+      const fa = (a.fecha_presentacion ?? "").split("T")[0];
+      const fb = (b.fecha_presentacion ?? "").split("T")[0];
+      if (fa && fb && fa !== fb) return fa.localeCompare(fb); // más próximas primero
+
+      return (b.pres_maximo ?? 0) - (a.pres_maximo ?? 0); // luego por presupuesto descendente
+    });
+  }, [data]);
+
   return (
     <div className="flex flex-1 flex-col gap-6">
       <header className="flex items-center justify-between gap-4">
@@ -123,22 +136,74 @@ export default function LicitacionesPage() {
 
       <Card>
         <CardHeader className="flex flex-row flex-wrap items-center justify-between gap-4">
-          <CardTitle className="text-sm font-medium text-slate-800">
+          <CardTitle className="text-sm font-medium text-slate-800 shrink-0">
             Listado de licitaciones
           </CardTitle>
-          <div className="flex flex-wrap items-center gap-3">
-            <select
-              value={filterPais}
-              onChange={(e) => setFilterPais(e.target.value as "" | PaisLicitacion)}
-              className="h-9 min-w-[140px] rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
-              title="Filtrar por país"
-            >
-              {PAISES_FILTRO.map((opt) => (
-                <option key={opt.value || "todos"} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </select>
+          <div className="flex flex-wrap items-center justify-end gap-3 ml-auto">
+            <Popover open={paisDropdownOpen} onOpenChange={setPaisDropdownOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  title="Filtrar por país"
+                  className="flex h-9 min-w-[160px] items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-700 focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                >
+                  <span className="flex items-center gap-2">
+                    {filterPais ? (
+                      <>
+                        <Image
+                          src={PAIS_FLAG_SRC[filterPais]}
+                          alt=""
+                          width={24}
+                          height={16}
+                          unoptimized
+                          className="h-4 w-6 rounded object-cover object-center"
+                        />
+                        <span>{PAIS_LABEL[filterPais]}</span>
+                      </>
+                    ) : (
+                      <span className="text-slate-500">Todos los países</span>
+                    )}
+                  </span>
+                  <ChevronDown className="h-4 w-4 shrink-0 text-slate-400" />
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] min-w-[160px] p-0">
+                <div className="py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFilterPais("");
+                      setPaisDropdownOpen(false);
+                    }}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                  >
+                    <span className="w-6 text-slate-400">—</span>
+                    <span>Todos los países</span>
+                  </button>
+                  {PAISES_OPCIONES.map((p) => (
+                    <button
+                      key={p}
+                      type="button"
+                      onClick={() => {
+                        setFilterPais(p);
+                        setPaisDropdownOpen(false);
+                      }}
+                      className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-100"
+                    >
+                      <Image
+                        src={PAIS_FLAG_SRC[p]}
+                        alt=""
+                        width={24}
+                        height={16}
+                        unoptimized
+                        className="h-4 w-6 rounded object-cover object-center"
+                      />
+                      <span>{PAIS_LABEL[p]}</span>
+                    </button>
+                  ))}
+                </div>
+              </PopoverContent>
+            </Popover>
             <select
               value={filterEstadoId}
               onChange={(e) => {
@@ -187,14 +252,14 @@ export default function LicitacionesPage() {
                 </tr>
               </thead>
               <tbody>
-                {data.length === 0 ? (
+                {sortedData.length === 0 ? (
                   <tr>
                     <td colSpan={5} className="py-6 text-center text-sm text-slate-500">
                       No hay licitaciones. Crea una o ajusta el filtro.
                     </td>
                   </tr>
                 ) : (
-                  data.map((lic) => {
+                  sortedData.map((lic) => {
                     const { urgent } = getUrgencyInfo(lic);
                     return (
                     <tr

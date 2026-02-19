@@ -259,8 +259,6 @@ export default function LicitacionDetallePage() {
   const [motivoDescarte, setMotivoDescarte] = React.useState("");
   const [motivoPerdida, setMotivoPerdida] = React.useState("");
   const [competidorGanador, setCompetidorGanador] = React.useState("");
-  const [importeAdjudicacion, setImporteAdjudicacion] = React.useState("");
-  const [fechaAdjudicacion, setFechaAdjudicacion] = React.useState(new Date().toISOString().slice(0, 10));
 
   const cabeceraForm = useForm<CabeceraFormValues>({
     resolver: zodResolver(cabeceraFormSchema),
@@ -428,13 +426,15 @@ export default function LicitacionDetallePage() {
         payload.competidor_ganador = competidorGanador.trim();
       }
       if (nuevoEstadoId === ID_ESTADO_ADJUDICADA) {
-        const imp = parseFloat(String(importeAdjudicacion).replace(",", "."));
-        if (!Number.isFinite(imp) || imp <= 0) {
-          setErrorEstado("El importe final adjudicado es obligatorio y debe ser > 0.");
+        // Importe = presupuesto presentado; fecha = la definida en la licitación (al crearla/editar cabecera)
+        const importe = Math.round(ofertado * 100) / 100;
+        if (importe <= 0) {
+          setErrorEstado("El presupuesto presentado debe ser > 0 para marcar como adjudicada.");
           return;
         }
-        payload.importe_adjudicacion = imp;
-        if (fechaAdjudicacion) payload.fecha_adjudicacion = fechaAdjudicacion;
+        payload.importe_adjudicacion = importe;
+        const fAdj = (lic.fecha_adjudicacion ?? "").toString().trim().slice(0, 10);
+        payload.fecha_adjudicacion = fAdj || new Date().toISOString().slice(0, 10);
       }
       await TendersService.changeStatus(lic.id_licitacion, payload);
       refetchLicitacion();
@@ -443,7 +443,6 @@ export default function LicitacionDetallePage() {
       setMotivoDescarte("");
       setMotivoPerdida("");
       setCompetidorGanador("");
-      setImporteAdjudicacion("");
     } catch (e) {
       setErrorEstado(e instanceof Error ? e.message : "Error al cambiar estado.");
     } finally {
@@ -480,8 +479,65 @@ export default function LicitacionDetallePage() {
     return i.activo;
   });
   const presupuestoBase = showContent && lic ? Number(lic.pres_maximo) || 0 : 0;
-  const ofertado = activos.reduce((acc, i) => acc + i.unidades * i.pvu, 0);
-  const costePrevisto = activos.reduce((acc, i) => acc + i.unidades * i.pcu, 0);
+  // Ofertado / coste previsto según tipo de licitación
+  const isTipo2 = lic?.id_tipolicitacion === 2;
+  const partidasActivasTipo2 =
+    isTipo2 && lic
+      ? (lic.partidas ?? []).filter((p) => {
+          const lote = (p.lote ?? "General") as string;
+          const activo = p.activo ?? true;
+          if (lotesConfig.length > 0) {
+            return activo && lotesGanados.has(lote);
+          }
+          return activo;
+        })
+      : [];
+
+  const ofertado = isTipo2
+    ? (() => {
+        const totalPmaxu = partidasActivasTipo2.reduce(
+          (acc, p) => acc + (Number(p.pmaxu) || 0),
+          0
+        );
+        const totalPvu = partidasActivasTipo2.reduce(
+          (acc, p) => acc + (Number(p.pvu) || 0),
+          0
+        );
+        if (!presupuestoBase || presupuestoBase <= 0) return totalPvu;
+        const factor =
+          totalPmaxu > 0 ? Math.max(0, Math.min(1, totalPvu / totalPmaxu)) : 1;
+        return presupuestoBase * factor;
+      })()
+    : activos.reduce((acc, i) => {
+        const pvu = Number(i.pvu) || 0;
+        const uds = Number(i.unidades) || 0;
+        return acc + uds * pvu;
+      }, 0);
+
+  const costePrevisto = isTipo2
+    ? (() => {
+        const n = partidasActivasTipo2.length;
+        if (n === 0) return 0;
+        const totalPvu = partidasActivasTipo2.reduce(
+          (acc, p) => acc + (Number(p.pvu) || 0),
+          0
+        );
+        const totalPcu = partidasActivasTipo2.reduce(
+          (acc, p) => acc + (Number(p.pcu) || 0),
+          0
+        );
+        const mediaPvu = totalPvu / n || 0;
+        const udsTeoricas =
+          mediaPvu > 0 ? ofertado / mediaPvu : 0;
+        const mediaCoste =
+          n > 0 ? totalPcu / n : 0;
+        return udsTeoricas * mediaCoste;
+      })()
+    : activos.reduce((acc, i) => {
+        const pcu = Number(i.pcu) || 0;
+        const uds = Number(i.unidades) || 0;
+        return acc + uds * pcu;
+      }, 0);
   const beneficioPrevisto = ofertado - costePrevisto;
 
   const handleGenerarLotes = async () => {
@@ -737,29 +793,6 @@ export default function LicitacionDetallePage() {
                             value={competidorGanador}
                             onChange={(e) => setCompetidorGanador(e.target.value)}
                             placeholder="Empresa adjudicataria"
-                          />
-                        </div>
-                      </div>
-                    )}
-                    {nuevoEstadoId === ID_ESTADO_ADJUDICADA && (
-                      <div className="space-y-2">
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-600">Importe Final Adjudicado (€) *</label>
-                          <Input
-                            type="number"
-                            min={0}
-                            step={0.01}
-                            value={importeAdjudicacion}
-                            onChange={(e) => setImporteAdjudicacion(e.target.value)}
-                            placeholder="Ej. 125000"
-                          />
-                        </div>
-                        <div>
-                          <label className="mb-1 block text-xs font-medium text-slate-600">Fecha de adjudicación</label>
-                          <Input
-                            type="date"
-                            value={fechaAdjudicacion}
-                            onChange={(e) => setFechaAdjudicacion(e.target.value)}
                           />
                         </div>
                       </div>
