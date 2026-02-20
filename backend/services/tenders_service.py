@@ -5,6 +5,7 @@ Recibe TendersRepository por inyección. Lanza excepciones de dominio
 (ValueError, NotFoundError, ConflictError), no HTTPException.
 """
 
+import logging
 from datetime import date
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
@@ -28,9 +29,40 @@ CAMPOS_BLOQUEADOS_EDICION = {
     "fecha_presentacion", "fecha_adjudicacion", "fecha_finalizacion", "pais",
 }
 CAMPOS_PERMITIDOS_CUANDO_BLOQUEADO = {
-    "descripcion", "nombre", "numero_expediente", "id_tipolicitacion", "enlace_gober", "lotes_config",
+    "descripcion", "nombre", "numero_expediente", "id_tipolicitacion", "enlace_gober", "enlace_sharepoint", "lotes_config",
     "tipo_procedimiento", "id_licitacion_padre",
 }
+
+logger = logging.getLogger(__name__)
+
+
+def _mutate_gober_url(url: Optional[str]) -> Optional[str]:
+    """
+    Mutador de URL Gover: si contiene '/tenders/', se reemplaza por '/public/' antes de guardar.
+    """
+    if not url or "/tenders/" not in url:
+        return url
+    mutated = url.replace("/tenders/", "/public/", 1)
+    logger.info("Gover URL mutada: /tenders/ -> /public/ (guardando en BD)")
+    return mutated
+
+
+def _normalize_lotes_config(lotes: Any) -> List[Dict[str, Any]]:
+    """
+    Normaliza lotes a lista simple: solo los lotes a los que Veraleza se presenta.
+    Solo se guardan nombre y ganado; se ignora trazabilidad de lotes descartados.
+    """
+    if not lotes or not isinstance(lotes, list):
+        return []
+    out: List[Dict[str, Any]] = []
+    for x in lotes:
+        if not isinstance(x, dict):
+            continue
+        out.append({
+            "nombre": str(x.get("nombre", "")).strip() or "Lote",
+            "ganado": bool(x.get("ganado", False)),
+        })
+    return out
 
 
 class TenderService:
@@ -45,7 +77,7 @@ class TenderService:
         nombre: Optional[str] = None,
         pais: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Lista licitaciones con filtros opcionales."""
+        """Lista licitaciones con filtros opcionales. Contratos Basado (id_licitacion_padre) se tratan como licitaciones estándar e individuales en el listado, sin subdivisiones de lotes anidadas."""
         return self._repo.list_tenders(estado_id=estado_id, nombre=nombre, pais=pais)
 
     def get_tender(self, tender_id: int) -> Dict[str, Any]:
@@ -61,7 +93,8 @@ class TenderService:
 
     def create_tender(self, payload: TenderCreate) -> Dict[str, Any]:
         """Crea licitación en estado EN_ANALISIS. organization_id lo inyecta el repo.
-        Si se pasa id_licitacion_padre, se fuerza tipo_procedimiento a CONTRATO_BASADO."""
+        Si se pasa id_licitacion_padre, se fuerza tipo_procedimiento a CONTRATO_BASADO.
+        URL Gover: se muta /tenders/ -> /public/ antes de guardar."""
         if payload.id_licitacion_padre is not None:
             tipo = TipoProcedimiento.CONTRATO_BASADO
         else:
@@ -72,7 +105,8 @@ class TenderService:
             "numero_expediente": payload.numero_expediente or "",
             "pres_maximo": float(payload.pres_maximo) if payload.pres_maximo is not None else 0.0,
             "descripcion": payload.descripcion or "",
-            "enlace_gober": payload.enlace_gober or None,
+            "enlace_gober": _mutate_gober_url(payload.enlace_gober or None),
+            "enlace_sharepoint": (payload.enlace_sharepoint or "").strip() or None,
             "id_estado": EstadoLicitacion.EN_ANALISIS.value,
             "id_tipolicitacion": payload.id_tipolicitacion,
             "fecha_presentacion": payload.fecha_presentacion,
@@ -92,11 +126,17 @@ class TenderService:
         return id_est in {e.value for e in ESTADOS_BLOQUEO_EDICION}
 
     def update_tender(self, tender_id: int, payload: TenderUpdate) -> Dict[str, Any]:
-        """Actualiza licitación. Si estado >= PRESENTADA solo permite campos informativos."""
+        """Actualiza licitación. Si estado >= PRESENTADA solo permite campos informativos.
+        URL Gover: se muta /tenders/ -> /public/. Lotes: se guardan solo nombre y ganado (lista simple)."""
         self.get_tender(tender_id)  # asegura existencia
         update_data = payload.model_dump(exclude_unset=True, mode="json")
         if not update_data:
             return self.get_tender(tender_id)
+
+        if "enlace_gober" in update_data:
+            update_data["enlace_gober"] = _mutate_gober_url(update_data.get("enlace_gober"))
+        if "lotes_config" in update_data:
+            update_data["lotes_config"] = _normalize_lotes_config(update_data["lotes_config"])
 
         if self._is_edition_blocked(tender_id):
             bloqueados = set(update_data.keys()) & CAMPOS_BLOQUEADOS_EDICION
@@ -121,6 +161,8 @@ class TenderService:
     def change_tender_status(self, tender_id: int, payload: TenderStatusChange) -> Dict[str, Any]:
         """
         Máquina de estados: valida transiciones y reglas de negocio, luego actualiza.
+        - PRESENTADA: cambio directo, sin validaciones ni bloqueos.
+        - ADJUDICADA: validación ERP: todas las partidas activas deben tener id_producto (Belneo).
         Lanza ValueError para reglas de negocio, ConflictError si el estado cambió en concurrencia.
         """
         licitacion = self._repo.get_by_id(tender_id)
@@ -138,15 +180,26 @@ class TenderService:
         except ValueError:
             raise ValueError(f"Estado {nuevo_id} no válido.")
 
-        # LCSP: AM y SDA no requieren partidas ni importe cerrado para presentar/adjudicar
-        if nuevo_estado == EstadoLicitacion.PRESENTADA:
-            tipo_proc = (licitacion.get("tipo_procedimiento") or "").upper() if isinstance(licitacion.get("tipo_procedimiento"), str) else ""
-            if tipo_proc not in ("ACUERDO_MARCO", "SDA"):
-                total = self._repo.get_active_budget_total(tender_id)
-                if total <= Decimal("0"):
-                    raise ValueError(
-                        "No se puede presentar a coste cero. La suma del presupuesto (partidas activas) debe ser > 0."
-                    )
+        # Transición a PRESENTADA: cambio directo, sin bloqueos ni validaciones complejas.
+        # (Sin comprobación de presupuesto > 0 ni flujos de aprobación.)
+
+        # Validación diferida ERP: solo al pasar a ADJUDICADA, todas las partidas deben tener id_producto (Belneo).
+        if nuevo_estado == EstadoLicitacion.ADJUDICADA:
+            detalle = self._repo.get_tender_with_details(tender_id)
+            partidas = detalle.get("partidas") or []
+            # Solo partidas activas cuentan para la validación (presupuesto efectivo).
+            partidas_activas = [p for p in partidas if p.get("activo") is True]
+            sin_producto = [p for p in partidas_activas if p.get("id_producto") is None]
+            if sin_producto:
+                ids_detalle = [p.get("id_detalle") for p in sin_producto if p.get("id_detalle") is not None]
+                logger.warning(
+                    "Adjudicación rechazada: partidas sin id_producto (ERP Belneo). id_detalle=%s",
+                    ids_detalle,
+                )
+                raise ValueError(
+                    "Para adjudicar, todas las líneas de presupuesto deben tener un producto de Belneo (id_producto). "
+                    "Partidas con solo nombre libre no son válidas. Corrija las partidas y vuelva a intentar."
+                )
 
         update_data: Dict[str, Any] = {"id_estado": nuevo_id}
 
@@ -186,6 +239,7 @@ class TenderService:
         row: Dict[str, Any] = {
             "lote": payload.lote or "General",
             "id_producto": payload.id_producto,
+            "nombre_producto_libre": payload.nombre_producto_libre,
             "unidades": payload.unidades if payload.unidades is not None else 1.0,
             "pvu": float(payload.pvu) if payload.pvu is not None else 0.0,
             "pcu": float(payload.pcu) if payload.pcu is not None else 0.0,

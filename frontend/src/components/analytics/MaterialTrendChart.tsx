@@ -5,13 +5,16 @@ import { createChart, LineSeries, type IChartApi, type ISeriesApi } from "lightw
 import type { MaterialTrendPoint, MaterialTrendResponse } from "@/types/api";
 
 export interface MaterialTrendChartProps {
-  /** Respuesta del API: PVU (referencia + detalle) y PCU (referencia + real). */
+  /** Respuesta del API: PVU (venta) y PCU (compra) para dos líneas de tendencia. */
   data: MaterialTrendResponse;
   materialName: string;
   isLoading?: boolean;
   error?: Error | null;
   className?: string;
 }
+
+const COLOR_PVU = "#059669"; // verde (venta)
+const COLOR_PCU = "#d97706"; // ámbar (compra)
 
 function formatDateLabel(time: string | undefined): string {
   if (!time || typeof time !== "string") return "—";
@@ -22,7 +25,6 @@ function formatDateLabel(time: string | undefined): string {
   return `${day} ${months[mi] ?? m} '${(y ?? "").slice(-2)}`;
 }
 
-/** Normaliza param.time del crosshair (string ISO, BusinessDay o timestamp) a "YYYY-MM-DD". */
 function normalizeTimeToYMD(t: unknown): string | null {
   if (t == null) return null;
   if (typeof t === "string") {
@@ -52,35 +54,29 @@ export function MaterialTrendChart({
   const containerRef = React.useRef<HTMLDivElement>(null);
   const tooltipRef = React.useRef<HTMLDivElement>(null);
   const chartRef = React.useRef<IChartApi | null>(null);
-  const pvuSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
-  const pcuSeriesRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const seriesPvuRef = React.useRef<ISeriesApi<"Line"> | null>(null);
+  const seriesPcuRef = React.useRef<ISeriesApi<"Line"> | null>(null);
   const dataRef = React.useRef(data);
 
   const safeData = data ?? { pvu: [], pcu: [] };
   const pvuList = safeData.pvu ?? [];
   const pcuList = safeData.pcu ?? [];
-  const hasPvu = pvuList.length > 0;
-  const hasPcu = pcuList.length > 0;
-  const hasData = hasPvu || hasPcu;
+  const hasData = pvuList.length > 0 || pcuList.length > 0;
 
   dataRef.current = safeData;
 
-  // Array de dependencias de longitud fija (6) en todos los efectos
-  const deps: [boolean, boolean, boolean, string, number, number] = [
-    hasData,
-    hasPvu,
-    hasPcu,
-    materialName,
-    pvuList.length,
-    pcuList.length,
-  ];
+  const toPoint = (d: { time: string; value: unknown }) => ({
+    time: d.time as string,
+    value: Number(d.value) || 0,
+  });
+  const deps: [boolean, string, number, number] = [hasData, materialName, pvuList.length, pcuList.length];
 
   React.useEffect(() => {
-    if (!containerRef.current || !deps[0]) return;
+    if (!containerRef.current || !hasData) return;
     const chart = createChart(containerRef.current, {
       layout: {
         background: { type: "solid", color: "transparent" },
-        textColor: "var(--foreground, #171717)",
+        textColor: "#ffffff",
       },
       grid: {
         vertLines: { color: "rgba(0,0,0,0.06)" },
@@ -91,20 +87,12 @@ export function MaterialTrendChart({
       timeScale: { timeVisible: true, secondsVisible: false },
       rightPriceScale: { borderVisible: true },
     });
-    const toPoint = (d: { time: string; value: unknown }) => ({
-      time: d.time as string,
-      value: Number(d.value) || 0,
-    });
-    if (deps[1]) {
-      const pvuSeries = chart.addSeries(LineSeries, { color: "#059669", lineWidth: 2 });
-      pvuSeries.setData(pvuList.map(toPoint));
-      pvuSeriesRef.current = pvuSeries;
-    }
-    if (deps[2]) {
-      const pcuSeries = chart.addSeries(LineSeries, { color: "#64748b", lineWidth: 2 });
-      pcuSeries.setData(pcuList.map(toPoint));
-      pcuSeriesRef.current = pcuSeries;
-    }
+    const seriesPvu = chart.addSeries(LineSeries, { color: COLOR_PVU, lineWidth: 2, title: "PVU" });
+    const seriesPcu = chart.addSeries(LineSeries, { color: COLOR_PCU, lineWidth: 2, title: "PCU" });
+    if (pvuList.length) seriesPvu.setData(pvuList.map(toPoint));
+    if (pcuList.length) seriesPcu.setData(pcuList.map(toPoint));
+    seriesPvuRef.current = seriesPvu;
+    seriesPcuRef.current = seriesPcu;
     chartRef.current = chart;
 
     const crosshairHandler = (param: Parameters<Parameters<IChartApi["subscribeCrosshairMove"]>[0]>[0]) => {
@@ -115,37 +103,43 @@ export function MaterialTrendChart({
         tooltipEl.style.display = "none";
         return;
       }
-      const { pvu: pvuData, pcu: pcuData } = dataRef.current;
+      const { pvu: pvuData } = dataRef.current;
       let pvuVal: number | null = null;
       let pcuVal: number | null = null;
       let unidades: number | null = null;
-      if (pvuSeriesRef.current && param.seriesData) {
-        const p = param.seriesData.get(pvuSeriesRef.current) as { value?: number } | undefined;
-        if (p?.value != null) pvuVal = p.value;
+      if (param.seriesData) {
+        if (seriesPvuRef.current) {
+          const p = param.seriesData.get(seriesPvuRef.current) as { value?: number } | undefined;
+          if (p?.value != null) pvuVal = p.value;
+        }
+        if (seriesPcuRef.current) {
+          const p = param.seriesData.get(seriesPcuRef.current) as { value?: number } | undefined;
+          if (p?.value != null) pcuVal = p.value;
+        }
       }
-      if (pcuSeriesRef.current && param.seriesData) {
-        const p = param.seriesData.get(pcuSeriesRef.current) as { value?: number } | undefined;
-        if (p?.value != null) pcuVal = p.value;
-      }
-      const pvuPoint = (pvuData ?? []).find(
+      const point = (pvuData ?? []).find(
         (d) => normalizeTimeToYMD(d.time) === timeStr || String(d.time).slice(0, 10) === timeStr
       );
-      if (pvuPoint && "unidades" in pvuPoint) {
-        const u = pvuPoint.unidades;
+      if (point && "unidades" in point) {
+        const u = point.unidades;
         unidades = u === null || u === undefined ? null : Number(u);
       }
+      // Si no tenemos PVU del crosshair, intentar del punto de datos
+      if (pvuVal == null && point && "value" in point) pvuVal = Number((point as { value?: unknown }).value) || null;
+      const pcuPoint = (dataRef.current.pcu ?? []).find(
+        (d) => normalizeTimeToYMD(d.time) === timeStr || String(d.time).slice(0, 10) === timeStr
+      );
+      if (pcuVal == null && pcuPoint && "value" in pcuPoint) pcuVal = Number((pcuPoint as { value?: unknown }).value) || null;
 
       tooltipEl.style.display = "block";
       tooltipEl.style.left = `${param.point.x + 12}px`;
       tooltipEl.style.top = `${param.point.y}px`;
       const unidadesText =
-        unidades !== null && unidades !== undefined
-          ? Number(unidades).toLocaleString("es-ES")
-          : "—";
+        unidades !== null && unidades !== undefined ? Number(unidades).toLocaleString("es-ES") : "—";
       tooltipEl.innerHTML = [
         `<div class="font-semibold text-slate-200">${formatDateLabel(timeStr)}</div>`,
         pvuVal != null ? `<div><span class="text-emerald-400">PVU (venta):</span> ${pvuVal.toFixed(2)} €</div>` : "",
-        pcuVal != null ? `<div><span class="text-slate-400">PCU (coste):</span> ${pcuVal.toFixed(2)} €</div>` : "",
+        pcuVal != null ? `<div><span class="text-amber-400">PCU (compra):</span> ${pcuVal.toFixed(2)} €</div>` : "",
         `<div><span class="text-slate-400">Unidades vendidas:</span> ${unidadesText}</div>`,
       ].filter(Boolean).join("");
     };
@@ -156,24 +150,16 @@ export function MaterialTrendChart({
       }
       chart.remove();
       chartRef.current = null;
-      pvuSeriesRef.current = null;
-      pcuSeriesRef.current = null;
+      seriesPvuRef.current = null;
+      seriesPcuRef.current = null;
     };
   }, deps);
 
   React.useEffect(() => {
-    if (!chartRef.current || !deps[0]) return;
+    if (!chartRef.current || !hasData) return;
     const { pvu, pcu } = dataRef.current;
-    const toPoint = (d: { time: string; value: unknown }) => ({
-      time: d.time as string,
-      value: Number(d.value) || 0,
-    });
-    if (deps[1] && pvuSeriesRef.current && pvu?.length) {
-      pvuSeriesRef.current.setData(pvu.map(toPoint));
-    }
-    if (deps[2] && pcuSeriesRef.current && pcu?.length) {
-      pcuSeriesRef.current.setData(pcu.map(toPoint));
-    }
+    if (seriesPvuRef.current && pvu?.length) seriesPvuRef.current.setData(pvu.map(toPoint));
+    if (seriesPcuRef.current && pcu?.length) seriesPcuRef.current.setData(pcu.map(toPoint));
   }, deps);
 
   React.useEffect(() => {
@@ -229,9 +215,18 @@ export function MaterialTrendChart({
   return (
     <div className={`relative ${className ?? ""}`}>
       <p className="mb-2 text-xs font-medium text-slate-500 dark:text-slate-400">
-        Evolución de precio — {materialName}
-        {hasPvu && hasPcu && " (Verde: PVU precio venta · Gris: PCU precio coste)"}
+        Evolución del precio — {materialName}
       </p>
+      <div className="mb-1 flex items-center gap-4 text-xs">
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: COLOR_PVU }} />
+          <span className="text-slate-600 dark:text-slate-400">PVU (venta)</span>
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-block h-0.5 w-4 rounded" style={{ backgroundColor: COLOR_PCU }} />
+          <span className="text-slate-600 dark:text-slate-400">PCU (compra)</span>
+        </span>
+      </div>
       <div className="relative">
         <div ref={containerRef} className="rounded-lg" />
         <div

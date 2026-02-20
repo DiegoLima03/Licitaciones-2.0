@@ -142,6 +142,7 @@ class TenderCreate(BaseModel):
     pres_maximo: Optional[Decimal] = Field(Decimal("0"), description="Presupuesto máximo (€).")
     descripcion: Optional[str] = Field(None, description="Notas / descripción.")
     enlace_gober: Optional[str] = Field(None, description="URL de la licitación en Gober (plataforma de scraping).")
+    enlace_sharepoint: Optional[str] = Field(None, description="URL de SharePoint con la documentación e información de la licitación.")
     id_tipolicitacion: Optional[int] = Field(None, description="ID tipo de licitación (FK tbl_tipolicitacion).")
     fecha_presentacion: Optional[str] = Field(None, description="Fecha presentación (YYYY-MM-DD).")
     fecha_adjudicacion: Optional[str] = Field(None, description="Fecha adjudicación (YYYY-MM-DD).")
@@ -165,6 +166,7 @@ class TenderUpdate(BaseModel):
     pres_maximo: Optional[Decimal] = None
     descripcion: Optional[str] = None
     enlace_gober: Optional[str] = None
+    enlace_sharepoint: Optional[str] = None
     id_estado: Optional[int] = None
     id_tipolicitacion: Optional[int] = None
     fecha_presentacion: Optional[str] = None
@@ -174,6 +176,12 @@ class TenderUpdate(BaseModel):
     lotes_config: Optional[List[Dict[str, Any]]] = None  # [{"nombre":"Lote 1","ganado":false}, ...]
     tipo_procedimiento: Optional[TipoProcedimiento] = None
     id_licitacion_padre: Optional[int] = None
+    is_delivered: Optional[bool] = None
+    is_invoiced: Optional[bool] = None
+    is_collected: Optional[bool] = None
+    coste_presupuestado: Optional[Decimal] = Field(None, ge=0)
+    coste_real: Optional[Decimal] = Field(None, ge=0)
+    gastos_extraordinarios: Optional[Decimal] = Field(None, ge=0)
 
 
 class TenderStatusChange(BaseModel):
@@ -222,10 +230,11 @@ class ProductoSearchResult(BaseModel):
 
 
 class PartidaCreate(BaseModel):
-    """Payload para añadir una partida manual a tbl_licitaciones_detalle."""
+    """Payload para añadir una partida manual a tbl_licitaciones_detalle. id_producto opcional (ERP Belneo); si NULL, usar nombre_producto_libre."""
 
     lote: Optional[str] = Field("General", description="Lote / zona.")
-    id_producto: int = Field(..., description="ID del producto en tbl_productos.")
+    id_producto: Optional[int] = Field(None, description="ID del producto en tbl_productos (opcional; si NULL, usar nombre_producto_libre).")
+    nombre_producto_libre: Optional[str] = Field(None, description="Nombre libre del producto cuando no se vincula al ERP.")
     unidades: Optional[float] = Field(1.0, ge=0, description="Unidades.")
     pvu: Optional[Decimal] = Field(Decimal("0"), ge=0, description="Precio venta unitario (€).")
     pcu: Optional[Decimal] = Field(Decimal("0"), ge=0, description="Precio coste unitario (€).")
@@ -238,6 +247,7 @@ class PartidaUpdate(BaseModel):
 
     lote: Optional[str] = None
     id_producto: Optional[int] = None
+    nombre_producto_libre: Optional[str] = None
     unidades: Optional[float] = Field(None, ge=0)
     pvu: Optional[Decimal] = Field(None, ge=0)
     pcu: Optional[Decimal] = Field(None, ge=0)
@@ -285,6 +295,51 @@ class DeliveryLineUpdate(BaseModel):
 
     estado: Optional[str] = Field(None, description="Estado de la línea (ej. EN ESPERA, ENTREGADO).")
     cobrado: Optional[bool] = Field(None, description="Si la línea está cobrada.")
+
+
+# ----- Adjuntos a licitación (tender_attachments) -----
+
+
+class TenderAttachmentCreate(BaseModel):
+    """Payload para subir un adjunto a una licitación (pliegos, facturas)."""
+
+    tender_id: int = Field(..., description="ID de la licitación.")
+    file_path: str = Field(..., description="Ruta del archivo almacenado.")
+    file_type: Optional[str] = Field(None, description="Tipo MIME o extensión (ej. application/pdf).")
+
+
+class TenderAttachment(BaseModel):
+    """Registro de adjunto (tender_attachments)."""
+
+    id: UUID = Field(..., description="UUID del adjunto.")
+    tender_id: int = Field(..., description="ID de la licitación.")
+    file_path: str = Field(..., description="Ruta del archivo.")
+    file_type: Optional[str] = Field(None, description="Tipo de archivo.")
+    uploaded_at: str = Field(..., description="Fecha de subida (ISO).")
+
+
+# ----- Hitos de entrega programados (scheduled_deliveries) -----
+
+
+class ScheduledDeliveryCreate(BaseModel):
+    """Payload para crear un hito de entrega programado."""
+
+    tender_id: int = Field(..., description="ID de la licitación.")
+    delivery_date: date = Field(..., description="Fecha prevista de entrega (YYYY-MM-DD).")
+    status: Optional[str] = Field(None, description="Estado del hito (ej. PENDIENTE, ENTREGADO).")
+    description: Optional[str] = Field(None, description="Descripción del hito.")
+    items_json: Optional[Dict[str, Any]] = Field(None, description="Detalle de partidas en JSON.")
+
+
+class ScheduledDelivery(BaseModel):
+    """Registro de hito de entrega (scheduled_deliveries)."""
+
+    id: UUID = Field(..., description="UUID del hito.")
+    tender_id: int = Field(..., description="ID de la licitación.")
+    delivery_date: date = Field(..., description="Fecha prevista.")
+    status: Optional[str] = Field(None, description="Estado.")
+    description: Optional[str] = Field(None, description="Descripción.")
+    items_json: Optional[Dict[str, Any]] = Field(None, description="Detalle partidas.")
 
 
 # ----- Gastos de proyecto (tbl_gastos_proyecto) -----

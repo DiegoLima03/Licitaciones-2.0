@@ -291,8 +291,8 @@ export function EditableBudgetTable({
     }
     const serverRows = partidas.map((p) => ({
       id_detalle: p.id_detalle,
-      id_producto: p.id_producto,
-      product_nombre: p.product_nombre || "",
+      id_producto: p.id_producto ?? null,
+      product_nombre: p.product_nombre || (p as { nombre_producto_libre?: string | null }).nombre_producto_libre || "",
       lote: loteFilter ?? (p.lote || "General"),
       unidades: Number(p.unidades) || 0,
       pvu: Number(p.pvu) || 0,
@@ -421,7 +421,11 @@ export function EditableBudgetTable({
     const toAdd: number[] = [];
     partidas.forEach((row, index) => {
       if (row.id_detalle && row.isDirty) toUpdate.push(index);
-      else if (!row.id_detalle && row.id_producto && (Number(row.unidades) > 0 || Number(row.pvu) > 0 || Number(row.pcu) > 0))
+      else if (
+        !row.id_detalle &&
+        (row.id_producto != null || ((row.product_nombre ?? "").trim() !== "")) &&
+        (Number(row.unidades) > 0 || Number(row.pvu) > 0 || Number(row.pcu) > 0)
+      )
         toAdd.push(index);
     });
     if (toUpdate.length === 0 && toAdd.length === 0) return;
@@ -437,7 +441,8 @@ export function EditableBudgetTable({
         update(index, { ...row, isSaving: true });
         await TendersService.updatePartida(tenderId, row.id_detalle!, {
           lote: row.lote || "General",
-          id_producto: row.id_producto!,
+          id_producto: row.id_producto ?? undefined,
+          nombre_producto_libre: row.id_producto == null ? (row.product_nombre?.trim() || undefined) : undefined,
           unidades: row.unidades,
           pvu: row.pvu,
           pcu: row.pcu,
@@ -451,7 +456,8 @@ export function EditableBudgetTable({
         update(index, { ...row, isSaving: true });
         const created = await TendersService.addPartida(tenderId, {
           lote: row.lote || "General",
-          id_producto: row.id_producto!,
+          id_producto: row.id_producto ?? undefined,
+          nombre_producto_libre: row.id_producto == null ? (row.product_nombre?.trim() || undefined) : undefined,
           unidades: row.unidades,
           pvu: row.pvu,
           pcu: row.pcu,
@@ -630,10 +636,16 @@ export function EditableBudgetTable({
                   <td className="min-w-[280px] py-2 pl-4 pr-2 align-middle">
                     <ProductCellAutocomplete
                       value={idProd ? { id: idProd, nombre: prodName ?? "" } : null}
+                      freeTextDisplay={idProd == null && (prodName ?? "").trim() ? (prodName ?? "") : undefined}
                       onSelect={(id, nombre) => handleProductSelect(index, id, nombre)}
                       onClear={() => {
                         form.setValue(`partidas.${index}.id_producto`, null);
                         form.setValue(`partidas.${index}.product_nombre`, "");
+                        markDirty(index);
+                      }}
+                      onAcceptFreeText={(text) => {
+                        form.setValue(`partidas.${index}.id_producto`, null);
+                        form.setValue(`partidas.${index}.product_nombre`, text.trim());
                         markDirty(index);
                       }}
                       placeholder={isGhost ? "Añadir..." : ""}

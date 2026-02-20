@@ -18,6 +18,16 @@ import { useBuscadorStore } from "@/stores/useBuscadorStore";
 import { ProductAnalyticsPanel } from "@/components/buscador/ProductAnalyticsPanel";
 import type { SearchResult } from "@/types/api";
 
+/** Fila agrupada por mismo producto + proveedor, con promedios. */
+interface GroupedResult {
+  producto: string;
+  proveedor: string;
+  pvu_medio: number | null;
+  pcu_medio: number | null;
+  count: number;
+  id_producto: number | null;
+}
+
 function formatEuro(value: number) {
   return new Intl.NumberFormat("es-ES", {
     style: "currency",
@@ -33,7 +43,46 @@ export default function BuscadorHistoricoPage() {
   const [resultados, setResultados] = React.useState<SearchResult[]>([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  // Agrupado por defecto
+  const [agruparPorProductoProveedor, setAgruparPorProductoProveedor] = React.useState(true);
   const { selectedProductId, setSelectedProductId } = useBuscadorStore();
+
+  const groupedData = React.useMemo((): GroupedResult[] => {
+    if (resultados.length === 0) return [];
+    const key = (r: SearchResult) => `${(r.producto ?? "").trim()}|${(r.proveedor ?? "").trim()}`;
+    const map = new Map<string, { pvuSum: number; pvuN: number; pcuSum: number; pcuN: number; count: number; id_producto: number | null }>();
+    for (const r of resultados) {
+      const k = key(r);
+      let entry = map.get(k);
+      if (!entry) {
+        entry = { pvuSum: 0, pvuN: 0, pcuSum: 0, pcuN: 0, count: 0, id_producto: r.id_producto ?? null };
+        map.set(k, entry);
+      }
+      entry.count += 1;
+      const pvu = r.pvu != null ? Number(r.pvu) : NaN;
+      const pcu = r.pcu != null ? Number(r.pcu) : NaN;
+      if (!Number.isNaN(pvu)) {
+        entry.pvuSum += pvu;
+        entry.pvuN += 1;
+      }
+      if (!Number.isNaN(pcu)) {
+        entry.pcuSum += pcu;
+        entry.pcuN += 1;
+      }
+      if (entry.id_producto == null && r.id_producto != null) entry.id_producto = r.id_producto;
+    }
+    return Array.from(map.entries()).map(([k, v]) => {
+      const [producto = "", proveedor = ""] = k.split("|");
+      return {
+        producto,
+        proveedor,
+        pvu_medio: v.pvuN > 0 ? v.pvuSum / v.pvuN : null,
+        pcu_medio: v.pcuN > 0 ? v.pcuSum / v.pcuN : null,
+        count: v.count,
+        id_producto: v.id_producto,
+      };
+    });
+  }, [resultados]);
 
   React.useEffect(() => {
     if (!query.trim()) {
@@ -132,18 +181,79 @@ export default function BuscadorHistoricoPage() {
     []
   );
 
+  const columnsGrouped = React.useMemo<ColumnDef<GroupedResult>[]>(
+    () => [
+      {
+        accessorKey: "producto",
+        header: "Producto",
+        cell: ({ getValue }) => (
+          <span className="max-w-xs truncate font-medium text-slate-900 dark:text-slate-100">
+            {String(getValue() ?? "")}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "proveedor",
+        header: "Proveedor",
+        cell: ({ getValue }) => (
+          <span className="text-slate-700 dark:text-slate-300">
+            {getValue() ?? "—"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "pvu_medio",
+        header: () => (
+          <span className="text-right text-emerald-700 dark:text-emerald-400">
+            PVU medio
+          </span>
+        ),
+        cell: ({ getValue }) => (
+          <span className="block text-right font-semibold text-emerald-700 dark:text-emerald-400">
+            {getValue() != null ? formatEuro(Number(getValue())) : "—"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "pcu_medio",
+        header: () => <span className="text-right">PCU medio</span>,
+        cell: ({ getValue }) => (
+          <span className="block text-right text-slate-900 dark:text-slate-100">
+            {getValue() != null ? formatEuro(Number(getValue())) : "—"}
+          </span>
+        ),
+      },
+      {
+        accessorKey: "count",
+        header: () => <span className="text-right">Coincidencias</span>,
+        cell: ({ getValue }) => (
+          <span className="block text-right text-slate-600 dark:text-slate-400">
+            {Number(getValue() ?? 0).toLocaleString("es-ES")}
+          </span>
+        ),
+      },
+    ],
+    []
+  );
+
+  const tableData = agruparPorProductoProveedor ? groupedData : resultados;
+  const tableColumns = agruparPorProductoProveedor ? columnsGrouped : columns;
+
   const table = useReactTable({
-    data: resultados,
-    columns,
+    data: tableData as SearchResult[],
+    columns: tableColumns as ColumnDef<SearchResult>[],
     getCoreRowModel: getCoreRowModel(),
-    getRowId: (row, index) => `${row.producto}-${row.licitacion_nombre ?? ""}-${index}`,
+    getRowId: (row, index) =>
+      agruparPorProductoProveedor
+        ? `g-${(row as GroupedResult).producto}-${(row as GroupedResult).proveedor}`
+        : `${(row as SearchResult).producto}-${(row as SearchResult).licitacion_nombre ?? ""}-${index}`,
   });
 
   const { rows } = table.getRowModel();
 
   const handleRowClick = React.useCallback(
-    (row: SearchResult) => {
-      const id = row.id_producto;
+    (row: SearchResult | GroupedResult) => {
+      const id = "id_producto" in row ? row.id_producto : (row as GroupedResult).id_producto;
       if (id != null && typeof id === "number") {
         setSelectedProductId(id);
       }
@@ -219,13 +329,31 @@ export default function BuscadorHistoricoPage() {
             </p>
           ) : (
             <>
-              <p className="mb-3 text-xs text-slate-500 dark:text-slate-400">
-                Mostrando{" "}
-                <span className="font-semibold text-slate-800 dark:text-slate-200">
-                  {resultados.length}
-                </span>{" "}
-                coincidencias. Clic en fila para analíticas.
-              </p>
+              <div className="mb-3 flex flex-wrap items-center gap-4">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-7 px-3 text-xs dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+                  onClick={() =>
+                    setAgruparPorProductoProveedor((prev) => !prev)
+                  }
+                >
+                  {agruparPorProductoProveedor
+                    ? "Ver detalle por licitación"
+                    : "Ver agrupado por producto/proveedor"}
+                </Button>
+                <p className="text-xs text-slate-500 dark:text-slate-400">
+                  Mostrando{" "}
+                  <span className="font-semibold text-slate-800 dark:text-slate-200">
+                    {agruparPorProductoProveedor
+                      ? groupedData.length
+                      : resultados.length}
+                  </span>{" "}
+                  {agruparPorProductoProveedor ? "grupos" : "coincidencias"}.
+                  Clic en fila para analíticas.
+                </p>
+              </div>
               <div className="min-h-0 flex-1 overflow-auto">
                 <table className="min-w-full text-left text-sm">
                   <thead className="sticky top-0 z-10 bg-slate-100 dark:bg-slate-800">
@@ -250,10 +378,9 @@ export default function BuscadorHistoricoPage() {
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                     {rows.map((row) => {
-                      const original = row.original;
-                      const hasProductId =
-                        original.id_producto != null &&
-                        typeof original.id_producto === "number";
+                      const original = row.original as SearchResult | GroupedResult;
+                      const idProd = "id_producto" in original ? original.id_producto : (original as GroupedResult).id_producto;
+                      const hasProductId = idProd != null && typeof idProd === "number";
                       return (
                         <tr
                           key={row.id}

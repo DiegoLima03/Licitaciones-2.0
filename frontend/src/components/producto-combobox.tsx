@@ -18,6 +18,8 @@ const DEBOUNCE_MS = 300;
 export interface ProductComboboxProps {
   value: { id: number; nombre: string } | null;
   onSelect: (id: number, nombre: string) => void;
+  /** Si se proporciona, permite deseleccionar el producto (p. ej. para usar nombre libre). */
+  onClear?: () => void;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
@@ -26,6 +28,7 @@ export interface ProductComboboxProps {
 export function ProductCombobox({
   value,
   onSelect,
+  onClear,
   placeholder = "Buscar producto…",
   disabled = false,
   className,
@@ -101,6 +104,21 @@ export function ProductCombobox({
               </div>
             ) : (
               <ul className="space-y-0.5">
+                {value && onClear && (
+                  <li>
+                    <button
+                      type="button"
+                      className="w-full rounded px-2 py-1.5 text-left text-sm text-slate-500 hover:bg-slate-100 focus:bg-slate-100 focus:outline-none"
+                      onClick={() => {
+                        onClear();
+                        setOpen(false);
+                        setQuery("");
+                      }}
+                    >
+                      — Quitar selección
+                    </button>
+                  </li>
+                )}
                 {options.map((opt) => (
                   <li key={opt.id}>
                     <button

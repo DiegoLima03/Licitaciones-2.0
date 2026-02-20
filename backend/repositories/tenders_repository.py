@@ -160,6 +160,19 @@ class TendersRepository(BaseTenantRepository):
             )
         else:
             out["licitacion_padre"] = None
+        # Hitos de entrega programados (scheduled_deliveries)
+        try:
+            sched = (
+                self._client.table("scheduled_deliveries")
+                .select("*")
+                .eq("organization_id", self._organization_id)
+                .eq("tender_id", tender_id)
+                .order("delivery_date")
+                .execute()
+            )
+            out["scheduled_deliveries"] = list(sched.data or [])
+        except Exception:
+            out["scheduled_deliveries"] = []
         return out
 
     def get_active_budget_total(self, tender_id: int) -> Decimal:

@@ -46,6 +46,19 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
       return false;
     }
   }, [user]);
+
+  /** Rol Planta (admin_planta, member_planta): sin Dashboard general; vista limitada a CRM Presupuestos y Buscador. */
+  const isPlanta = React.useMemo(() => {
+    if (SKIP_LOGIN) return false;
+    if (!user) return false;
+    try {
+      const parsed = JSON.parse(user);
+      const role = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
+      return role.includes("planta");
+    } catch {
+      return false;
+    }
+  }, [user]);
   const [mounted, setMounted] = React.useState(false);
 
   React.useEffect(() => {
@@ -115,7 +128,24 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
     if (!SKIP_LOGIN && !isLoggedIn && pathname !== "/login") {
       router.replace("/login");
     } else if (isLoggedIn && pathname === "/login") {
-      router.replace("/");
+      let role = "";
+      try {
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          role = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
+        }
+      } catch {
+        // ignore
+      }
+      router.replace(role.includes("planta") ? "/buscador" : "/");
+    } else if (isLoggedIn && !SKIP_LOGIN && pathname === "/" && raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        const role = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
+        if (role.includes("planta")) router.replace("/buscador");
+      } catch {
+        // ignore
+      }
     }
   }, [mounted, pathname, router]);
 
@@ -224,41 +254,47 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
         </Popover>
 
         <nav className="mt-4 space-y-1 px-3 text-sm">
-          <Link
-            href="/"
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
-          >
-            <BarChart3 className="h-4 w-4" />
-            <span>Dashboard</span>
-          </Link>
+          {!isPlanta && (
+            <Link
+              href="/"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+            >
+              <BarChart3 className="h-4 w-4" />
+              <span>Dashboard</span>
+            </Link>
+          )}
           <Link
             href="/licitaciones"
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white ${pathname.startsWith("/licitaciones") ? "bg-slate-800" : ""}`}
           >
             <FolderKanban className="h-4 w-4" />
-            <span>Mis Licitaciones</span>
+            <span>{isPlanta ? "CRM Presupuestos" : "Mis Licitaciones"}</span>
           </Link>
           <Link
             href="/buscador"
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white ${pathname === "/buscador" ? "bg-slate-800" : ""}`}
           >
             <Search className="h-4 w-4" />
             <span>Buscador Histórico</span>
           </Link>
-          <Link
-            href="/lineas-referencia"
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
-          >
-            <ListPlus className="h-4 w-4" />
-            <span>Añadir líneas</span>
-          </Link>
-          <Link
-            href="/dashboard/analytics"
-            className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
-          >
-            <LineChart className="h-4 w-4" />
-            <span>Analítica</span>
-          </Link>
+          {!isPlanta && (
+            <>
+              <Link
+                href="/lineas-referencia"
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+              >
+                <ListPlus className="h-4 w-4" />
+                <span>Añadir líneas</span>
+              </Link>
+              <Link
+                href="/dashboard/analytics"
+                className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+              >
+                <LineChart className="h-4 w-4" />
+                <span>Analítica</span>
+              </Link>
+            </>
+          )}
           {(SKIP_LOGIN || isAdmin) && (
             <Link
               href="/usuarios"

@@ -58,10 +58,24 @@ export interface Tender {
   fecha_finalizacion?: string | null;
   descuento_global?: number | null;
   enlace_gober?: string | null;
+  enlace_sharepoint?: string | null;
   lotes_config?: LoteConfigItem[] | null;
   tipo_procedimiento?: TipoProcedimiento | null;
   id_licitacion_padre?: number | null;
+  coste_presupuestado?: number | null;
+  coste_real?: number | null;
+  gastos_extraordinarios?: number | null;
   [key: string]: unknown;
+}
+
+/** Hito de entrega programado (scheduled_deliveries). */
+export interface ScheduledDelivery {
+  id: string;
+  tender_id: number;
+  delivery_date: string;
+  status?: string | null;
+  description?: string | null;
+  items_json?: Record<string, unknown> | null;
 }
 
 export interface LoteConfigItem {
@@ -76,6 +90,7 @@ export interface TenderCreate {
   pres_maximo?: number | null;
   descripcion?: string | null;
   enlace_gober?: string | null;
+  enlace_sharepoint?: string | null;
   id_tipolicitacion?: number | null;
   fecha_presentacion?: string | null;
   fecha_adjudicacion?: string | null;
@@ -91,6 +106,7 @@ export interface TenderUpdate {
   pres_maximo?: number | null;
   descripcion?: string | null;
   enlace_gober?: string | null;
+  enlace_sharepoint?: string | null;
   id_estado?: number | null;
   id_tipolicitacion?: number | null;
   fecha_presentacion?: string | null;
@@ -120,11 +136,12 @@ export interface ProductoSearchResult {
   nombre_proveedor?: string | null;
 }
 
-// Partida de presupuesto (tbl_licitaciones_detalle)
+// Partida de presupuesto (tbl_licitaciones_detalle). id_producto null = solo nombre_producto_libre (sin Belneo).
 export interface TenderPartida {
   id_detalle: number;
   id_licitacion: number;
-  id_producto: number;
+  id_producto?: number | null;
+  nombre_producto_libre?: string | null;
   product_nombre?: string | null;
   nombre_proveedor?: string | null;
   lote?: string | null;
@@ -150,12 +167,15 @@ export interface TenderDetail extends Tender {
   contratos_derivados?: Tender[];
   /** Padre AM/SDA cuando esta licitación es contrato derivado (acceso desde el padre). */
   licitacion_padre?: LicitacionPadre | null;
+  /** Hitos de entrega programados (entregas mensuales). */
+  scheduled_deliveries?: ScheduledDelivery[];
 }
 
-/** Payload para añadir una partida manual (POST /tenders/{id}/partidas). */
+/** Payload para añadir una partida manual (POST /tenders/{id}/partidas). id_producto opcional; si no se vincula Belneo, usar nombre_producto_libre. */
 export interface PartidaCreate {
   lote?: string | null;
-  id_producto: number;
+  id_producto?: number | null;
+  nombre_producto_libre?: string | null;
   unidades?: number | null;
   pvu?: number | null;
   pcu?: number | null;
@@ -167,6 +187,7 @@ export interface PartidaCreate {
 export interface PartidaUpdate {
   lote?: string | null;
   id_producto?: number | null;
+  nombre_producto_libre?: string | null;
   unidades?: number | null;
   pvu?: number | null;
   pcu?: number | null;

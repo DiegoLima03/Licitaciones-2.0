@@ -15,6 +15,10 @@ export interface ProductAutocompleteInputProps {
   onSelect: (id: number, nombre: string, nombreProveedor?: string | null) => void;
   /** Llámalo para limpiar la selección (p. ej. botón X o borrar todo el texto). */
   onClear?: () => void;
+  /** Si el usuario escribe texto y cierra sin elegir de la lista, se usa como nombre libre (id_producto = null). */
+  onAcceptFreeText?: (text: string) => void;
+  /** Texto a mostrar cuando no hay producto seleccionado pero sí nombre libre (p. ej. partida solo con nombre_producto_libre). */
+  freeTextDisplay?: string | null;
   placeholder?: string;
   disabled?: boolean;
   className?: string;
@@ -31,6 +35,8 @@ export function ProductAutocompleteInput({
   value,
   onSelect,
   onClear,
+  onAcceptFreeText,
+  freeTextDisplay,
   placeholder = "Buscar o seleccionar producto…",
   disabled = false,
   className,
@@ -46,7 +52,8 @@ export function ProductAutocompleteInput({
   const wrapperRef = React.useRef<HTMLDivElement>(null);
   const listRef = React.useRef<HTMLDivElement>(null);
 
-  const displayValue = query.trim() !== "" ? query : (value ? value.nombre : "");
+  const displayValue =
+    query.trim() !== "" ? query : (value ? value.nombre : "") || (freeTextDisplay ?? "");
 
   React.useEffect(() => {
     if (!query.trim()) {
@@ -79,12 +86,17 @@ export function ProductAutocompleteInput({
   React.useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
+        const q = query.trim();
+        if (q && onAcceptFreeText) {
+          onAcceptFreeText(q);
+          setQuery("");
+        }
         setOpen(false);
       }
     }
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [query, onAcceptFreeText]);
 
   const select = React.useCallback(
     (opt: ProductoSearchResult) => {
@@ -161,6 +173,14 @@ export function ProductAutocompleteInput({
           onFocus={() => {
             if (query.trim()) setOpen(true);
             if (value) setQuery(value.nombre);
+          }}
+          onBlur={() => {
+            const q = query.trim();
+            if (q && onAcceptFreeText) {
+              onAcceptFreeText(q);
+              setQuery("");
+            }
+            setOpen(false);
           }}
           onKeyDown={handleKeyDown}
         />

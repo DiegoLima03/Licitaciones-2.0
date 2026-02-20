@@ -43,8 +43,10 @@ import {
 import { Switch } from "@/components/ui/switch";
 import { getEstadoNombre } from "@/lib/estados";
 import { ProductAutocompleteInput } from "@/components/producto-autocomplete-input";
+import { CostDeviationKPI } from "@/components/licitaciones/CostDeviationKPI";
 import { CreateTenderDialog } from "@/components/licitaciones/create-tender-dialog";
 import { EditableBudgetTable } from "@/components/licitaciones/editable-budget-table";
+import { ScheduledDeliveriesAccordion } from "@/components/licitaciones/ScheduledDeliveriesAccordion";
 import { DeliveriesService, EstadosService, TendersService, TiposGastoService, TiposService } from "@/services/api";
 import type {
   EntregaLinea,
@@ -123,6 +125,7 @@ const cabeceraFormSchema = z
     fecha_finalizacion: z.string().optional(),
     descripcion: z.string().optional(),
     enlace_gober: z.string().optional(),
+    enlace_sharepoint: z.string().optional(),
   })
   .superRefine((data, ctx) => {
     const raw = (data.fecha_presentacion ?? "").trim().split("T")[0];
@@ -271,6 +274,7 @@ export default function LicitacionDetallePage() {
       fecha_finalizacion: "",
       descripcion: "",
       enlace_gober: "",
+      enlace_sharepoint: "",
     },
   });
 
@@ -282,6 +286,7 @@ export default function LicitacionDetallePage() {
         fecha_finalizacion: lic.fecha_finalizacion ?? "",
         descripcion: lic.descripcion ?? "",
         enlace_gober: lic.enlace_gober ?? "",
+        enlace_sharepoint: lic.enlace_sharepoint ?? "",
       });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- reset when dialog opens with lic
@@ -721,6 +726,17 @@ export default function LicitacionDetallePage() {
                 Ver en Gober
               </a>
             )}
+            {lic.enlace_sharepoint && (
+              <a
+                href={lic.enlace_sharepoint}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1 font-medium text-sky-600 hover:text-sky-700 hover:underline"
+              >
+                <ExternalLink className="h-3.5 w-3.5" />
+                SharePoint
+              </a>
+            )}
             <span>
               <span className="font-medium text-slate-700">Tipo:</span>{" "}
               {lic.id_tipolicitacion != null
@@ -853,6 +869,7 @@ export default function LicitacionDetallePage() {
                           fecha_finalizacion: values.fecha_finalizacion?.trim() || null,
                           descripcion: values.descripcion?.trim() || null,
                           enlace_gober: values.enlace_gober?.trim() || null,
+                          enlace_sharepoint: values.enlace_sharepoint?.trim() || null,
                         });
                         refetchLicitacion();
                         setOpenEditarCabecera(false);
@@ -932,6 +949,26 @@ export default function LicitacionDetallePage() {
                             <Input
                               type="url"
                               placeholder="https://gober.es/..."
+                              {...field}
+                              value={field.value ?? ""}
+                            />
+                          </FormControl>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+                    <FormField
+                      control={cabeceraForm.control}
+                      name="enlace_sharepoint"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel className="text-xs font-medium text-slate-500">
+                            Enlace SharePoint
+                          </FormLabel>
+                          <FormControl>
+                            <Input
+                              type="url"
+                              placeholder="https://... (carpeta o sitio con documentación)"
                               {...field}
                               value={field.value ?? ""}
                             />
@@ -1081,6 +1118,15 @@ export default function LicitacionDetallePage() {
         <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
           Este es un Acuerdo Marco / SDA. La gestión de presupuesto, entregas y remaining se hace en cada contrato derivado.
         </div>
+      )}
+
+      {showContent && lic && (lic.coste_presupuestado != null || lic.coste_real != null) && (
+        <CostDeviationKPI
+          costePresupuestado={lic.coste_presupuestado}
+          costeReal={lic.coste_real}
+          gastosExtraordinarios={lic.gastos_extraordinarios}
+          className="mt-4"
+        />
       )}
 
       <section className="mt-2">
@@ -1314,6 +1360,11 @@ export default function LicitacionDetallePage() {
 
           {showEjecucionRemainingTabs && !isAmSda && (
           <TabsContent value="ejecucion">
+            {lic?.scheduled_deliveries && lic.scheduled_deliveries.length > 0 && (
+              <div className="mb-6">
+                <ScheduledDeliveriesAccordion deliveries={lic.scheduled_deliveries} />
+              </div>
+            )}
             <div className="mb-3 flex items-center justify-between gap-2">
               <p className="text-sm text-slate-600">
                 Resumen de entregas y albaranes vinculados a esta licitación.

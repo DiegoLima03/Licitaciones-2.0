@@ -58,6 +58,10 @@ const formSchema = z.object({
     .string()
     .optional()
     .refine((s) => !s || s.trim() === "" || /^https?:\/\/.+/.test(s.trim()), "Introduce una URL válida"),
+  enlace_sharepoint: z
+    .string()
+    .optional()
+    .refine((s) => !s || s.trim() === "" || /^https?:\/\/.+/.test(s.trim()), "Introduce una URL válida"),
   f_presentacion: z.date({
     required_error: "La fecha de presentación es obligatoria",
   }),
@@ -205,6 +209,7 @@ export function CreateTenderDialog({
       pais: "España" as PaisLicitacion,
       expediente: "",
       enlace_gober: "",
+      enlace_sharepoint: "",
       presupuesto: 0,
       notas: "",
       tipo_id: "",
@@ -231,6 +236,7 @@ export function CreateTenderDialog({
         pais: values.pais,
         numero_expediente: values.expediente,
         enlace_gober: values.enlace_gober?.trim() || undefined,
+        enlace_sharepoint: values.enlace_sharepoint?.trim() || undefined,
         pres_maximo: values.presupuesto ?? 0,
         descripcion: values.notas ?? "",
         id_tipolicitacion,
@@ -461,6 +467,25 @@ export function CreateTenderDialog({
                       <Input
                         type="url"
                         placeholder="https://gober.es/... (URL de la licitación en Gober)"
+                        {...field}
+                        value={field.value ?? ""}
+                      />
+                    </FormControl>
+                    <FormMessage />
+                  </FormItem>
+                )}
+              />
+
+              <FormField
+                control={form.control}
+                name="enlace_sharepoint"
+                render={({ field }) => (
+                  <FormItem className="md:col-span-2">
+                    <FormLabel>Enlace SharePoint</FormLabel>
+                    <FormControl>
+                      <Input
+                        type="url"
+                        placeholder="https://... (carpeta o sitio con documentación e información)"
                         {...field}
                         value={field.value ?? ""}
                       />
