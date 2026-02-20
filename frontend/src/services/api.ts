@@ -154,8 +154,12 @@ export const UsersService = {
 export const EstadosService = {
   async getAll(): Promise<Estado[]> {
     try {
-      const { data } = await apiClient.get<Estado[]>("/estados");
-      return data ?? [];
+      const { data } = await apiClient.get<unknown>("/estados");
+      const list = Array.isArray(data) ? data : [];
+      return list.map((e: Record<string, unknown>) => ({
+        id_estado: Number(e.id_estado ?? 0),
+        nombre_estado: String(e.nombre_estado ?? "").trim() || `Estado ${e.id_estado ?? ""}`,
+      })) as Estado[];
     } catch (error) {
       throw new Error(getMessageFromError(error));
     }
@@ -234,6 +238,16 @@ export const TendersService = {
       if (filters?.nombre) params.set("nombre", filters.nombre);
       if (filters?.pais) params.set("pais", filters.pais);
       const { data } = await apiClient.get<Tender[]>("/tenders", { params });
+      return data ?? [];
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+
+  /** Licitaciones padre (AM/SDA adjudicadas) para selector al crear Contrato Basado / Específico. */
+  async getParents(): Promise<Tender[]> {
+    try {
+      const { data } = await apiClient.get<Tender[]>("/tenders/parents");
       return data ?? [];
     } catch (error) {
       throw new Error(getMessageFromError(error));

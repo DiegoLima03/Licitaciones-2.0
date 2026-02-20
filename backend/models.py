@@ -10,6 +10,19 @@ from pydantic import BaseModel, Field, model_validator
 PaisLicitacion = Literal["España", "Portugal"]
 
 
+class TipoProcedimiento(str, Enum):
+    """
+    Tipo de procedimiento (Acuerdos Marco / SDA / jerarquía padre-hijo).
+    ORDINARIO, ACUERDO_MARCO, SDA = pueden ser padres.
+    CONTRATO_BASADO = contrato derivado de un AM/SDA (tiene id_licitacion_padre).
+    """
+
+    ORDINARIO = "ORDINARIO"
+    ACUERDO_MARCO = "ACUERDO_MARCO"
+    SDA = "SDA"
+    CONTRATO_BASADO = "CONTRATO_BASADO"
+
+
 # ----- Estados de licitación (tbl_estados) -----
 # IDs según base de datos actual. Extensible si se añaden más estados.
 class EstadoLicitacion(IntEnum):
@@ -133,6 +146,14 @@ class TenderCreate(BaseModel):
     fecha_presentacion: Optional[str] = Field(None, description="Fecha presentación (YYYY-MM-DD).")
     fecha_adjudicacion: Optional[str] = Field(None, description="Fecha adjudicación (YYYY-MM-DD).")
     fecha_finalizacion: Optional[str] = Field(None, description="Fecha finalización (YYYY-MM-DD).")
+    tipo_procedimiento: Optional[TipoProcedimiento] = Field(
+        default=TipoProcedimiento.ORDINARIO,
+        description="Tipo: ORDINARIO, ACUERDO_MARCO, SDA, CONTRATO_BASADO.",
+    )
+    id_licitacion_padre: Optional[int] = Field(
+        None,
+        description="ID de la licitación padre (AM/SDA) cuando tipo es CONTRATO_BASADO.",
+    )
 
 
 class TenderUpdate(BaseModel):
@@ -151,6 +172,8 @@ class TenderUpdate(BaseModel):
     fecha_finalizacion: Optional[str] = None
     descuento_global: Optional[Decimal] = None
     lotes_config: Optional[List[Dict[str, Any]]] = None  # [{"nombre":"Lote 1","ganado":false}, ...]
+    tipo_procedimiento: Optional[TipoProcedimiento] = None
+    id_licitacion_padre: Optional[int] = None
 
 
 class TenderStatusChange(BaseModel):
@@ -411,6 +434,7 @@ class PriceHistoryPoint(BaseModel):
     """Punto de la serie temporal de precios adjudicados (eje X tiempo, eje Y precio)."""
     time: str = Field(..., description="Fecha ISO YYYY-MM-DD.")
     value: Decimal = Field(..., description="Precio de adjudicación (PVU).")
+    unidades: Optional[float] = Field(None, description="Unidades (suma ese día) para tooltip.")
 
 
 class VolumeMetrics(BaseModel):

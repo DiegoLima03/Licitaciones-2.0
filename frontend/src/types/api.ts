@@ -37,6 +37,13 @@ export interface Tipo {
 
 export type PaisLicitacion = "España" | "Portugal";
 
+/** Tipo de procedimiento (Acuerdos Marco / SDA / jerarquía padre-hijo). */
+export type TipoProcedimiento =
+  | "ORDINARIO"
+  | "ACUERDO_MARCO"
+  | "SDA"
+  | "CONTRATO_BASADO";
+
 export interface Tender {
   id_licitacion: number;
   nombre: string;
@@ -52,6 +59,8 @@ export interface Tender {
   descuento_global?: number | null;
   enlace_gober?: string | null;
   lotes_config?: LoteConfigItem[] | null;
+  tipo_procedimiento?: TipoProcedimiento | null;
+  id_licitacion_padre?: number | null;
   [key: string]: unknown;
 }
 
@@ -71,6 +80,8 @@ export interface TenderCreate {
   fecha_presentacion?: string | null;
   fecha_adjudicacion?: string | null;
   fecha_finalizacion?: string | null;
+  tipo_procedimiento?: TipoProcedimiento | null;
+  id_licitacion_padre?: number | null;
 }
 
 export interface TenderUpdate {
@@ -87,6 +98,8 @@ export interface TenderUpdate {
   fecha_finalizacion?: string | null;
   descuento_global?: number | null;
   lotes_config?: LoteConfigItem[] | null;
+  tipo_procedimiento?: TipoProcedimiento | null;
+  id_licitacion_padre?: number | null;
 }
 
 /** Payload para POST /tenders/{id}/change-status (máquina de estados) */
@@ -123,9 +136,20 @@ export interface TenderPartida {
   [key: string]: unknown;
 }
 
-/** Detalle de licitación con partidas (GET /tenders/{id}). */
+/** Datos mínimos del expediente padre (solo en detalle de contrato derivado). */
+export interface LicitacionPadre {
+  id_licitacion: number;
+  nombre?: string | null;
+  numero_expediente?: string | null;
+}
+
+/** Detalle de licitación con partidas (GET /tenders/{id}). Para AM/SDA incluye contratos_derivados. */
 export interface TenderDetail extends Tender {
   partidas: TenderPartida[];
+  /** Licitaciones hijo (CONTRATO_BASADO) cuando esta licitación es AM o SDA. */
+  contratos_derivados?: Tender[];
+  /** Padre AM/SDA cuando esta licitación es contrato derivado (acceso desde el padre). */
+  licitacion_padre?: LicitacionPadre | null;
 }
 
 /** Payload para añadir una partida manual (POST /tenders/{id}/partidas). */
@@ -277,6 +301,8 @@ export interface SearchResult {
 export interface PriceHistoryPoint {
   time: string;
   value: number;
+  /** Unidades (suma ese día) para tooltip en gráfico de evolución. */
+  unidades?: number | null;
 }
 
 export interface VolumeMetrics {
@@ -341,6 +367,7 @@ export interface DashboardKPIs {
 export interface MaterialTrendPoint {
   time: string;
   value: number;
+  unidades?: number | null;
 }
 
 export interface MaterialTrendResponse {

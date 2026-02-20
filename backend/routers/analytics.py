@@ -43,11 +43,14 @@ ESTADOS_ADJUDICADAS_TERMINADAS_NORM = {s.lower() for s in ESTADOS_ADJUDICADAS_TE
 ESTADOS_DESCARTADA_NORM = {s.lower() for s in ESTADOS_DESCARTADA}
 ESTADOS_EN_ANALISIS_NORM = {s.lower() for s in ESTADOS_EN_ANALISIS}
 
+# Tipos de procedimiento facturables (excluimos AM y SDA "padre" para totales económicos)
+TIPOS_FACTURABLES = {"ORDINARIO", "CONTRATO_BASADO"}
+
 
 def _get_licitaciones_df(org_id: str) -> pd.DataFrame:
     """Licitaciones de la organización con columnas necesarias."""
     response = supabase_client.table("tbl_licitaciones").select(
-        "id_licitacion, nombre, pres_maximo, id_estado, "
+        "id_licitacion, nombre, pres_maximo, id_estado, tipo_procedimiento, "
         "fecha_presentacion, fecha_adjudicacion, fecha_finalizacion"
     ).eq("organization_id", org_id).execute()
     data = response.data or []
@@ -197,7 +200,6 @@ def get_kpis(
 
     try:
         df = _enriquecer_estados(df, maestros)
-        timeline_records = _build_timeline_all(df)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -207,13 +209,22 @@ def get_kpis(
     # Normalizar nombre de estado para comparación insensible a mayúsculas (ej. "TERMINADA" en BD)
     df["_estado_norm"] = df["estado_nombre"].astype(str).str.strip().str.lower()
 
-    # Total oportunidades = todas las licitaciones
-    total_oportunidades_uds = len(df)
-    total_oportunidades_euros = float(df["pres_maximo"].sum())
+    # Solo facturables para totales económicos y timeline (excluir ACUERDO_MARCO y SDA "padre")
+    tipo = df.get("tipo_procedimiento")
+    if tipo is not None:
+        mask_facturable = tipo.fillna("ORDINARIO").astype(str).str.upper().isin(TIPOS_FACTURABLES)
+    else:
+        mask_facturable = pd.Series(True, index=df.index)
+    df_fact = df[mask_facturable]
+    timeline_records = _build_timeline_all(df_fact)
 
-    # Total ofertado = solo estados en ESTADOS_OFERTADO (Adjudicada, No Adjudicada, Presentada, Terminada)
-    mask_ofertado = df["_estado_norm"].isin(ESTADOS_OFERTADO_NORM)
-    df_ofertado = df[mask_ofertado]
+    # Total oportunidades = solo licitaciones facturables (ORDINARIO, BASADO_AM, ESPECIFICO_SDA)
+    total_oportunidades_uds = len(df_fact)
+    total_oportunidades_euros = float(df_fact["pres_maximo"].sum())
+
+    # Total ofertado = facturables en estados Adjudicada, No Adjudicada, Presentada, Terminada
+    mask_ofertado = df_fact["_estado_norm"].isin(ESTADOS_OFERTADO_NORM)
+    df_ofertado = df_fact[mask_ofertado]
     total_ofertado_uds = len(df_ofertado)
     total_ofertado_euros = float(df_ofertado["pres_maximo"].sum())
 
@@ -225,27 +236,27 @@ def get_kpis(
         (total_ofertado_euros / total_oportunidades_euros * 100) if total_oportunidades_euros else 0.0
     )
 
-    # Adjudicadas + Terminadas
-    mask_adj_ter = df["_estado_norm"].isin(ESTADOS_ADJUDICADAS_TERMINADAS_NORM)
+    # Adjudicadas + Terminadas (solo facturables)
+    mask_adj_ter = df_fact["_estado_norm"].isin(ESTADOS_ADJUDICADAS_TERMINADAS_NORM)
     count_adj_ter = mask_adj_ter.sum()
     ratio_adjudicadas_terminadas_ofertado = (
         (count_adj_ter / total_ofertado_uds * 100) if total_ofertado_uds else 0.0
     )
 
-    # Margen medio ponderado (adjudicadas + terminadas)
-    ids_adj_ter = df.loc[mask_adj_ter, "id_licitacion"].astype(int).tolist()
+    # Margen medio ponderado (adjudicadas + terminadas, solo facturables)
+    ids_adj_ter = df_fact.loc[mask_adj_ter, "id_licitacion"].astype(int).tolist()
     org_s = str(current_user.org_id)
     margen_presu = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=True, org_id=org_s)
     margen_real = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=False, org_id=org_s)
 
-    # % descartadas = descartadas / (total - en análisis)
-    mask_des = df["_estado_norm"].isin(ESTADOS_DESCARTADA_NORM)
-    mask_an_val = df["_estado_norm"].isin(ESTADOS_EN_ANALISIS_NORM)
+    # % descartadas = descartadas / (total facturables - en análisis)
+    mask_des = df_fact["_estado_norm"].isin(ESTADOS_DESCARTADA_NORM)
+    mask_an_val = df_fact["_estado_norm"].isin(ESTADOS_EN_ANALISIS_NORM)
     count_des = mask_des.sum()
     denom = total_oportunidades_uds - mask_an_val.sum()
     pct_descartadas_uds = (count_des / denom * 100) if denom and denom > 0 else None
-    euros_des = float(df.loc[mask_des, "pres_maximo"].sum())
-    euros_total_menos_an_val = float(df[~mask_an_val]["pres_maximo"].sum())
+    euros_des = float(df_fact.loc[mask_des, "pres_maximo"].sum())
+    euros_total_menos_an_val = float(df_fact.loc[~mask_an_val, "pres_maximo"].sum())
     pct_descartadas_euros = (euros_des / euros_total_menos_an_val * 100) if euros_total_menos_an_val else None
 
     # Ratio adjudicación = (Adjudicadas+Terminadas) / (Adjudicadas+No Adjudicadas+Terminadas)
@@ -783,14 +794,39 @@ def get_product_analytics(product_id: int, current_user: CurrentUserDep) -> Prod
         # Precios de referencia (pvu y pcu con fecha_presupuesto)
         ref_resp = (
             supabase_client.table("tbl_precios_referencia")
-            .select("pvu, pcu, fecha_presupuesto")
+            .select("pvu, pcu, unidades, fecha_presupuesto")
             .eq("organization_id", org_s)
             .eq("id_producto", product_id)
             .execute()
         )
         ref_rows = ref_resp.data or []
 
-        # Construir price_history (PVU) y price_history_pcu (PCU) con Pandas
+        # Unidades vendidas = desde tbl_precios_referencia donde PCU es NULL (albaranes de venta), por fecha_presupuesto
+        def _pcu_es_nulo(pcu: Any) -> bool:
+            """True si no hay coste (NULL, vacío o 0)."""
+            if pcu is None:
+                return True
+            if isinstance(pcu, str) and (not pcu.strip() or pcu.strip().lower() == "null"):
+                return True
+            try:
+                return float(pcu) == 0
+            except (TypeError, ValueError):
+                return False
+
+        unidades_vendidas_by_date: Dict[str, float] = {}
+        for r in ref_rows:
+            if not _pcu_es_nulo(r.get("pcu")):
+                continue
+            time_str = _norm_date(r.get("fecha_presupuesto"))
+            if not time_str:
+                continue
+            try:
+                qty = float(r.get("unidades") or 0)
+            except (TypeError, ValueError):
+                continue
+            unidades_vendidas_by_date[time_str] = unidades_vendidas_by_date.get(time_str, 0.0) + qty
+
+        # Construir price_history (PVU); unidades del tooltip = unidades vendidas por fecha (referencia con PCU NULL)
         hist_rows: List[Dict[str, Any]] = []
         for r in det_rows:
             pvu = r.get("pvu")
@@ -814,14 +850,21 @@ def get_product_analytics(product_id: int, current_user: CurrentUserDep) -> Prod
                 value = float(pvu)
             except (TypeError, ValueError):
                 continue
-            time_str = str(fecha).split("T")[0][:10]
+            time_str = _norm_date(fecha)
+            if not time_str:
+                continue
             hist_rows.append({"time": time_str, "value": value})
 
         df_hist = pd.DataFrame(hist_rows)
         if not df_hist.empty:
-            df_hist = df_hist.sort_values("time").drop_duplicates(subset=["time"], keep="last")
+            df_hist = df_hist.sort_values("time")
+            df_hist = df_hist.groupby("time", as_index=False).agg(value=("value", "last"))
         price_history = [
-            PriceHistoryPoint(time=row["time"], value=round(float(row["value"]), 2))
+            PriceHistoryPoint(
+                time=row["time"],
+                value=round(float(row["value"]), 2),
+                unidades=round(unidades_vendidas_by_date.get(row["time"], 0.0), 2),
+            )
             for _, row in df_hist.iterrows()
         ]
 

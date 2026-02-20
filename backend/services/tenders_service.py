@@ -17,6 +17,7 @@ from backend.models import (
     TenderCreate,
     TenderStatusChange,
     TenderUpdate,
+    TipoProcedimiento,
 )
 from backend.repositories.tenders_repository import TendersRepository
 from backend.services.exceptions import ConflictError, NotFoundError
@@ -28,6 +29,7 @@ CAMPOS_BLOQUEADOS_EDICION = {
 }
 CAMPOS_PERMITIDOS_CUANDO_BLOQUEADO = {
     "descripcion", "nombre", "numero_expediente", "id_tipolicitacion", "enlace_gober", "lotes_config",
+    "tipo_procedimiento", "id_licitacion_padre",
 }
 
 
@@ -53,8 +55,17 @@ class TenderService:
             raise NotFoundError("Licitación no encontrada.")
         return out
 
+    def get_parent_tenders(self) -> List[Dict[str, Any]]:
+        """Licitaciones AM/SDA adjudicadas para usar como padre al crear CONTRATO_BASADO."""
+        return self._repo.get_parent_tenders()
+
     def create_tender(self, payload: TenderCreate) -> Dict[str, Any]:
-        """Crea licitación en estado EN_ANALISIS. organization_id lo inyecta el repo."""
+        """Crea licitación en estado EN_ANALISIS. organization_id lo inyecta el repo.
+        Si se pasa id_licitacion_padre, se fuerza tipo_procedimiento a CONTRATO_BASADO."""
+        if payload.id_licitacion_padre is not None:
+            tipo = TipoProcedimiento.CONTRATO_BASADO
+        else:
+            tipo = payload.tipo_procedimiento if payload.tipo_procedimiento is not None else TipoProcedimiento.ORDINARIO
         row: Dict[str, Any] = {
             "nombre": payload.nombre,
             "pais": payload.pais,
@@ -67,6 +78,8 @@ class TenderService:
             "fecha_presentacion": payload.fecha_presentacion,
             "fecha_adjudicacion": payload.fecha_adjudicacion,
             "fecha_finalizacion": payload.fecha_finalizacion,
+            "tipo_procedimiento": tipo.value if isinstance(tipo, TipoProcedimiento) else tipo,
+            "id_licitacion_padre": payload.id_licitacion_padre,
         }
         return self._repo.create(row)
 
@@ -125,12 +138,15 @@ class TenderService:
         except ValueError:
             raise ValueError(f"Estado {nuevo_id} no válido.")
 
+        # LCSP: AM y SDA no requieren partidas ni importe cerrado para presentar/adjudicar
         if nuevo_estado == EstadoLicitacion.PRESENTADA:
-            total = self._repo.get_active_budget_total(tender_id)
-            if total <= Decimal("0"):
-                raise ValueError(
-                    "No se puede presentar a coste cero. La suma del presupuesto (partidas activas) debe ser > 0."
-                )
+            tipo_proc = (licitacion.get("tipo_procedimiento") or "").upper() if isinstance(licitacion.get("tipo_procedimiento"), str) else ""
+            if tipo_proc not in ("ACUERDO_MARCO", "SDA"):
+                total = self._repo.get_active_budget_total(tender_id)
+                if total <= Decimal("0"):
+                    raise ValueError(
+                        "No se puede presentar a coste cero. La suma del presupuesto (partidas activas) debe ser > 0."
+                    )
 
         update_data: Dict[str, Any] = {"id_estado": nuevo_id}
 

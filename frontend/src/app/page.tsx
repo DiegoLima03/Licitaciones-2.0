@@ -140,41 +140,85 @@ function TimelineChart({ items }: { items: TimelineItem[] }) {
     const f = parseTimelineDate(i.fecha_finalizacion);
     return [a, f].filter((x): x is number => typeof x === "number");
   });
-  const minT = dates.length ? Math.min(...dates) : Date.now();
-  const maxT = dates.length ? Math.max(...dates) : Date.now();
+  const todayForRange = new Date();
+  todayForRange.setHours(0, 0, 0, 0);
+  const todayT = todayForRange.getTime();
+  const dataMin = dates.length ? Math.min(...dates) : todayT;
+  const dataMax = dates.length ? Math.max(...dates) : todayT;
+  const minT = Math.min(dataMin, todayT);
+  const maxT = Math.max(dataMax, todayT);
   const range = maxT - minT || 1;
 
   const minDate = new Date(minT);
   const maxDate = new Date(maxT);
 
-  /** Ticks del eje de fechas: escalado para no saturar (1, 2 o 3 meses según rango) */
+  /** Ticks del eje de fechas: adaptados al rango (días → semanas → meses) */
   const dateTicks = React.useMemo(() => {
     const ticks: { ts: number; label: string }[] = [];
-    const monthsDiff = (maxDate.getFullYear() - minDate.getFullYear()) * 12 + (maxDate.getMonth() - minDate.getMonth()) + 1;
-    const step = monthsDiff > 18 ? 3 : monthsDiff > 9 ? 2 : 1;
-    const start = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
-    const end = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, 0);
-    let cur = new Date(start);
-    while (cur <= end) {
-      const ts = cur.getTime();
-      if (ts >= minT && ts <= maxT) {
-        const year = cur.getFullYear();
-        const shortYear = String(year).slice(-2);
-        const monthCount = (cur.getFullYear() - minDate.getFullYear()) * 12 + (cur.getMonth() - minDate.getMonth());
-        if (monthCount % step === 0) {
-          ticks.push({
-            ts,
-            label: `${MESES[cur.getMonth()]} ${shortYear}`,
-          });
-        }
+    const rangeDays = range / (24 * 60 * 60 * 1000);
+    const dayMs = 24 * 60 * 60 * 1000;
+
+    // Rango muy corto: marcas cada día (máx. ~10 ticks)
+    if (rangeDays <= 14) {
+      const stepDays = rangeDays <= 5 ? 1 : rangeDays <= 8 ? 2 : 3;
+      const targetCount = Math.min(10, Math.max(3, Math.ceil(rangeDays / stepDays)));
+      const step = Math.max(1, Math.floor(rangeDays / targetCount));
+      let cur = new Date(minT);
+      cur.setHours(0, 0, 0, 0);
+      let t = cur.getTime();
+      while (t <= maxT && ticks.length < 12) {
+        ticks.push({
+          ts: t,
+          label: `${cur.getDate()} ${MESES[cur.getMonth()]}`,
+        });
+        t += step * dayMs;
+        cur = new Date(t);
       }
-      cur.setMonth(cur.getMonth() + 1);
     }
+    // Rango de pocas semanas hasta ~2 meses: marcas cada varios días o cada semana
+    else if (rangeDays <= 60) {
+      const stepDays = rangeDays <= 21 ? 7 : 14;
+      let t = minT;
+      const d = new Date(minT);
+      d.setHours(0, 0, 0, 0);
+      t = d.getTime();
+      while (t <= maxT && ticks.length < 12) {
+        ticks.push({
+          ts: t,
+          label: `${d.getDate()} ${MESES[d.getMonth()]}`,
+        });
+        t += stepDays * dayMs;
+        d.setTime(t);
+      }
+    }
+    // Rango mayor: por meses (1, 2 o 3 según duración)
+    else {
+      const monthsDiff = (maxDate.getFullYear() - minDate.getFullYear()) * 12 + (maxDate.getMonth() - minDate.getMonth()) + 1;
+      const step = monthsDiff > 18 ? 3 : monthsDiff > 9 ? 2 : 1;
+      const start = new Date(minDate.getFullYear(), minDate.getMonth(), 1);
+      const end = new Date(maxDate.getFullYear(), maxDate.getMonth() + 1, 0);
+      let cur = new Date(start);
+      while (cur <= end) {
+        const ts = cur.getTime();
+        if (ts >= minT && ts <= maxT) {
+          const shortYear = String(cur.getFullYear()).slice(-2);
+          const monthCount = (cur.getFullYear() - minDate.getFullYear()) * 12 + (cur.getMonth() - minDate.getMonth());
+          if (monthCount % step === 0) {
+            ticks.push({
+              ts,
+              label: `${MESES[cur.getMonth()]} ${shortYear}`,
+            });
+          }
+        }
+        cur.setMonth(cur.getMonth() + 1);
+      }
+    }
+
     if (ticks.length === 0) {
-      ticks.push({ ts: minT, label: MESES[minDate.getMonth()] + " " + String(minDate.getFullYear()).slice(-2) });
+      ticks.push({ ts: minT, label: `${minDate.getDate()} ${MESES[minDate.getMonth()]}` });
     }
     return ticks;
-  }, [minT, maxT, minDate, maxDate]);
+  }, [minT, maxT, minDate, maxDate, range]);
 
   if (displayItems.length === 0) {
     return (
@@ -219,13 +263,8 @@ function TimelineChart({ items }: { items: TimelineItem[] }) {
 
           {/* Área Gantt: barras + cuadrícula de fechas */}
           <div className="relative min-w-0 flex-1">
-            {/* Línea roja "hoy" */}
+            {/* Línea roja "hoy": el rango del eje incluye hoy, así que siempre se muestra cuando hay datos */}
             {(() => {
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              const todayT = today.getTime();
-              const inRange = todayT >= minT && todayT <= maxT;
-              if (!inRange) return null;
               const leftPercent = ((todayT - minT) / range) * 100;
               return (
                 <div
@@ -234,7 +273,7 @@ function TimelineChart({ items }: { items: TimelineItem[] }) {
                     left: `${leftPercent}%`,
                     height: displayItems.length * (barHeight + 8),
                   }}
-                  title={`Hoy: ${formatDate(today.toISOString().slice(0, 10))}`}
+                  title={`Hoy: ${formatDate(todayForRange.toISOString().slice(0, 10))}`}
                 />
               );
             })()}

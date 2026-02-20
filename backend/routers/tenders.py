@@ -52,6 +52,18 @@ def list_tenders(
         raise _map_service_error(e)
 
 
+@router.get("/parents", response_model=List[dict])
+def list_parent_tenders(
+    current_user: CurrentUserDep,
+    service: TenderService = Depends(get_tender_service),
+) -> List[dict]:
+    """Lista licitaciones que pueden ser padre (AM/SDA) y están adjudicadas. Para selector al crear BASADO_AM/ESPECIFICO_SDA."""
+    try:
+        return service.get_parent_tenders()
+    except (NotFoundError, ConflictError, ValueError) as e:
+        raise _map_service_error(e)
+
+
 @router.get("/{tender_id}", response_model=dict)
 def get_tender(
     tender_id: int,

@@ -31,12 +31,24 @@ import Image from "next/image";
 import { ChevronDown } from "lucide-react";
 import { PAIS_FLAG_SRC, PAIS_LABEL, PAISES_OPCIONES } from "@/lib/paises";
 import { TiposService, TendersService } from "@/services/api";
-import type { PaisLicitacion, Tipo } from "@/types/api";
+import type { PaisLicitacion, Tender, Tipo, TipoProcedimiento } from "@/types/api";
 
 type CreateTenderDialogProps = {
   triggerLabel?: string;
   onSuccess?: () => void;
+  /** Modo controlado: abre/cierra desde fuera (ej. botón "Generar Contrato Basado"). */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Pre-rellena padre y tipo CONTRATO_BASADO; oculta selector de tipo y expediente padre. */
+  defaultIdLicitacionPadre?: number;
 };
+
+const TIPO_PROCEDIMIENTO_VALUES: TipoProcedimiento[] = [
+  "ORDINARIO",
+  "ACUERDO_MARCO",
+  "SDA",
+  "CONTRATO_BASADO",
+];
 
 const formSchema = z.object({
   nombre: z.string().min(1, "El nombre del proyecto es obligatorio"),
@@ -60,6 +72,13 @@ const formSchema = z.object({
     .transform((val) => (typeof val === "string" ? parseFloat(val || "0") : val))
     .refine((val) => !Number.isNaN(val) && val >= 0, "Introduce un importe válido"),
   tipo_id: z.string().min(1, "Selecciona un tipo de licitación"),
+  tipo_procedimiento: z.enum([
+    "ORDINARIO",
+    "ACUERDO_MARCO",
+    "SDA",
+    "CONTRATO_BASADO",
+  ] as const),
+  id_licitacion_padre: z.string().optional(),
   notas: z.string().optional().default(""),
 }).superRefine((data, ctx) => {
   const hoy = new Date();
@@ -81,6 +100,16 @@ const formSchema = z.object({
       });
     }
   }
+  if (
+    data.tipo_procedimiento === "CONTRATO_BASADO" &&
+    (!data.id_licitacion_padre || String(data.id_licitacion_padre).trim() === "")
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Selecciona el expediente padre (AM/SDA adjudicado)",
+      path: ["id_licitacion_padre"],
+    });
+  }
 });
 
 type FormValues = z.infer<typeof formSchema>;
@@ -88,10 +117,18 @@ type FormValues = z.infer<typeof formSchema>;
 export function CreateTenderDialog({
   triggerLabel = "Nueva Licitación",
   onSuccess,
+  open: controlledOpen,
+  onOpenChange: controlledOnOpenChange,
+  defaultIdLicitacionPadre,
 }: CreateTenderDialogProps) {
-  const [open, setOpen] = React.useState(false);
+  const [internalOpen, setInternalOpen] = React.useState(false);
+  const isControlled = controlledOpen !== undefined && controlledOnOpenChange !== undefined;
+  const open = isControlled ? controlledOpen : internalOpen;
+  const setOpen = isControlled ? controlledOnOpenChange : setInternalOpen;
+  const isContratoBasadoFromParent = defaultIdLicitacionPadre != null;
   const [submitting, setSubmitting] = React.useState(false);
   const [tipos, setTipos] = React.useState<Tipo[]>([]);
+  const [parentTenders, setParentTenders] = React.useState<Tender[]>([]);
   const [loadingMaestros, setLoadingMaestros] = React.useState(false);
   const [paisPopoverOpen, setPaisPopoverOpen] = React.useState(false);
   const [openDatePopover, setOpenDatePopover] = React.useState<
@@ -140,15 +177,26 @@ export function CreateTenderDialog({
   React.useEffect(() => {
     if (!open) return;
     setLoadingMaestros(true);
-    TiposService.getAll()
-      .then((t) => {
+    Promise.all([TiposService.getAll(), TendersService.getParents()])
+      .then(([t, parents]) => {
         setTipos(t);
+        setParentTenders(parents);
       })
       .catch((err) => {
-        console.error("Error cargando tipos", err);
+        console.error("Error cargando maestros o padres", err);
       })
       .finally(() => setLoadingMaestros(false));
   }, [open]);
+
+  React.useEffect(() => {
+    if (open && isContratoBasadoFromParent && defaultIdLicitacionPadre != null) {
+      form.reset({
+        ...form.getValues(),
+        tipo_procedimiento: "CONTRATO_BASADO",
+        id_licitacion_padre: String(defaultIdLicitacionPadre),
+      });
+    }
+  }, [open, isContratoBasadoFromParent, defaultIdLicitacionPadre]);
 
   const form = useForm<FormValues>({
     resolver: zodResolver(formSchema),
@@ -160,13 +208,23 @@ export function CreateTenderDialog({
       presupuesto: 0,
       notas: "",
       tipo_id: "",
+      tipo_procedimiento: "ORDINARIO",
+      id_licitacion_padre: "",
     },
   });
+
+  const tipoProcedimiento = form.watch("tipo_procedimiento");
+  const showExpedientePadre = tipoProcedimiento === "CONTRATO_BASADO";
 
   async function onSubmit(values: FormValues) {
     setSubmitting(true);
     try {
       const id_tipolicitacion = Number(values.tipo_id);
+
+      const idLicitacionPadre =
+        values.id_licitacion_padre && String(values.id_licitacion_padre).trim() !== ""
+          ? Number(values.id_licitacion_padre)
+          : undefined;
 
       await TendersService.create({
         nombre: values.nombre,
@@ -179,6 +237,8 @@ export function CreateTenderDialog({
         fecha_presentacion: values.f_presentacion.toISOString().split("T")[0],
         fecha_adjudicacion: values.f_adjudicacion.toISOString().split("T")[0],
         fecha_finalizacion: values.f_finalizacion.toISOString().split("T")[0],
+        tipo_procedimiento: values.tipo_procedimiento,
+        id_licitacion_padre: idLicitacionPadre ?? null,
       });
 
       // eslint-disable-next-line no-alert
@@ -270,17 +330,22 @@ export function CreateTenderDialog({
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        <Button className="gap-2">
-          {triggerLabel}
-        </Button>
-      </DialogTrigger>
+      {!isControlled && (
+        <DialogTrigger asChild>
+          <Button className="gap-2">
+            {triggerLabel}
+          </Button>
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-xl">
         <DialogHeader>
-          <DialogTitle>Nueva Licitación</DialogTitle>
+          <DialogTitle>
+            {isContratoBasadoFromParent ? "Nuevo Contrato Basado" : "Nueva Licitación"}
+          </DialogTitle>
           <DialogDescription>
-            Completa los datos principales de la licitación. Podrás editar el
-            detalle más adelante.
+            {isContratoBasadoFromParent
+              ? "Contrato derivado de este Acuerdo Marco / SDA. Completa los datos del contrato."
+              : "Completa los datos principales de la licitación. Podrás editar el detalle más adelante."}
           </DialogDescription>
         </DialogHeader>
 
@@ -414,7 +479,7 @@ export function CreateTenderDialog({
                     <FormControl>
                       <Input
                         type="number"
-                        step="100"
+                        step="1"
                         min="0"
                         placeholder="0"
                         {...field}
@@ -494,6 +559,66 @@ export function CreateTenderDialog({
                   </FormItem>
                 )}
               />
+
+              {!isContratoBasadoFromParent && (
+                <FormField
+                  control={form.control}
+                  name="tipo_procedimiento"
+                  render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Tipo de procedimiento</FormLabel>
+                      <FormControl>
+                        <select
+                          className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:opacity-50"
+                          value={field.value}
+                          onChange={(e) => {
+                            const v = e.target.value as FormValues["tipo_procedimiento"];
+                            field.onChange(v);
+                            if (v !== "CONTRATO_BASADO") form.setValue("id_licitacion_padre", "");
+                          }}
+                        >
+                          <option value="ORDINARIO">Licitación</option>
+                          <option value="ACUERDO_MARCO">Acuerdo Marco</option>
+                          <option value="SDA">SDA</option>
+                          {/* Contrato Basado solo desde el detalle del AM/SDA (Generar Contrato Basado) */}
+                        </select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
+
+              {showExpedientePadre && !isContratoBasadoFromParent && (
+                <FormField
+                  control={form.control}
+                  name="id_licitacion_padre"
+                  render={({ field }) => (
+                    <FormItem className="md:col-span-2">
+                      <FormLabel>Expediente Padre</FormLabel>
+                      <FormControl>
+                        <select
+                          className="h-9 w-full rounded-md border border-slate-200 bg-white px-3 text-sm text-slate-900 shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500 focus-visible:ring-offset-2 disabled:opacity-50"
+                          value={field.value ?? ""}
+                          onChange={(e) => field.onChange(e.target.value)}
+                        >
+                          <option value="">
+                            {parentTenders.length === 0
+                              ? "No hay AM/SDA adjudicados"
+                              : "Selecciona el expediente padre"}
+                          </option>
+                          {parentTenders.map((p) => (
+                            <option key={p.id_licitacion} value={p.id_licitacion}>
+                              {p.numero_expediente ?? `#${p.id_licitacion}`} — {p.nombre}
+                            </option>
+                          ))}
+                        </select>
+                      </FormControl>
+                      <FormMessage />
+                    </FormItem>
+                  )}
+                />
+              )}
             </div>
 
             <FormField
@@ -524,7 +649,7 @@ export function CreateTenderDialog({
                 Cancelar
               </Button>
               <Button type="submit" disabled={submitting}>
-                {submitting ? "Guardando..." : "Guardar Licitación"}
+                {submitting ? "Guardando..." : isContratoBasadoFromParent ? "Crear Contrato Basado" : "Guardar Licitación"}
               </Button>
             </div>
           </form>

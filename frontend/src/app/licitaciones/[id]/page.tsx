@@ -41,7 +41,9 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
+import { getEstadoNombre } from "@/lib/estados";
 import { ProductAutocompleteInput } from "@/components/producto-autocomplete-input";
+import { CreateTenderDialog } from "@/components/licitaciones/create-tender-dialog";
 import { EditableBudgetTable } from "@/components/licitaciones/editable-budget-table";
 import { DeliveriesService, EstadosService, TendersService, TiposGastoService, TiposService } from "@/services/api";
 import type {
@@ -259,6 +261,7 @@ export default function LicitacionDetallePage() {
   const [motivoDescarte, setMotivoDescarte] = React.useState("");
   const [motivoPerdida, setMotivoPerdida] = React.useState("");
   const [competidorGanador, setCompetidorGanador] = React.useState("");
+  const [openCreateContratoBasado, setOpenCreateContratoBasado] = React.useState(false);
 
   const cabeceraForm = useForm<CabeceraFormValues>({
     resolver: zodResolver(cabeceraFormSchema),
@@ -388,6 +391,9 @@ export default function LicitacionDetallePage() {
 
   const isLocked = showContent && lic ? ESTADOS_PRESUPUESTO_BLOQUEADO.includes(lic.id_estado) : false;
   const showEjecucionRemainingTabs = showContent && lic ? lic.id_estado >= ID_ESTADO_ADJUDICADA : false;
+  const isAmSda = showContent && lic && (lic.tipo_procedimiento === "ACUERDO_MARCO" || lic.tipo_procedimiento === "SDA");
+  /** Contratos basados y específicos: no tienen lotes; solo una tabla de presupuesto. */
+  const isContratoDerivado = showContent && lic && (lic.id_licitacion_padre != null || lic.tipo_procedimiento === "CONTRATO_BASADO" || lic.tipo_procedimiento === "ESPECIFICO_SDA");
   const puedeMarcarLotesGanados = showContent && lic ? lic.id_estado >= ID_ESTADO_ADJUDICADA : false;
   const isRechazada = showContent && lic && (lic.id_estado === ID_ESTADO_DESCARTADA || lic.id_estado === ID_ESTADO_NO_ADJUDICADA);
   const motivoRechazo = React.useMemo(() => {
@@ -426,8 +432,11 @@ export default function LicitacionDetallePage() {
         payload.competidor_ganador = competidorGanador.trim();
       }
       if (nuevoEstadoId === ID_ESTADO_ADJUDICADA) {
-        // Importe = presupuesto presentado; fecha = la definida en la licitación (al crearla/editar cabecera)
-        const importe = Math.round(ofertado * 100) / 100;
+        // AM/SDA: no tienen partidas; usamos pres_maximo (o 1) como importe simbólico
+        const isAmOrSda = lic.tipo_procedimiento === "ACUERDO_MARCO" || lic.tipo_procedimiento === "SDA";
+        const importe = isAmOrSda
+          ? Math.max(1, Math.round((Number(lic.pres_maximo) || 0) * 100) / 100)
+          : Math.round(ofertado * 100) / 100;
         if (importe <= 0) {
           setErrorEstado("El presupuesto presentado debe ser > 0 para marcar como adjudicada.");
           return;
@@ -719,7 +728,7 @@ export default function LicitacionDetallePage() {
                 : "—"}
             </span>
             <Badge variant="info" className="min-w-[130px] justify-center">
-              {estados.find((e) => e.id_estado === lic.id_estado)?.nombre_estado ?? `Estado ${lic.id_estado}`}
+              {getEstadoNombre(lic.id_estado, estados)}
             </Badge>
             {transicionesDisponibles.length > 0 && (
               <Dialog
@@ -964,15 +973,45 @@ export default function LicitacionDetallePage() {
               </DialogContent>
             </Dialog>
 
-            <Link href="/licitaciones">
-              <Button variant="outline" className="gap-2">
-                <ArrowLeft className="h-4 w-4" />
-                Volver al listado
-              </Button>
-            </Link>
+            {lic.licitacion_padre ? (
+              <Link href={`/licitaciones/${lic.licitacion_padre.id_licitacion}`}>
+                <Button variant="outline" className="gap-2">
+                  <ArrowLeft className="h-4 w-4" />
+                  Volver al AM/SDA
+                </Button>
+              </Link>
+            ) : (
+              <Link href="/licitaciones">
+                <Button variant="outline" className="gap-2">
+                  <ArrowLeft className="h-4 w-4" />
+                  Volver al listado
+                </Button>
+              </Link>
+            )}
           </div>
         </div>
       </header>
+
+      {lic.licitacion_padre && (
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+          <p className="text-sm text-slate-700">
+            Contrato derivado de:{" "}
+            <Link
+              href={`/licitaciones/${lic.licitacion_padre.id_licitacion}`}
+              className="font-semibold text-slate-900 hover:underline"
+            >
+              {lic.licitacion_padre.nombre ?? `#${lic.licitacion_padre.id_licitacion}`}
+              {lic.licitacion_padre.numero_expediente ? ` (${lic.licitacion_padre.numero_expediente})` : ""}
+            </Link>
+          </p>
+          <Link href={`/licitaciones/${lic.licitacion_padre.id_licitacion}`}>
+            <Button variant="outline" size="sm" className="mt-2 gap-2">
+              <ArrowLeft className="h-3.5 w-3.5" />
+              Volver al AM/SDA
+            </Button>
+          </Link>
+        </div>
+      )}
 
       {motivoRechazo && (
         <div className="rounded-lg border border-red-200 bg-red-50 p-4">
@@ -1038,11 +1077,22 @@ export default function LicitacionDetallePage() {
         </Card>
       </section>
 
+      {isAmSda && (
+        <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+          Este es un Acuerdo Marco / SDA. La gestión de presupuesto, entregas y remaining se hace en cada contrato derivado.
+        </div>
+      )}
+
       <section className="mt-2">
-        <Tabs defaultValue="presupuesto">
+        <Tabs defaultValue={isAmSda ? "contratos-derivados" : "presupuesto"}>
           <TabsList>
-            <TabsTrigger value="presupuesto">Presupuesto (Oferta)</TabsTrigger>
-            {showEjecucionRemainingTabs && (
+            {!isAmSda && (
+              <TabsTrigger value="presupuesto">Presupuesto (Oferta)</TabsTrigger>
+            )}
+            {isAmSda && (
+              <TabsTrigger value="contratos-derivados">Contratos Derivados</TabsTrigger>
+            )}
+            {showEjecucionRemainingTabs && !isAmSda && (
               <>
                 <TabsTrigger value="ejecucion">Entregas (Real / Albaranes)</TabsTrigger>
                 <TabsTrigger value="remaining">Remaining</TabsTrigger>
@@ -1050,10 +1100,22 @@ export default function LicitacionDetallePage() {
             )}
           </TabsList>
 
+          {!isAmSda && (
           <TabsContent value="presupuesto" className="flex min-h-[60vh] flex-col">
-            {lic && (
+            {lic ? (
               <>
-                {(!lotesConfig || lotesConfig.length === 0) ? (
+                {isContratoDerivado ? (
+                  <div className="min-h-0 flex-1">
+                    <p className="mb-3 text-sm text-slate-600">
+                      En contratos basados y específicos no se usan lotes; todas las partidas en una sola tabla.
+                    </p>
+                    <EditableBudgetTable
+                      lic={lic}
+                      onPartidaAdded={refetchLicitacion}
+                      isLocked={isLocked}
+                    />
+                  </div>
+                ) : (!lotesConfig || lotesConfig.length === 0) ? (
                   <div className="flex flex-col gap-4">
                     {!showLotesConfigPanel ? (
                       <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
@@ -1185,10 +1247,72 @@ export default function LicitacionDetallePage() {
                   </div>
                 )}
               </>
-            )}
+            ) : null}
           </TabsContent>
+          )}
 
-          {showEjecucionRemainingTabs && (
+          {isAmSda && (
+            <TabsContent value="contratos-derivados" className="flex min-h-[40vh] flex-col">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                <p className="text-sm text-slate-600">
+                  Contratos basados derivados de este Acuerdo Marco / SDA.
+                </p>
+                <Button
+                  size="sm"
+                  onClick={() => setOpenCreateContratoBasado(true)}
+                >
+                  Generar Contrato Basado
+                </Button>
+              </div>
+              {(lic.contratos_derivados ?? []).length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  Aún no hay contratos derivados. Usa &quot;Generar Contrato Basado&quot; para crear uno.
+                </p>
+              ) : (
+                <div className="overflow-x-auto rounded-md border border-slate-200">
+                  <table className="min-w-full text-left text-sm">
+                    <thead>
+                      <tr className="border-b border-slate-200 bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                        <th className="py-2 pr-4">ID</th>
+                        <th className="py-2 pr-4">Expediente</th>
+                        <th className="py-2 pr-4">Nombre</th>
+                        <th className="py-2 pr-4">Estado</th>
+                        <th className="py-2 pr-4 text-right">Presupuesto (€)</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(lic.contratos_derivados ?? []).map((c) => (
+                        <tr
+                          key={c.id_licitacion}
+                          className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
+                        >
+                          <td className="py-2 pr-4 font-medium text-slate-700">
+                            <Link href={`/licitaciones/${c.id_licitacion}`} className="hover:underline">
+                              #{c.id_licitacion}
+                            </Link>
+                          </td>
+                          <td className="py-2 pr-4 text-slate-600">{c.numero_expediente ?? "—"}</td>
+                          <td className="py-2 pr-4">
+                            <Link href={`/licitaciones/${c.id_licitacion}`} className="font-medium text-slate-900 hover:underline">
+                              {c.nombre}
+                            </Link>
+                          </td>
+                          <td className="py-2 pr-4">
+                            {getEstadoNombre(c.id_estado, estados)}
+                          </td>
+                          <td className="py-2 pr-4 text-right font-medium text-slate-900">
+                            {formatEuro(Number(c.pres_maximo) || 0)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </TabsContent>
+          )}
+
+          {showEjecucionRemainingTabs && !isAmSda && (
           <TabsContent value="ejecucion">
             <div className="mb-3 flex items-center justify-between gap-2">
               <p className="text-sm text-slate-600">
@@ -1396,7 +1520,7 @@ export default function LicitacionDetallePage() {
                                     <option value="">Selecciona partida…</option>
                                     {(lic?.partidas ?? []).map((p) => (
                                       <option key={p.id_detalle} value={p.id_detalle}>
-                                        {[p.lote ?? "General", p.product_nombre].filter(Boolean).join(" – ")}
+                                        {isContratoDerivado ? (p.product_nombre ?? "—") : [p.lote ?? "General", p.product_nombre].filter(Boolean).join(" – ")}
                                       </option>
                                     ))}
                                   </select>
@@ -1572,7 +1696,7 @@ export default function LicitacionDetallePage() {
           </TabsContent>
           )}
 
-          {showEjecucionRemainingTabs && (
+          {showEjecucionRemainingTabs && !isAmSda && (
           <TabsContent value="remaining">
             <p className="mb-3 text-sm text-slate-600">
               Comparativa entre unidades presupuestadas y ejecutadas por partida.
@@ -1582,7 +1706,7 @@ export default function LicitacionDetallePage() {
                 <table className="min-w-full text-left text-sm">
                   <thead>
                     <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                      <th className="py-2 pr-3">Lote</th>
+                      {!isContratoDerivado && <th className="py-2 pr-3">Lote</th>}
                       <th className="py-2 pr-3">Partida</th>
                       <th className="py-2 pr-3 text-right">Ud. Presu.</th>
                       <th className="py-2 pr-3 text-right">Ud. Real</th>
@@ -1592,7 +1716,7 @@ export default function LicitacionDetallePage() {
                   </thead>
                   <tbody>
                     {itemsPresupuestoAgregado
-                      .filter((item) => lotesConfig.length === 0 || lotesGanados.has(item.lote))
+                      .filter((item) => isContratoDerivado || lotesConfig.length === 0 || lotesGanados.has(item.lote))
                       .map((item) => {
                       const keyPartida = `${item.lote}|${item.descripcion}`;
                       const ejecutado = ejecutadoPorPartida[keyPartida] ?? 0;
@@ -1606,7 +1730,9 @@ export default function LicitacionDetallePage() {
                           key={`${item.lote}-${item.descripcion}`}
                           className="border-b border-slate-100 last:border-0"
                         >
-                          <td className="py-2 pr-3 text-xs text-slate-500">{item.lote}</td>
+                          {!isContratoDerivado && (
+                            <td className="py-2 pr-3 text-xs text-slate-500">{item.lote}</td>
+                          )}
                           <td className="max-w-xs py-2 pr-3 text-sm text-slate-900">
                             {item.descripcion}
                           </td>
@@ -1641,6 +1767,18 @@ export default function LicitacionDetallePage() {
           )}
         </Tabs>
       </section>
+
+      {isAmSda && (
+        <CreateTenderDialog
+          open={openCreateContratoBasado}
+          onOpenChange={setOpenCreateContratoBasado}
+          defaultIdLicitacionPadre={id}
+          onSuccess={() => {
+            refetchLicitacion();
+            setOpenCreateContratoBasado(false);
+          }}
+        />
+      )}
     </div>
   );
 }

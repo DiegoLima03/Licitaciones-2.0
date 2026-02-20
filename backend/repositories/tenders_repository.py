@@ -5,9 +5,11 @@ Todas las operaciones están scoped por organization_id vía BaseTenantRepositor
 Métodos específicos de dominio: get_tender_with_details, get_active_budget_total.
 """
 
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List
 
+from backend.models import EstadoLicitacion
 from backend.repositories.base_repository import BaseTenantRepository
 
 
@@ -38,26 +40,86 @@ class TendersRepository(BaseTenantRepository):
         nombre: str | None = None,
         pais: str | None = None,
     ) -> List[Dict[str, Any]]:
-        """Lista licitaciones con filtros opcionales (orden id_licitacion desc)."""
-        query = (
+        """Lista licitaciones raíz y, excepcionalmente, derivados en análisis con
+        fecha de presentación en ≤5 días. Filtros opcionales; orden id_licitacion desc."""
+        query_raiz = (
             self._client.table(self.TABLE_LICITACIONES)
             .select("*")
             .eq("organization_id", self._organization_id)
+            .is_("id_licitacion_padre", "null")
             .order(self.PK_LICITACION, desc=True)
         )
         if estado_id is not None:
-            query = query.eq("id_estado", estado_id)
+            query_raiz = query_raiz.eq("id_estado", estado_id)
         if nombre and nombre.strip():
-            query = query.ilike("nombre", f"%{nombre.strip()}%")
+            query_raiz = query_raiz.ilike("nombre", f"%{nombre.strip()}%")
         if pais and pais.strip():
-            query = query.eq("pais", pais.strip())
-        response = query.execute()
+            query_raiz = query_raiz.eq("pais", pais.strip())
+        response_raiz = query_raiz.execute()
+        raiz_list = list(response_raiz.data or [])
+
+        # Excepción: incluir derivados (hijos AM/SDA) solo si están en análisis y presentación en ≤5 días
+        derivados_urgentes: List[Dict[str, Any]] = []
+        if estado_id is None or estado_id == EstadoLicitacion.EN_ANALISIS.value:
+            today = date.today()
+            end = today + timedelta(days=5)
+            start_iso = today.isoformat()
+            end_iso = end.isoformat()
+            query_deriv = (
+                self._client.table(self.TABLE_LICITACIONES)
+                .select("*")
+                .eq("organization_id", self._organization_id)
+                .not_.is_("id_licitacion_padre", "null")
+                .eq("id_estado", EstadoLicitacion.EN_ANALISIS.value)
+                .gte("fecha_presentacion", start_iso)
+                .lte("fecha_presentacion", end_iso)
+                .order(self.PK_LICITACION, desc=True)
+                .execute()
+            )
+            derivados_urgentes = list(query_deriv.data or [])
+            # Filtrar por nombre/pais si aplican
+            if nombre and nombre.strip():
+                n = nombre.strip().lower()
+                derivados_urgentes = [d for d in derivados_urgentes if n in (d.get("nombre") or "").lower()]
+            if pais and pais.strip():
+                p = pais.strip()
+                derivados_urgentes = [d for d in derivados_urgentes if d.get("pais") == p]
+            # Restringir a fecha realmente en ventana (por si el campo es timestamp)
+            def _date_in_window(row: Dict[str, Any]) -> bool:
+                fp = row.get("fecha_presentacion")
+                if not fp:
+                    return False
+                try:
+                    d = date.fromisoformat(str(fp).split("T")[0])
+                    return today <= d <= end
+                except (ValueError, TypeError):
+                    return False
+            derivados_urgentes = [d for d in derivados_urgentes if _date_in_window(d)]
+
+        # Evitar duplicados por id y ordenar por id desc
+        seen = {r["id_licitacion"] for r in raiz_list}
+        extra = [d for d in derivados_urgentes if d["id_licitacion"] not in seen]
+        merged = raiz_list + extra
+        merged.sort(key=lambda x: x[self.PK_LICITACION], reverse=True)
+        return merged
+
+    def get_contratos_derivados(self, id_licitacion_padre: int) -> List[Dict[str, Any]]:
+        """Licitaciones hijo (CONTRATO_BASADO) cuyo id_licitacion_padre es el dado."""
+        response = (
+            self._client.table(self.TABLE_LICITACIONES)
+            .select("*")
+            .eq("organization_id", self._organization_id)
+            .eq("id_licitacion_padre", id_licitacion_padre)
+            .order(self.PK_LICITACION, desc=True)
+            .execute()
+        )
         return list(response.data or [])
 
     def get_tender_with_details(self, tender_id: int) -> Dict[str, Any] | None:
         """
         Obtiene una licitación por ID con sus partidas (tbl_licitaciones_detalle)
         y nombres de producto. Solo si pertenece a la organización.
+        Si es AM o SDA, incluye contratos_derivados (licitaciones con id_licitacion_padre == tender_id).
         """
         licitacion = self.get_by_id(tender_id)
         if not licitacion:
@@ -80,7 +142,25 @@ class TendersRepository(BaseTenantRepository):
                 "product_nombre": prod.get("nombre"),
                 "nombre_proveedor": (prod.get("nombre_proveedor") or "").strip() or None,
             })
-        return {**licitacion, "partidas": partidas}
+        out: Dict[str, Any] = {**licitacion, "partidas": partidas}
+        tipo_proc = licitacion.get("tipo_procedimiento")
+        tipo_str = (tipo_proc.upper() if isinstance(tipo_proc, str) else "") or ""
+        if tipo_str in ("ACUERDO_MARCO", "SDA"):
+            out["contratos_derivados"] = self.get_contratos_derivados(tender_id)
+        else:
+            out["contratos_derivados"] = []
+        # Para contratos derivados, incluir datos del padre (acceso desde el padre).
+        id_padre = licitacion.get("id_licitacion_padre")
+        if id_padre is not None:
+            padre = self.get_by_id(int(id_padre))
+            out["licitacion_padre"] = (
+                {"id_licitacion": padre["id_licitacion"], "nombre": padre.get("nombre"), "numero_expediente": padre.get("numero_expediente")}
+                if padre
+                else None
+            )
+        else:
+            out["licitacion_padre"] = None
+        return out
 
     def get_active_budget_total(self, tender_id: int) -> Decimal:
         """
@@ -189,6 +269,22 @@ class TendersRepository(BaseTenantRepository):
         )
         if response.data is not None and len(response.data) == 0:
             raise ValueError("Partida no encontrada.")
+
+    def get_parent_tenders(self) -> List[Dict[str, Any]]:
+        """
+        Licitaciones que pueden ser padre (AM o SDA) y están adjudicadas.
+        Para que el frontend las liste al crear un contrato BASADO_AM / ESPECIFICO_SDA.
+        """
+        response = (
+            self._client.table(self.TABLE_LICITACIONES)
+            .select("*")
+            .eq("organization_id", self._organization_id)
+            .in_("tipo_procedimiento", ["ACUERDO_MARCO", "SDA"])
+            .eq("id_estado", EstadoLicitacion.ADJUDICADA.value)
+            .order(self.PK_LICITACION, desc=True)
+            .execute()
+        )
+        return list(response.data or [])
 
     def update_tender_with_state_check(
         self,

@@ -12,6 +12,7 @@ from backend.models import (
     ProductSearchItem,
     TenderCreate,
     TenderUpdate,
+    TipoProcedimiento,
     UserLogin,
     UserResponse,
 )
@@ -29,6 +30,7 @@ __all__ = [
     "ProductSearchItem",
     "TenderCreate",
     "TenderUpdate",
+    "TipoProcedimiento",
     "UserLogin",
     "UserResponse",
 ]

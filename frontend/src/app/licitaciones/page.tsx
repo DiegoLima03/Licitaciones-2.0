@@ -15,22 +15,22 @@ import {
 import { CreateTenderDialog } from "@/components/licitaciones/create-tender-dialog";
 import { PAIS_FLAG_SRC, PAIS_LABEL, PAISES_OPCIONES } from "@/lib/paises";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ESTADO_NOMBRE_BY_ID_FALLBACK, getEstadoColorClass } from "@/lib/estados";
 import { EstadosService, TendersService } from "@/services/api";
-import type { Estado, PaisLicitacion, Tender } from "@/types/api";
+import { Badge } from "@/components/ui/badge";
+import type { Estado, PaisLicitacion, Tender, TipoProcedimiento } from "@/types/api";
 
-const ESTADO_COLOR_CLASSES = [
-  "bg-sky-100 text-sky-800 border-sky-200",      // info
-  "bg-amber-100 text-amber-800 border-amber-200",  // warning
-  "bg-emerald-100 text-emerald-800 border-emerald-200", // success
-  "bg-rose-100 text-rose-800 border-rose-200",   // destructive
-  "bg-slate-100 text-slate-800 border-slate-200", // default
-  "bg-violet-100 text-violet-800 border-violet-200", // extra
-] as const;
-
-function getEstadoColorClass(idEstado: number, estados: Estado[]): string {
-  const idx = estados.findIndex((e) => e.id_estado === idEstado);
-  if (idx >= 0 && idx < ESTADO_COLOR_CLASSES.length) return ESTADO_COLOR_CLASSES[idx];
-  return ESTADO_COLOR_CLASSES[4];
+/** Mapa id_estado -> nombre desde tbl_estados; usa fallback si la API no devolvió datos. */
+function buildEstadoNombreById(estados: Estado[]): Map<number, string> {
+  const map = new Map<number, string>();
+  estados.forEach((e) => {
+    const id = Number(e.id_estado);
+    if (!Number.isNaN(id) && e.nombre_estado) map.set(id, e.nombre_estado);
+  });
+  if (map.size === 0) {
+    Object.entries(ESTADO_NOMBRE_BY_ID_FALLBACK).forEach(([id, nombre]) => map.set(Number(id), nombre));
+  }
+  return map;
 }
 
 function formatEuro(value: number) {
@@ -64,6 +64,28 @@ function getUrgencyInfo(lic: Tender): { urgent: boolean; deadline: string | null
 function formatFechaCorta(isoDate: string): string {
   const [y, m, d] = isoDate.split("-");
   return `${d}/${m}/${y}`;
+}
+
+/** Etiquetas cortas para el badge en el listado (Licitación, AM, SDA, Basado). */
+const TIPO_BADGE_LABEL: Record<string, string> = {
+  ORDINARIO: "Licitación",
+  ACUERDO_MARCO: "AM",
+  SDA: "SDA",
+  CONTRATO_BASADO: "Basado",
+};
+
+function getTipoProcedimientoLabel(tipo: TipoProcedimiento | null | undefined): string {
+  if (!tipo) return "Licitación";
+  return TIPO_BADGE_LABEL[tipo] ?? tipo;
+}
+
+function getTipoBadgeVariant(
+  tipo: TipoProcedimiento | null | undefined
+): "default" | "success" | "warning" | "info" | "destructive" | "outline" {
+  if (!tipo || tipo === "ORDINARIO") return "outline";
+  if (tipo === "ACUERDO_MARCO" || tipo === "SDA") return "info";
+  if (tipo === "CONTRATO_BASADO") return "success";
+  return "outline";
 }
 
 export default function LicitacionesPage() {
@@ -105,6 +127,18 @@ export default function LicitacionesPage() {
     fetchLicitaciones();
   }, [fetchLicitaciones]);
 
+  /** Nombres de estados desde tbl_estados (id_estado -> nombre_estado) para la tabla. */
+  const estadoNombreById = React.useMemo(() => buildEstadoNombreById(estados), [estados]);
+
+  /** Nombres de padres (raíz) para mostrar "Cuelga de" en derivados que salen por excepción (urgentes). */
+  const parentNameById = React.useMemo(() => {
+    const map = new Map<number, string>();
+    data.filter((lic) => lic.id_licitacion_padre == null).forEach((lic) => {
+      map.set(lic.id_licitacion, lic.nombre ?? `#${lic.id_licitacion}`);
+    });
+    return map;
+  }, [data]);
+
   const sortedData = React.useMemo(() => {
     if (!data || data.length === 0) return [];
     return [...data].sort((a, b) => {
@@ -139,7 +173,8 @@ export default function LicitacionesPage() {
           <CardTitle className="text-sm font-medium text-slate-800 shrink-0">
             Listado de licitaciones
           </CardTitle>
-          <div className="flex flex-wrap items-center justify-end gap-3 ml-auto">
+          <div className="flex flex-col items-end gap-3 ml-auto">
+            <div className="flex items-center gap-3">
             <Popover open={paisDropdownOpen} onOpenChange={setPaisDropdownOpen}>
               <PopoverTrigger asChild>
                 <button
@@ -220,7 +255,8 @@ export default function LicitacionesPage() {
                 </option>
               ))}
             </select>
-            <div className="relative w-full max-w-xs">
+            </div>
+            <div className="relative w-full min-w-[320px] max-w-md">
               <Search className="pointer-events-none absolute left-2.5 top-2.5 h-4 w-4 text-slate-400" />
               <input
                 type="text"
@@ -244,17 +280,18 @@ export default function LicitacionesPage() {
             <table className="min-w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-xs uppercase tracking-wide text-slate-500">
-                  <th className="py-2 pr-4">Expediente</th>
-                  <th className="py-2 pr-4">Nombre proyecto</th>
-                  <th className="py-2 pr-4">F. Presentación</th>
-                  <th className="py-2 pr-4">Estado</th>
-                  <th className="py-2 pr-4 text-right">Presupuesto (€)</th>
+                  <th className="py-2 pr-4 text-center">Expediente</th>
+                  <th className="py-2 pr-4 text-center">Nombre proyecto</th>
+                  <th className="py-2 pr-4 text-center">Procedimiento</th>
+                  <th className="py-2 pr-4 text-center">F. Presentación</th>
+                  <th className="py-2 pr-4 text-center">Estado</th>
+                  <th className="py-2 pr-4 text-center">Presupuesto (€)</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedData.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-6 text-center text-sm text-slate-500">
+                    <td colSpan={6} className="py-6 text-center text-sm text-slate-500">
                       No hay licitaciones. Crea una o ajusta el filtro.
                     </td>
                   </tr>
@@ -282,11 +319,32 @@ export default function LicitacionesPage() {
                           {lic.nombre}
                         </Link>
                       </td>
-                      <td className="py-2 pr-4">
+                      <td className="py-2 pr-4 text-center">
+                        <div className="flex flex-col items-center gap-1">
+                          <Badge
+                            variant={getTipoBadgeVariant(lic.tipo_procedimiento)}
+                            className={`w-fit justify-center text-xs ${(!lic.tipo_procedimiento || lic.tipo_procedimiento === "ORDINARIO") ? "bg-slate-100 text-slate-700 border-slate-200" : ""}`}
+                          >
+                            {getTipoProcedimientoLabel(lic.tipo_procedimiento)}
+                          </Badge>
+                          {lic.id_licitacion_padre != null && (
+                            <span className="text-center text-xs text-slate-500">
+                              Cuelga de:{" "}
+                              <Link
+                                href={`/licitaciones/${lic.id_licitacion_padre}`}
+                                className="font-medium text-slate-700 hover:underline"
+                              >
+                                {parentNameById.get(lic.id_licitacion_padre) ?? `#${lic.id_licitacion_padre}`}
+                              </Link>
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="py-2 pr-4 text-center">
                         {lic.fecha_presentacion ? (
                           urgent && lic.fecha_presentacion ? (
                             <span
-                              className="inline-flex items-center gap-1 rounded border border-red-200 bg-red-100 px-2 py-1 text-xs font-medium text-red-700"
+                              className="inline-flex items-center justify-center gap-1 rounded border border-red-200 bg-red-100 px-2 py-1 text-xs font-medium text-red-700"
                               title="¡Menos de 5 días para presentación!"
                             >
                               <AlertTriangle
@@ -306,10 +364,9 @@ export default function LicitacionesPage() {
                       </td>
                       <td className="py-2 pr-4">
                         <span
-                          className={`inline-block min-w-[130px] rounded-md border px-2.5 py-1 text-center text-sm font-medium ${getEstadoColorClass(lic.id_estado, estados)}`}
+                          className={`inline-block min-w-[130px] rounded-md border px-2.5 py-1 text-center text-sm font-medium ${getEstadoColorClass(lic.id_estado)}`}
                         >
-                          {estados.find((e) => e.id_estado === lic.id_estado)?.nombre_estado ??
-                            `Estado ${lic.id_estado}`}
+                          {estadoNombreById.get(Number(lic.id_estado)) ?? ESTADO_NOMBRE_BY_ID_FALLBACK[Number(lic.id_estado)] ?? `Estado ${lic.id_estado}`}
                         </span>
                       </td>
                       <td className="py-2 pr-4 text-right text-sm font-semibold text-slate-900">
