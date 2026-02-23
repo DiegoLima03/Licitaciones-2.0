@@ -15,7 +15,7 @@ const DEVIATION_DEBOUNCE_MS = 500; // Debounce para comprobación de desviación
 const inputCellClass =
   "w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded";
 
-// --- COMPONENTE DE AUTOCOMPLETADO (Sin cambios) ---
+// --- COMPONENTE DE AUTOCOMPLETADO ---
 function ProductCellAutocomplete({
   value,
   onSelect,
@@ -23,6 +23,8 @@ function ProductCellAutocomplete({
   placeholder,
   onKeyDown,
   disabled,
+  freeTextDisplay,
+  onAcceptFreeText,
 }: {
   value: { id: number; nombre: string } | null;
   onSelect: (id: number, nombre: string) => void;
@@ -30,6 +32,8 @@ function ProductCellAutocomplete({
   placeholder?: string;
   onKeyDown?: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   disabled?: boolean;
+  freeTextDisplay?: string;
+  onAcceptFreeText?: (text: string) => void;
 }) {
   const [query, setQuery] = React.useState("");
   const [options, setOptions] = React.useState<ProductoSearchResult[]>([]);
@@ -41,11 +45,13 @@ function ProductCellAutocomplete({
 
   React.useEffect(() => {
     if (value && !open) {
-       // Sincronización silenciosa
+      // Sincronización silenciosa
     }
   }, [value, open]);
 
-  const displayValue = (open ? query : (value ? value.nombre : query)) ?? "";
+  // Si está abierto usa el query; si hay valor oficial, su nombre;
+  // si no, texto libre (freeTextDisplay) o el query actual.
+  const displayValue = open ? query : (value ? value.nombre : (freeTextDisplay ?? query));
 
   React.useEffect(() => {
     if (!query.trim()) {
@@ -108,6 +114,10 @@ function ProductCellAutocomplete({
           setQuery(v);
           if (v.trim() === "" && value && onClear) {
             onClear();
+          }
+          // Avisar al padre del texto libre mientras se escribe, si no hay producto oficial.
+          if (!value && onAcceptFreeText) {
+            onAcceptFreeText(v);
           }
           if (!open) setOpen(true);
         }}
@@ -363,9 +373,11 @@ export function EditableBudgetTable({
       const toClear: number[] = [];
       const toFetch: { index: number; nombre: string; pvu: number }[] = [];
       partidas.forEach((row, index) => {
+        const hasProduct = row.id_producto != null;
         const nombre = (row.product_nombre ?? "").trim();
         const pvuVal = Number(row.pvu);
-        if (!nombre || pvuVal <= 0) toClear.push(index);
+        // Solo tiene sentido comprobar desviación para productos del catálogo con precio informado
+        if (!hasProduct || !nombre || pvuVal <= 0) toClear.push(index);
         else toFetch.push({ index, nombre, pvu: pvuVal });
       });
       setDeviationByIndex((prev) => {
@@ -421,12 +433,13 @@ export function EditableBudgetTable({
     const toAdd: number[] = [];
     partidas.forEach((row, index) => {
       if (row.id_detalle && row.isDirty) toUpdate.push(index);
-      else if (
-        !row.id_detalle &&
-        (row.id_producto != null || ((row.product_nombre ?? "").trim() !== "")) &&
-        (Number(row.unidades) > 0 || Number(row.pvu) > 0 || Number(row.pcu) > 0)
-      )
-        toAdd.push(index);
+      else if (!row.id_detalle) {
+        const hasProduct = row.id_producto != null;
+        const hasFreeText = ((row.product_nombre ?? "").trim() !== "");
+        const hasAmounts = Number(row.unidades) > 0 || Number(row.pvu) > 0 || Number(row.pcu) > 0;
+        // Incluir si hay producto con cantidades, o si hay solo texto libre (partida sin catálogo)
+        if ((hasProduct && hasAmounts) || (hasFreeText && !hasProduct)) toAdd.push(index);
+      }
     });
     if (toUpdate.length === 0 && toAdd.length === 0) return;
 

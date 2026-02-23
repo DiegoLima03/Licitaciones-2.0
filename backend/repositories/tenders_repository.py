@@ -137,9 +137,11 @@ class TendersRepository(BaseTenantRepository):
         partidas: List[Dict[str, Any]] = []
         for p in raw_list:
             prod = p.get("tbl_productos") or {}
+            # Si no hay producto del catálogo, usar nombre_producto_libre para la visualización
+            product_nombre = prod.get("nombre") if prod else (p.get("nombre_producto_libre") or None)
             partidas.append({
                 **{k: v for k, v in p.items() if k != "tbl_productos"},
-                "product_nombre": prod.get("nombre"),
+                "product_nombre": product_nombre,
                 "nombre_proveedor": (prod.get("nombre_proveedor") or "").strip() or None,
             })
         out: Dict[str, Any] = {**licitacion, "partidas": partidas}

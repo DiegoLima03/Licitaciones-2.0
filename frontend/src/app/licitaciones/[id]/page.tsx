@@ -47,6 +47,7 @@ import { CostDeviationKPI } from "@/components/licitaciones/CostDeviationKPI";
 import { CreateTenderDialog } from "@/components/licitaciones/create-tender-dialog";
 import { EditableBudgetTable } from "@/components/licitaciones/editable-budget-table";
 import { ScheduledDeliveriesAccordion } from "@/components/licitaciones/ScheduledDeliveriesAccordion";
+import { FixMissingProductsModal } from "@/components/licitaciones/fix-missing-products-modal";
 import { DeliveriesService, EstadosService, TendersService, TiposGastoService, TiposService } from "@/services/api";
 import type {
   EntregaLinea,
@@ -128,29 +129,52 @@ const cabeceraFormSchema = z
     enlace_sharepoint: z.string().optional(),
   })
   .superRefine((data, ctx) => {
-    const raw = (data.fecha_presentacion ?? "").trim().split("T")[0];
-    if (!raw) return;
-    const [y, m, d] = raw.split("-").map(Number);
-    if (!y || !m || !d) return;
-    const fPresentacion = new Date(y, m - 1, d);
-    const hoy = new Date();
-    hoy.setHours(0, 0, 0, 0);
-    fPresentacion.setHours(0, 0, 0, 0);
-    if (fPresentacion > hoy) {
-      const enlace = (data.enlace_gober ?? "").trim();
-      if (!enlace) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "El enlace a Gober es obligatorio cuando la fecha de presentación es futura",
-          path: ["enlace_gober"],
-        });
-      } else if (!/^https?:\/\/.+/.test(enlace)) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Introduce una URL válida",
-          path: ["enlace_gober"],
-        });
+    // Validación enlace Gober
+    const rawPres = (data.fecha_presentacion ?? "").trim().split("T")[0];
+    if (rawPres) {
+      const [y, m, d] = rawPres.split("-").map(Number);
+      if (y && m && d) {
+        const fPresentacion = new Date(y, m - 1, d);
+        const hoy = new Date();
+        hoy.setHours(0, 0, 0, 0);
+        fPresentacion.setHours(0, 0, 0, 0);
+        if (fPresentacion > hoy) {
+          const enlace = (data.enlace_gober ?? "").trim();
+          if (!enlace) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "El enlace a Gober es obligatorio cuando la fecha de presentación es futura",
+              path: ["enlace_gober"],
+            });
+          } else if (!/^https?:\/\/.+/.test(enlace)) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              message: "Introduce una URL válida",
+              path: ["enlace_gober"],
+            });
+          }
+        }
       }
+    }
+
+    // Validación de coherencia de fechas
+    const dPres = data.fecha_presentacion ? new Date(data.fecha_presentacion) : null;
+    const dAdj = data.fecha_adjudicacion ? new Date(data.fecha_adjudicacion) : null;
+    const dFin = data.fecha_finalizacion ? new Date(data.fecha_finalizacion) : null;
+
+    if (dPres && dAdj && dAdj < dPres) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "La fecha de adjudicación no puede ser anterior a la de presentación",
+        path: ["fecha_adjudicacion"],
+      });
+    }
+    if (dAdj && dFin && dFin < dAdj) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "La fecha de finalización no puede ser anterior a la de adjudicación",
+        path: ["fecha_finalizacion"],
+      });
     }
   });
 type CabeceraFormValues = z.infer<typeof cabeceraFormSchema>;
@@ -232,12 +256,14 @@ export default function LicitacionDetallePage() {
   const [openAlbaran, setOpenAlbaran] = React.useState(false);
   type LineaTipo = "presupuestada" | "extraordinario";
 
-  const nuevaLineaVacia = () => ({
+  const nuevaLineaVacia = (tipo: LineaTipo = "presupuestada") => ({
+    tipo,
     id_producto: null as number | null,
     id_detalle: null as number | null,
     id_tipo_gasto: null as number | null,
     productNombre: "",
     tipoGastoNombre: "",
+    tipoGastoLibre: "",
     proveedor: "",
     cantidad: "",
     coste_unit: "",
@@ -248,7 +274,7 @@ export default function LicitacionDetallePage() {
     codigo_albaran: "",
     observaciones: "",
     tipoLinea: "presupuestada" as LineaTipo,
-    lineas: [nuevaLineaVacia(), nuevaLineaVacia(), nuevaLineaVacia()],
+    lineas: [nuevaLineaVacia("presupuestada"), nuevaLineaVacia("presupuestada"), nuevaLineaVacia("presupuestada")],
   });
 
   const tipoLinea = albaranForm.tipoLinea;
@@ -264,7 +290,13 @@ export default function LicitacionDetallePage() {
   const [motivoDescarte, setMotivoDescarte] = React.useState("");
   const [motivoPerdida, setMotivoPerdida] = React.useState("");
   const [competidorGanador, setCompetidorGanador] = React.useState("");
+  const [precioPerdida, setPrecioPerdida] = React.useState("");
+  const [ganadorLotesPerdidos, setGanadorLotesPerdidos] = React.useState("");
+  const [precioLotesPerdidos, setPrecioLotesPerdidos] = React.useState("");
+  const [motivoLotesPerdidos, setMotivoLotesPerdidos] = React.useState("");
   const [openCreateContratoBasado, setOpenCreateContratoBasado] = React.useState(false);
+  const [partidasInvalidas, setPartidasInvalidas] = React.useState<TenderPartida[]>([]);
+  const [showFixProductsModal, setShowFixProductsModal] = React.useState(false);
 
   const cabeceraForm = useForm<CabeceraFormValues>({
     resolver: zodResolver(cabeceraFormSchema),
@@ -398,8 +430,17 @@ export default function LicitacionDetallePage() {
   const showEjecucionRemainingTabs = showContent && lic ? lic.id_estado >= ID_ESTADO_ADJUDICADA : false;
   const isAmSda = showContent && lic && (lic.tipo_procedimiento === "ACUERDO_MARCO" || lic.tipo_procedimiento === "SDA");
   /** Contratos basados y específicos: no tienen lotes; solo una tabla de presupuesto. */
-  const isContratoDerivado = showContent && lic && (lic.id_licitacion_padre != null || lic.tipo_procedimiento === "CONTRATO_BASADO" || lic.tipo_procedimiento === "ESPECIFICO_SDA");
-  const puedeMarcarLotesGanados = showContent && lic ? lic.id_estado >= ID_ESTADO_ADJUDICADA : false;
+  const isContratoDerivado =
+    showContent &&
+    lic &&
+    (lic.id_licitacion_padre != null ||
+      lic.tipo_procedimiento === "CONTRATO_BASADO" ||
+      // Algunos expedientes vienen tipados como "ESPECIFICO_SDA" aunque no esté en el tipo TS.
+      (lic as any).tipo_procedimiento === "ESPECIFICO_SDA");
+  // A partir de PRESENTADA se puede marcar un lote como ganado/perdido,
+  // aunque el presupuesto ya esté bloqueado.
+  const puedeMarcarLotesGanados = showContent && lic ? lic.id_estado >= ID_ESTADO_PRESENTADA : false;
+  const mostrarToggleLoteGanado = showContent && lic ? lic.id_estado >= ID_ESTADO_PRESENTADA : false;
   const isRechazada = showContent && lic && (lic.id_estado === ID_ESTADO_DESCARTADA || lic.id_estado === ID_ESTADO_NO_ADJUDICADA);
   const motivoRechazo = React.useMemo(() => {
     if (!lic?.descripcion || !isRechazada) return null;
@@ -433,10 +474,46 @@ export default function LicitacionDetallePage() {
           setErrorEstado("El ganador es obligatorio.");
           return;
         }
-        payload.motivo_perdida = motivoPerdida.trim();
+        let motivoPerdidaTexto = motivoPerdida.trim();
+        if (!tieneLotes) {
+          if (
+            !precioPerdida.trim() ||
+            Number.isNaN(Number(precioPerdida)) ||
+            Number(precioPerdida) <= 0
+          ) {
+            setErrorEstado("Indica el importe de adjudicación (competidor) para la pérdida.");
+            return;
+          }
+          const importePerdida = Number(precioPerdida);
+          const trozoPrecio = `Precio adjudicación: ${importePerdida.toFixed(2)} €`;
+          motivoPerdidaTexto = motivoPerdidaTexto
+            ? `${motivoPerdidaTexto} | ${trozoPrecio}`
+            : trozoPrecio;
+        }
+        payload.motivo_perdida = motivoPerdidaTexto;
         payload.competidor_ganador = competidorGanador.trim();
       }
       if (nuevoEstadoId === ID_ESTADO_ADJUDICADA) {
+        // Validar localmente que no haya partidas activas sin producto de Belneo
+        const partidasSinProducto = (lic.partidas ?? []).filter(
+          (p) => (p.activo ?? true) && (p.id_producto == null)
+        );
+        if (partidasSinProducto.length > 0) {
+          setPartidasInvalidas(partidasSinProducto);
+          setShowFixProductsModal(true);
+          setSubmittingEstado(false);
+          return;
+        }
+        if (tieneLotesPerdidos) {
+          if (!ganadorLotesPerdidos.trim()) {
+            setErrorEstado("Indica quién ha ganado los lotes perdidos.");
+            return;
+          }
+          if (!precioLotesPerdidos.trim() || Number.isNaN(Number(precioLotesPerdidos)) || Number(precioLotesPerdidos) <= 0) {
+            setErrorEstado("Indica el precio de adjudicación de los lotes perdidos (importe > 0).");
+            return;
+          }
+        }
         // AM/SDA: no tienen partidas; usamos pres_maximo (o 1) como importe simbólico
         const isAmOrSda = lic.tipo_procedimiento === "ACUERDO_MARCO" || lic.tipo_procedimiento === "SDA";
         const importe = isAmOrSda
@@ -451,12 +528,34 @@ export default function LicitacionDetallePage() {
         payload.fecha_adjudicacion = fAdj || new Date().toISOString().slice(0, 10);
       }
       await TendersService.changeStatus(lic.id_licitacion, payload);
+
+      // Si hay lotes perdidos, anotamos la información en la descripción.
+      if (tieneLotesPerdidos) {
+        const partes: string[] = [];
+        partes.push(`Ganador: ${ganadorLotesPerdidos.trim()}`);
+        partes.push(`Precio: ${Number(precioLotesPerdidos).toFixed(2)} €`);
+        if (motivoLotesPerdidos.trim()) {
+          partes.push(`Motivo: ${motivoLotesPerdidos.trim()}`);
+        }
+        const descActual = lic.descripcion ?? "";
+        const extra = `[LOTES_PERDIDOS]: ${partes.join(" | ")}`;
+        const descripcion = descActual ? `${descActual}\n${extra}` : extra;
+        try {
+          await TendersService.update(lic.id_licitacion, { descripcion });
+        } catch {
+          // Si falla, no bloqueamos el cambio de estado; la nota simplemente no se guarda.
+        }
+      }
       refetchLicitacion();
       setOpenCambiarEstado(false);
       setNuevoEstadoId(null);
       setMotivoDescarte("");
       setMotivoPerdida("");
       setCompetidorGanador("");
+      setPrecioPerdida("");
+      setGanadorLotesPerdidos("");
+      setPrecioLotesPerdidos("");
+      setMotivoLotesPerdidos("");
     } catch (e) {
       setErrorEstado(e instanceof Error ? e.message : "Error al cambiar estado.");
     } finally {
@@ -482,30 +581,37 @@ export default function LicitacionDetallePage() {
     return trans;
   }, [lic?.id_estado]);
 
+  const tieneLotesPerdidos = React.useMemo(() => {
+    if (!lic?.lotes_config) return false;
+    const cfg = lic.lotes_config as LoteConfigItem[];
+    if (!Array.isArray(cfg) || cfg.length === 0) return false;
+    return cfg.some((l) => l && typeof l === "object" && (l as LoteConfigItem).ganado === false);
+  }, [lic?.lotes_config]);
+
   const itemsPresupuesto = showContent && lic ? mapPartidas(lic.partidas ?? []) : [];
   const itemsPresupuestoAgregado = agregarPartidas(itemsPresupuesto);
   const lotesConfig = (lic?.lotes_config ?? []) as LoteConfigItem[];
+  const tieneLotes = lotesConfig.length > 0;
   const lotesGanados = new Set(lotesConfig.filter((l) => l.ganado).map((l) => l.nombre));
   const activos = itemsPresupuestoAgregado.filter((i) => {
-    if (lotesConfig.length > 0) {
+    if (!i.activo) return false;
+    if (lotesConfig.length > 0 && lic && lic.id_estado >= ID_ESTADO_ADJUDICADA) {
       return lotesGanados.has(i.lote);
     }
-    return i.activo;
+    return true;
   });
   const presupuestoBase = showContent && lic ? Number(lic.pres_maximo) || 0 : 0;
   // Ofertado / coste previsto según tipo de licitación
   const isTipo2 = lic?.id_tipolicitacion === 2;
-  const partidasActivasTipo2 =
-    isTipo2 && lic
-      ? (lic.partidas ?? []).filter((p) => {
-          const lote = (p.lote ?? "General") as string;
-          const activo = p.activo ?? true;
-          if (lotesConfig.length > 0) {
-            return activo && lotesGanados.has(lote);
-          }
-          return activo;
-        })
-      : [];
+  const partidasActivasTipo2 = isTipo2 && lic
+    ? (lic.partidas ?? []).filter((p) => {
+        if (!p.activo) return false;
+        if (lotesConfig.length > 0 && lic.id_estado >= ID_ESTADO_ADJUDICADA) {
+          return lotesGanados.has(p.lote ?? "General");
+        }
+        return true;
+      })
+    : [];
 
   const ofertado = isTipo2
     ? (() => {
@@ -554,6 +660,14 @@ export default function LicitacionDetallePage() {
       }, 0);
   const beneficioPrevisto = ofertado - costePrevisto;
 
+  const importeAdjudicacionSugerido = React.useMemo(() => {
+    if (!lic) return 0;
+    const isAmOrSda = lic.tipo_procedimiento === "ACUERDO_MARCO" || lic.tipo_procedimiento === "SDA";
+    const base = isAmOrSda ? Number(lic.pres_maximo) || 0 : ofertado;
+    if (!base || base <= 0) return 0;
+    return Math.round(base * 100) / 100;
+  }, [lic, ofertado]);
+
   const handleGenerarLotes = async () => {
     if (!lic) return;
     setErrorLotes(null);
@@ -566,7 +680,8 @@ export default function LicitacionDetallePage() {
     try {
       const cfg: LoteConfigItem[] = Array.from({ length: n }, (_, i) => ({
         nombre: `Lote ${i + 1}`,
-        ganado: false,
+        // Por defecto consideramos todos los lotes como ganados; si alguno se pierde se marca manualmente.
+        ganado: true,
       }));
       const actualizado = await TendersService.update(lic.id_licitacion, { lotes_config: cfg });
       setLic((prev) => (prev ? { ...prev, ...actualizado, lotes_config: cfg } : null));
@@ -643,12 +758,25 @@ export default function LicitacionDetallePage() {
         setSubmittingAlbaran(false);
         return;
       }
+      const observacionesOtros = albaranForm.lineas
+        .map((l, i) => {
+          if (tipoLinea !== "extraordinario" || l.id_tipo_gasto == null) return null;
+          const tipo = tiposGasto.find((t) => t.id === l.id_tipo_gasto);
+          if ((tipo?.nombre ?? "").trim().toLowerCase() !== "otros") return null;
+          const libre = (l.tipoGastoLibre ?? "").trim();
+          if (!libre) return null;
+          return `Línea ${i + 1} (Otros): ${libre}`;
+        })
+        .filter(Boolean) as string[];
+      const observacionesFinal = [albaranForm.observaciones.trim(), ...observacionesOtros]
+        .filter(Boolean)
+        .join("\n") || undefined;
       await DeliveriesService.create({
         id_licitacion: lic.id_licitacion,
         cabecera: {
           fecha: albaranForm.fecha,
           codigo_albaran: albaranForm.codigo_albaran.trim() || "Sin código",
-          observaciones: albaranForm.observaciones.trim() || undefined,
+          observaciones: observacionesFinal,
         },
         lineas,
       });
@@ -659,7 +787,7 @@ export default function LicitacionDetallePage() {
         codigo_albaran: "",
         observaciones: "",
         tipoLinea: "presupuestada",
-        lineas: [nuevaLineaVacia(), nuevaLineaVacia(), nuevaLineaVacia()],
+        lineas: [nuevaLineaVacia("presupuestada"), nuevaLineaVacia("presupuestada"), nuevaLineaVacia("presupuestada")],
       });
     } catch (e) {
       setAlbaranError(e instanceof Error ? e.message : "Error al registrar albarán.");
@@ -698,6 +826,11 @@ export default function LicitacionDetallePage() {
         </p>
       </div>
     );
+  }
+
+  // En este punto, si no hay error ni loading, deberíamos tener una licitación cargada.
+  if (!lic) {
+    return null;
   }
 
   return (
@@ -818,6 +951,64 @@ export default function LicitacionDetallePage() {
                             value={competidorGanador}
                             onChange={(e) => setCompetidorGanador(e.target.value)}
                             placeholder="Empresa adjudicataria"
+                          />
+                        </div>
+                        {!tieneLotes && (
+                          <div>
+                            <label className="mb-1 block text-xs font-medium text-slate-600">
+                              Importe de adjudicación (competidor) € *
+                            </label>
+                            <Input
+                              type="number"
+                              min="0"
+                              step="0.01"
+                              value={precioPerdida}
+                              onChange={(e) => setPrecioPerdida(e.target.value)}
+                              placeholder={
+                                importeAdjudicacionSugerido > 0
+                                  ? importeAdjudicacionSugerido.toFixed(2)
+                                  : "Importe adjudicado"
+                              }
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {nuevoEstadoId === ID_ESTADO_ADJUDICADA && tieneLotesPerdidos && (
+                      <div className="space-y-2">
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Ganador de los lotes perdidos *
+                          </label>
+                          <Input
+                            value={ganadorLotesPerdidos}
+                            onChange={(e) => setGanadorLotesPerdidos(e.target.value)}
+                            placeholder="Empresa adjudicataria de los lotes perdidos"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Precio adjudicación lotes perdidos (€) *
+                          </label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={precioLotesPerdidos}
+                            onChange={(e) => setPrecioLotesPerdidos(e.target.value)}
+                            placeholder="Importe total adjudicado en los lotes perdidos"
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-xs font-medium text-slate-600">
+                            Motivo de los lotes perdidos (opcional)
+                          </label>
+                          <Textarea
+                            value={motivoLotesPerdidos}
+                            onChange={(e) => setMotivoLotesPerdidos(e.target.value)}
+                            placeholder="Indica qué lotes no se han ganado y, si quieres, por qué..."
+                            rows={3}
+                            className="w-full"
                           />
                         </div>
                       </div>
@@ -1240,15 +1431,23 @@ export default function LicitacionDetallePage() {
                           <CardTitle className="text-base font-semibold text-slate-800">
                             {loteItem.nombre}
                           </CardTitle>
-                          <div className="flex items-center gap-2">
-                            <span className="text-xs text-slate-500">Ganado</span>
-                            <Switch
-                              checked={loteItem.ganado}
-                              disabled={!puedeMarcarLotesGanados}
-                              title={puedeMarcarLotesGanados ? "Marcar si este lote se adjudicó" : "Disponible tras la adjudicación"}
-                              onCheckedChange={(checked) => handleToggleGanado(loteItem.nombre, checked)}
-                            />
-                          </div>
+                          {mostrarToggleLoteGanado && (
+                            <div className="flex items-center gap-2">
+                              <span className="text-xs text-slate-500">Ganado</span>
+                              <Switch
+                                checked={loteItem.ganado}
+                                disabled={!puedeMarcarLotesGanados}
+                                title={
+                                  puedeMarcarLotesGanados
+                                    ? "Marcar si este lote se adjudicó"
+                                    : "Disponible tras la adjudicación"
+                                }
+                                onCheckedChange={(checked) =>
+                                  handleToggleGanado(loteItem.nombre, checked)
+                                }
+                              />
+                            </div>
+                          )}
                         </CardHeader>
                         <CardContent className="pt-0">
                           <div className="min-h-0 flex-1">
@@ -1497,7 +1696,7 @@ export default function LicitacionDetallePage() {
                             setAlbaranForm((f) => ({
                               ...f,
                               tipoLinea: "presupuestada",
-                              lineas: f.lineas.map(() => nuevaLineaVacia()),
+                              lineas: [nuevaLineaVacia("presupuestada"), nuevaLineaVacia("presupuestada"), nuevaLineaVacia("presupuestada")],
                             }))
                           }
                           className={
@@ -1515,7 +1714,7 @@ export default function LicitacionDetallePage() {
                             setAlbaranForm((f) => ({
                               ...f,
                               tipoLinea: "extraordinario",
-                              lineas: f.lineas.map(() => nuevaLineaVacia()),
+                              lineas: [nuevaLineaVacia("extraordinario"), nuevaLineaVacia("extraordinario"), nuevaLineaVacia("extraordinario")],
                             }))
                           }
                           className={
@@ -1533,10 +1732,9 @@ export default function LicitacionDetallePage() {
                       <table className="min-w-full text-sm">
                         <thead>
                           <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
+                            <th className="w-24 py-2 pl-3 pr-2">Tipo</th>
                             <th className="min-w-[180px] py-2 pl-3 pr-2">Concepto</th>
-                            {tipoLinea === "presupuestada" && (
-                              <th className="w-16 py-2 pr-2 text-right">Cant.</th>
-                            )}
+                            <th className="w-16 py-2 pr-2 text-right">Cant.</th>
                             <th className="w-20 py-2 pr-2 text-right">Coste €</th>
                             <th className="w-10 py-2 pr-3"></th>
                           </tr>
@@ -1544,8 +1742,11 @@ export default function LicitacionDetallePage() {
                         <tbody>
                           {albaranForm.lineas.map((lin, idx) => (
                             <tr key={idx} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
+                              <td className="py-1.5 pl-3 pr-2 align-middle text-xs text-slate-500">
+                                {(lin as { tipo?: LineaTipo }).tipo === "extraordinario" ? "Gasto ext." : "Partida"}
+                              </td>
                               <td className="py-1.5 pl-3 pr-2 align-top">
-                                {tipoLinea === "presupuestada" ? (
+                                {(lin as { tipo?: LineaTipo }).tipo === "presupuestada" ? (
                                   <select
                                     className="h-8 w-full min-w-[160px] rounded border border-slate-200 bg-white px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                                     value={lin.id_detalle != null ? String(lin.id_detalle) : ""}
@@ -1576,38 +1777,58 @@ export default function LicitacionDetallePage() {
                                     ))}
                                   </select>
                                 ) : (
-                                  <select
-                                    className="h-8 w-full min-w-[160px] rounded border border-slate-200 bg-white px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
-                                    value={lin.id_tipo_gasto != null ? String(lin.id_tipo_gasto) : ""}
-                                    onChange={(e) => {
-                                      const idTipo = e.target.value ? Number(e.target.value) : null;
-                                      const tipo = idTipo != null ? tiposGasto.find((t) => t.id === idTipo) : undefined;
-                                      setAlbaranForm((f) => ({
-                                        ...f,
-                                        lineas: f.lineas.map((l, i) =>
-                                          i === idx
-                                            ? {
-                                                ...l,
-                                                id_tipo_gasto: idTipo,
-                                                tipoGastoNombre: tipo?.nombre ?? "",
-                                                id_producto: null,
-                                                productNombre: "",
-                                              }
-                                            : l
-                                        ),
-                                      }));
-                                    }}
-                                  >
-                                    <option value="">Tipo de gasto…</option>
-                                    {tiposGasto.map((t, idx) => (
-                                      <option key={t.id ?? idx} value={t.id ?? ""}>
-                                        {t.nombre ?? t.codigo ?? ""}
-                                      </option>
-                                    ))}
-                                  </select>
+                                  <div className="flex min-w-[200px] flex-col gap-1.5">
+                                    <select
+                                      className="h-8 w-full rounded border border-slate-200 bg-white px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
+                                      value={lin.id_tipo_gasto != null ? String(lin.id_tipo_gasto) : ""}
+                                      onChange={(e) => {
+                                        const idTipo = e.target.value ? Number(e.target.value) : null;
+                                        const tipo = idTipo != null ? tiposGasto.find((t) => t.id === idTipo) : undefined;
+                                        const esOtros = (tipo?.nombre ?? "").trim().toLowerCase() === "otros";
+                                        setAlbaranForm((f) => ({
+                                          ...f,
+                                          lineas: f.lineas.map((l, i) =>
+                                            i === idx
+                                              ? {
+                                                  ...l,
+                                                  id_tipo_gasto: idTipo,
+                                                  tipoGastoNombre: tipo?.nombre ?? "",
+                                                  tipoGastoLibre: esOtros ? (l.tipoGastoLibre ?? "") : "",
+                                                  id_producto: null,
+                                                  productNombre: "",
+                                                }
+                                              : l
+                                          ),
+                                        }));
+                                      }}
+                                    >
+                                      <option value="">Tipo de gasto…</option>
+                                      {tiposGasto.map((t, i) => (
+                                        <option key={t.id ?? i} value={t.id ?? ""}>
+                                          {t.nombre ?? t.codigo ?? ""}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {(tiposGasto.find((t) => t.id === lin.id_tipo_gasto)?.nombre ?? "").trim().toLowerCase() === "otros" && (
+                                      <Input
+                                        type="text"
+                                        className="h-8 text-xs"
+                                        placeholder="Describe el concepto (texto libre)"
+                                        value={lin.tipoGastoLibre ?? ""}
+                                        onChange={(e) =>
+                                          setAlbaranForm((f) => ({
+                                            ...f,
+                                            lineas: f.lineas.map((l, i) =>
+                                              i === idx ? { ...l, tipoGastoLibre: e.target.value } : l
+                                            ),
+                                          }))
+                                        }
+                                      />
+                                    )}
+                                  </div>
                                 )}
                               </td>
-                              {tipoLinea === "presupuestada" && (
+                              {(lin as { tipo?: LineaTipo }).tipo === "presupuestada" ? (
                                 <td className="py-1.5 pr-2 text-right align-top">
                                     {(() => {
                                       const partida =
@@ -1670,6 +1891,8 @@ export default function LicitacionDetallePage() {
                                       );
                                     })()}
                                 </td>
+                              ) : (
+                                <td className="py-1.5 pr-2 text-right align-top text-slate-400">—</td>
                               )}
                               <td className="py-1.5 pr-2 text-right align-top">
                                 <Input
@@ -1718,11 +1941,11 @@ export default function LicitacionDetallePage() {
                       onClick={() =>
                         setAlbaranForm((f) => ({
                           ...f,
-                          lineas: [...f.lineas, nuevaLineaVacia()],
+                          lineas: [...f.lineas, nuevaLineaVacia(f.tipoLinea)],
                         }))
                       }
                     >
-                      + Añadir fila
+                      + Añadir fila ({tipoLinea === "presupuestada" ? "partida" : "gasto ext."})
                     </Button>
                   </div>
                   {albaranError && (
@@ -1830,6 +2053,20 @@ export default function LicitacionDetallePage() {
           }}
         />
       )}
+
+      <FixMissingProductsModal
+        isOpen={showFixProductsModal}
+        onClose={() => {
+          setShowFixProductsModal(false);
+          setPartidasInvalidas([]);
+        }}
+        partidasInvalidas={partidasInvalidas}
+        tenderId={lic.id_licitacion}
+        onSuccess={async () => {
+          await refetchLicitacion();
+          await handleCambiarEstado();
+        }}
+      />
     </div>
   );
 }

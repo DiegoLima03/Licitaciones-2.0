@@ -187,18 +187,29 @@ class TenderService:
         if nuevo_estado == EstadoLicitacion.ADJUDICADA:
             detalle = self._repo.get_tender_with_details(tender_id)
             partidas = detalle.get("partidas") or []
-            # Solo partidas activas cuentan para la validación (presupuesto efectivo).
-            partidas_activas = [p for p in partidas if p.get("activo") is True]
+            lotes_ganados = {
+                l.get("nombre")
+                for l in licitacion.get("lotes_config", [])
+                if isinstance(l, dict) and l.get("ganado")
+            }
+            tiene_lotes = bool(licitacion.get("lotes_config"))
+
+            # Solo partidas activas de lotes ganados (o sin lotes) cuentan para la validación
+            partidas_activas = [
+                p
+                for p in partidas
+                if p.get("activo") is True and (not tiene_lotes or p.get("lote") in lotes_ganados)
+            ]
             sin_producto = [p for p in partidas_activas if p.get("id_producto") is None]
             if sin_producto:
                 ids_detalle = [p.get("id_detalle") for p in sin_producto if p.get("id_detalle") is not None]
                 logger.warning(
-                    "Adjudicación rechazada: partidas sin id_producto (ERP Belneo). id_detalle=%s",
+                    "Adjudicación rechazada: partidas sin id_producto (ERP Belneo) en lotes ganados. id_detalle=%s",
                     ids_detalle,
                 )
                 raise ValueError(
-                    "Para adjudicar, todas las líneas de presupuesto deben tener un producto de Belneo (id_producto). "
-                    "Partidas con solo nombre libre no son válidas. Corrija las partidas y vuelva a intentar."
+                    "Para adjudicar, todas las líneas de presupuesto de los lotes ganados deben tener un producto de Belneo (id_producto). "
+                    "Partidas con solo nombre libre no son válidas. Corrija las partidas de los lotes ganados y vuelva a intentar."
                 )
 
         update_data: Dict[str, Any] = {"id_estado": nuevo_id}
@@ -239,7 +250,7 @@ class TenderService:
         row: Dict[str, Any] = {
             "lote": payload.lote or "General",
             "id_producto": payload.id_producto,
-            "nombre_producto_libre": payload.nombre_producto_libre,
+            "nombre_producto_libre": payload.nombre_producto_libre if payload.id_producto is None else None,
             "unidades": payload.unidades if payload.unidades is not None else 1.0,
             "pvu": float(payload.pvu) if payload.pvu is not None else 0.0,
             "pcu": float(payload.pcu) if payload.pcu is not None else 0.0,
