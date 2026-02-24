@@ -45,24 +45,3 @@ class DeliveryLineUpdate(BaseModel):
   cobrado: Optional[bool] = Field(None, description="Si la línea está cobrada.")
 
 
-class ScheduledDeliveryCreate(BaseModel):
-  """Payload para crear un hito de entrega programado."""
-
-  tender_id: int = Field(..., description="ID de la licitación.")
-  delivery_date: date = Field(..., description="Fecha prevista de entrega (YYYY-MM-DD).")
-  status: Optional[str] = Field(None, description="Estado del hito (ej. PENDIENTE, ENTREGADO).")
-  description: Optional[str] = Field(None, description="Descripción del hito.")
-  items_json: Optional[Dict[str, Any]] = Field(None, description="Detalle de partidas en JSON.")
-
-
-class ScheduledDelivery(BaseModel):
-  """Registro de hito de entrega (scheduled_deliveries)."""
-
-  id: UUID = Field(..., description="UUID del hito.")
-  tender_id: int = Field(..., description="ID de la licitación.")
-  delivery_date: date = Field(..., description="Fecha prevista.")
-  status: Optional[str] = Field(None, description="Estado.")
-  description: Optional[str] = Field(None, description="Descripción.")
-  items_json: Optional[Dict[str, Any]] = Field(None, description="Detalle partidas.")
-
-

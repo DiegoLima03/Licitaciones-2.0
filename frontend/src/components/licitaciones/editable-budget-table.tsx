@@ -5,8 +5,7 @@ import { useForm, useFieldArray } from "react-hook-form";
 import { Loader2, Check, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { ProductosService, TendersService } from "@/services/api";
-import { AnalyticsService } from "@/services/analytics.api";
+import { ProductosService, TendersService, AnalyticsService } from "@/services/api";
 import type { TenderDetail, ProductoSearchResult } from "@/types/api";
 
 const DEBOUNCE_MS = 280; // Para el buscador
@@ -369,7 +368,7 @@ export function EditableBudgetTable({
     onUniqueLotesChange?.(unique);
   }, [watchedPartidas, onUniqueLotesChange, loteFilter]);
 
-  // Comprobación de desviación de precio por fila (PVU vs histórico): verde = aceptable, rojo = desviado
+  // Cálculo de media histórica de PVU (para número fantasma) y posible desviación
   const deviationDebounceRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   React.useEffect(() => {
     const partidas = form.watch("partidas") ?? [];
@@ -377,17 +376,14 @@ export function EditableBudgetTable({
     deviationDebounceRef.current = setTimeout(() => {
       deviationDebounceRef.current = null;
       const toClear: number[] = [];
-      const toFetch: { index: number; nombre: string; pvu: number }[] = [];
+      const toFetch: { index: number; productId: number }[] = [];
       partidas.forEach((row, index) => {
         const hasProduct = row.id_producto != null;
-        const nombre = (row.product_nombre ?? "").trim();
-        const pvuVal = Number(row.pvu);
-        // Solo tiene sentido comprobar desviación/media histórica para productos del catálogo
-        if (!hasProduct || !nombre) {
+        // Solo tiene sentido pedir media histórica para productos del catálogo
+        if (!hasProduct) {
           toClear.push(index);
         } else {
-          // Aunque el PVU aún sea 0, pedimos histórico para poder mostrar el PVU medio como placeholder
-          toFetch.push({ index, nombre, pvu: pvuVal > 0 ? pvuVal : 0 });
+          toFetch.push({ index, productId: row.id_producto as number });
         }
       });
       setDeviationByIndex((prev) => {
@@ -400,14 +396,32 @@ export function EditableBudgetTable({
         toClear.forEach((i) => (next[i] = null));
         return next;
       });
-      toFetch.forEach(({ index, nombre, pvu }) => {
-        AnalyticsService.getPriceDeviationCheck(nombre, pvu)
-          .then((res) => {
-            setDeviationByIndex((prev) => ({ ...prev, [index]: res.is_deviated }));
-            setHistoricalAvgByIndex((prev) => ({
-              ...prev,
-              [index]: Number.isFinite(Number(res.historical_avg)) ? Number(res.historical_avg) : null,
-            }));
+      toFetch.forEach(({ index, productId }) => {
+        AnalyticsService.getProductAnalytics(productId)
+          .then((data) => {
+            const values = (data.price_history ?? [])
+              .map((p) => Number(p.value))
+              .filter((n) => Number.isFinite(n));
+            if (values.length === 0) {
+              setHistoricalAvgByIndex((prev) => ({ ...prev, [index]: null }));
+              setDeviationByIndex((prev) => ({ ...prev, [index]: null }));
+              return;
+            }
+            const avg = values.reduce((acc, v) => acc + v, 0) / values.length;
+            setHistoricalAvgByIndex((prev) => ({ ...prev, [index]: avg }));
+
+            // Coloring determinista:
+            // - Sin PVU actual -> sin color (null)
+            // - PVU <= media -> verde (false)
+            // - PVU > media  -> rojo (true)
+            const row = form.getValues(`partidas.${index}`);
+            const currentPvu = Number(row.pvu);
+            if (!currentPvu || !Number.isFinite(currentPvu) || avg <= 0) {
+              setDeviationByIndex((prev) => ({ ...prev, [index]: null }));
+              return;
+            }
+            const isExpensive = currentPvu > avg;
+            setDeviationByIndex((prev) => ({ ...prev, [index]: isExpensive }));
           })
           .catch(() => {
             setDeviationByIndex((prev) => ({ ...prev, [index]: null }));
@@ -793,7 +807,7 @@ export function EditableBudgetTable({
                         placeholder={
                           historicalAvg != null && !Number.isNaN(historicalAvg) && historicalAvg > 0
                             ? String(historicalAvg)
-                            : "0"
+                            : "N/D"
                         }
                         className={`${inputCellClass} text-right`}
                         disabled={isLocked}

@@ -46,7 +46,6 @@ import { ProductAutocompleteInput } from "@/components/producto-autocomplete-inp
 import { CostDeviationKPI } from "@/components/licitaciones/CostDeviationKPI";
 import { CreateTenderDialog } from "@/components/licitaciones/create-tender-dialog";
 import { EditableBudgetTable } from "@/components/licitaciones/editable-budget-table";
-import { ScheduledDeliveriesAccordion } from "@/components/licitaciones/ScheduledDeliveriesAccordion";
 import { FixMissingProductsModal } from "@/components/licitaciones/fix-missing-products-modal";
 import { DeliveriesService, EstadosService, TendersService, TiposGastoService, TiposService } from "@/services/api";
 import type {
@@ -1770,11 +1769,6 @@ export default function LicitacionDetallePage() {
 
           {showEjecucionRemainingTabs && !isAmSda && (
           <TabsContent value="ejecucion">
-            {lic?.scheduled_deliveries && lic.scheduled_deliveries.length > 0 && (
-              <div className="mb-6">
-                <ScheduledDeliveriesAccordion deliveries={lic.scheduled_deliveries} />
-              </div>
-            )}
             <div className="mb-3 flex items-center justify-between gap-2">
               <p className="text-sm text-slate-600">
                 Resumen de entregas y albaranes vinculados a esta licitación.

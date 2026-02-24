@@ -68,16 +68,6 @@ export interface Tender {
   [key: string]: unknown;
 }
 
-/** Hito de entrega programado (scheduled_deliveries). */
-export interface ScheduledDelivery {
-  id: string;
-  tender_id: number;
-  delivery_date: string;
-  status?: string | null;
-  description?: string | null;
-  items_json?: Record<string, unknown> | null;
-}
-
 export interface LoteConfigItem {
   nombre: string;
   ganado: boolean;
@@ -167,8 +157,6 @@ export interface TenderDetail extends Tender {
   contratos_derivados?: Tender[];
   /** Padre AM/SDA cuando esta licitación es contrato derivado (acceso desde el padre). */
   licitacion_padre?: LicitacionPadre | null;
-  /** Hitos de entrega programados (entregas mensuales). */
-  scheduled_deliveries?: ScheduledDelivery[];
 }
 
 /** Payload para añadir una partida manual (POST /tenders/{id}/partidas). id_producto opcional; si no se vincula Belneo, usar nombre_producto_libre. */

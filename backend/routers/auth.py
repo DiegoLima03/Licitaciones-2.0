@@ -1,18 +1,15 @@
 """
-Autenticación: Supabase Auth + fallback tbl_usuarios.
+Autenticación basada en Supabase Auth.
 
 - POST /auth/login: Acepta email + contraseña.
 - GET /auth/me: Perfil del usuario (requiere Bearer token).
 - POST /auth/users: Crear usuario (requiere admin, usa Supabase Admin API).
 """
 
-import time
 from typing import Any
-
-import jwt
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from backend.config import supabase_client, SUPABASE_JWT_SECRET
+from backend.config import supabase_client
 from backend.deps import get_current_user
 from backend.schemas.auth import CurrentUser, UserLogin, UserResponse
 from backend.roles import DEFAULT_ROLE, ROLES_VALIDOS, can_delete_user, normalize_role
@@ -20,8 +17,6 @@ from pydantic import BaseModel, Field
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-
-JWT_AUDIENCE_LEGACY = "veraleza-legacy"
 
 
 def _get_or_create_profile(user_id: str, email: str, default_org_id: str) -> dict[str, Any]:
@@ -46,55 +41,6 @@ def _get_or_create_profile(user_id: str, email: str, default_org_id: str) -> dic
     }).execute()
 
     return {"organization_id": default_org_id, "role": DEFAULT_ROLE, "full_name": None}
-
-
-def _login_tbl_usuarios(email: str, password: str) -> dict | None:
-    """Fallback: autenticación contra tbl_usuarios."""
-    try:
-        resp = supabase_client.table("tbl_usuarios").select("*").eq("email", email).execute()
-        if not resp.data or len(resp.data) == 0:
-            return None
-        usuario = resp.data[0]
-        if usuario.get("password") != password:
-            return None
-
-        org_id = "00000000-0000-0000-0000-000000000001"
-        try:
-            org_resp = supabase_client.table("organizations").select("id").limit(1).execute()
-            if org_resp.data:
-                org_id = str(org_resp.data[0]["id"])
-        except Exception:
-            pass
-
-        raw_rol = (usuario.get("rol") or "").strip().lower()
-        role = "admin" if raw_rol == "admin" else DEFAULT_ROLE
-
-        access_token = None
-        if SUPABASE_JWT_SECRET:
-            payload = {
-                "sub": f"legacy-{usuario.get('id_usuario', usuario.get('id', ''))}",
-                "email": usuario.get("email", ""),
-                "aud": JWT_AUDIENCE_LEGACY,
-                "org_id": org_id,
-                "role": role,
-                "exp": int(time.time()) + 86400 * 7,
-            }
-            access_token = jwt.encode(
-                payload, SUPABASE_JWT_SECRET, algorithm="HS256"
-            )
-
-        return {
-            "id": usuario.get("id_usuario") or usuario.get("id"),
-            "email": usuario.get("email", ""),
-            "organization_id": org_id,
-            "role": role,
-            "rol": role,
-            "full_name": usuario.get("nombre"),
-            "nombre": usuario.get("nombre"),
-            "access_token": access_token,
-        }
-    except Exception:
-        return None
 
 
 def _can_manage_users(user: CurrentUser) -> bool:
@@ -138,8 +84,7 @@ def login(payload: UserLogin) -> dict:
     POST /auth/login
     Body: { "email": "...", "password": "..." }
 
-    Primero intenta Supabase Auth. Si falla (ej. migración no ejecutada), prueba tbl_usuarios.
-    Con Supabase Auth devuelve access_token para Bearer. Con tbl_usuarios, access_token es null.
+    Usa únicamente Supabase Auth y devuelve access_token para Bearer.
     """
     # 1. Intentar Supabase Auth
     try:
@@ -176,11 +121,6 @@ def login(payload: UserLogin) -> dict:
                 "rol": role,
                 "access_token": session.access_token,
             }
-
-    # 2. Fallback: tbl_usuarios
-    legacy = _login_tbl_usuarios(payload.email, payload.password)
-    if legacy:
-        return legacy
 
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,

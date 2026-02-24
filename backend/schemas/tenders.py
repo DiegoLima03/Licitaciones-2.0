@@ -161,21 +161,3 @@ class PartidaUpdate(BaseModel):
   activo: Optional[bool] = None
 
 
-class TenderAttachmentCreate(BaseModel):
-  """Payload para subir un adjunto a una licitación (pliegos, facturas)."""
-
-  tender_id: int = Field(..., description="ID de la licitación.")
-  file_path: str = Field(..., description="Ruta del archivo almacenado.")
-  file_type: Optional[str] = Field(None, description="Tipo MIME o extensión (ej. application/pdf).")
-
-
-class TenderAttachment(BaseModel):
-  """Registro de adjunto (tender_attachments)."""
-
-  id: UUID = Field(..., description="UUID del adjunto.")
-  tender_id: int = Field(..., description="ID de la licitación.")
-  file_path: str = Field(..., description="Ruta del archivo.")
-  file_type: Optional[str] = Field(None, description="Tipo de archivo.")
-  uploaded_at: str = Field(..., description="Fecha de subida (ISO).")
-
-

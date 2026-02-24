@@ -17,8 +17,6 @@ from backend.schemas.tenders import (
   TenderStatusChange,
   PartidaCreate,
   PartidaUpdate,
-  TenderAttachmentCreate,
-  TenderAttachment,
 )
 from backend.schemas.products import (
   ProductoSearchResult,
@@ -32,8 +30,6 @@ from backend.schemas.deliveries import (
   DeliveryItem,
   DeliveryCreate,
   DeliveryLineUpdate,
-  ScheduledDeliveryCreate,
-  ScheduledDelivery,
 )
 from backend.schemas.expenses import (
   TipoGasto,
@@ -73,8 +69,6 @@ __all__ = [
   "TenderStatusChange",
   "PartidaCreate",
   "PartidaUpdate",
-  "TenderAttachmentCreate",
-  "TenderAttachment",
   # Products
   "ProductoSearchResult",
   "ProductSearchItem",
@@ -86,8 +80,6 @@ __all__ = [
   "DeliveryItem",
   "DeliveryCreate",
   "DeliveryLineUpdate",
-  "ScheduledDeliveryCreate",
-  "ScheduledDelivery",
   # Expenses
   "TipoGasto",
   "EstadoGasto",
