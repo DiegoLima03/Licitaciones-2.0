@@ -25,6 +25,8 @@ function formatEuro(value: number) {
   }).format(value);
 }
 
+const PAGE_SIZE = 100;
+
 const initialForm = {
   pvu: null as number | null,
   pcu: null as number | null,
@@ -43,6 +45,7 @@ export default function LineasReferenciaPage() {
     nombre: string;
   } | null>(null);
   const [form, setForm] = React.useState(initialForm);
+  const [visibleCount, setVisibleCount] = React.useState(PAGE_SIZE);
 
   const fetchList = React.useCallback(async () => {
     setLoading(true);
@@ -50,6 +53,7 @@ export default function LineasReferenciaPage() {
     try {
       const data = await PreciosReferenciaService.getAll();
       setList(data);
+      setVisibleCount(PAGE_SIZE);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Error al cargar líneas");
       setList([]);
@@ -275,7 +279,7 @@ export default function LineasReferenciaPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {list.map((item) => (
+                  {list.slice(0, visibleCount).map((item) => (
                     <tr
                       key={item.id}
                       className="border-b border-slate-100 last:border-0 hover:bg-slate-50"
@@ -306,6 +310,22 @@ export default function LineasReferenciaPage() {
                   ))}
                 </tbody>
               </table>
+              {list.length > visibleCount && (
+                <div className="mt-2 flex justify-center">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() =>
+                      setVisibleCount((prev) =>
+                        Math.min(prev + PAGE_SIZE, list.length)
+                      )
+                    }
+                  >
+                    Mostrar más
+                  </Button>
+                </div>
+              )}
             </div>
           )}
         </CardContent>

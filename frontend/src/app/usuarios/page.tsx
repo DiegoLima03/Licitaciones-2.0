@@ -1,6 +1,7 @@
 "use client";
 
 import * as React from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { KeyRound, Trash2, UserPlus, Users } from "lucide-react";
 
@@ -21,7 +22,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { UsersService, type OrgUser } from "@/services/api";
+import { UsersService, AuthService, AnalyticsService, type OrgUser } from "@/services/api";
 
 const STORAGE_KEY = "veraleza_user";
 const SKIP_LOGIN =
@@ -37,31 +38,46 @@ const ROLES = [
   { value: "member_licitaciones", label: "Miembro licitaciones" },
 ];
 
-function useIsAdmin(): { isAdmin: boolean; checked: boolean } {
-  const [state, setState] = React.useState<{ isAdmin: boolean; checked: boolean }>({
-    isAdmin: false,
+function useCanManageUsers(): { allowed: boolean; checked: boolean } {
+  const [state, setState] = React.useState<{ allowed: boolean; checked: boolean }>({
+    allowed: false,
     checked: false,
   });
+
   React.useEffect(() => {
     if (SKIP_LOGIN) {
-      setState({ isAdmin: true, checked: true });
+      setState({ allowed: true, checked: true });
       return;
     }
-    try {
-      const raw = window.localStorage.getItem(STORAGE_KEY);
-      const parsed = raw ? JSON.parse(raw) : null;
-      const role = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
-      setState({ isAdmin: role === "admin", checked: true });
-    } catch {
-      setState({ isAdmin: false, checked: true });
-    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const [me, perms] = await Promise.all([
+          AuthService.getMe(),
+          AnalyticsService.getRolePermissions(),
+        ]);
+        if (cancelled) return;
+        const role = String(me.role ?? "").toLowerCase();
+        const matrix = perms.matrix || {};
+        const allowed = !!matrix[role]?.usuarios;
+        setState({ allowed, checked: true });
+      } catch {
+        if (!cancelled) {
+          setState({ allowed: false, checked: true });
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, []);
+
   return state;
 }
 
 export default function UsuariosPage() {
   const router = useRouter();
-  const { isAdmin, checked } = useIsAdmin();
+  const { allowed, checked } = useCanManageUsers();
   const [users, setUsers] = React.useState<OrgUser[]>([]);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -96,13 +112,13 @@ export default function UsuariosPage() {
 
   React.useEffect(() => {
     if (!checked) return;
-    if (!isAdmin) {
+    if (!allowed) {
       router.replace("/");
       return;
     }
     setError(null);
     refetchUsers();
-  }, [checked, isAdmin, router, refetchUsers]);
+  }, [checked, allowed, router, refetchUsers]);
 
   const handleRoleChange = React.useCallback(
     async (userId: string, newRole: string) => {
@@ -211,7 +227,7 @@ export default function UsuariosPage() {
       </div>
     );
   }
-  if (!isAdmin) {
+  if (!allowed) {
     return (
       <div className="flex min-h-[200px] items-center justify-center">
         <p className="text-sm text-slate-500">Redirigiendo…</p>
@@ -229,6 +245,16 @@ export default function UsuariosPage() {
           </h1>
           <p className="mt-1 text-sm text-slate-600">
             Administra los roles de los usuarios de tu organización.
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            Puedes ver un resumen de qué puede hacer cada rol en{" "}
+            <Link
+              href="/roles"
+              className="font-medium text-emerald-700 underline-offset-2 hover:underline"
+            >
+              Roles y permisos
+            </Link>
+            .
           </p>
         </div>
         <Dialog open={createOpen} onOpenChange={setCreateOpen}>

@@ -30,6 +30,7 @@ import type {
   TenderUpdate,
   Tipo,
   TipoGasto,
+  RolePermissionsMatrix,
 } from "@/types/api";
 
 const CONNECTION_ERROR_MSG =
@@ -130,8 +131,9 @@ export const UsersService = {
     return data;
   },
   async updateRole(userId: string, role: string): Promise<{ id: string; role: string }> {
+    const id = typeof userId === "string" ? userId : String(userId);
     const { data } = await apiClient.patch<{ id: string; role: string }>(
-      `/auth/users/${userId}`,
+      `/auth/users/${encodeURIComponent(id)}`,
       { role }
     );
     return data!;
@@ -435,6 +437,27 @@ export const AnalyticsService = {
       const { data } = await apiClient.get<DashboardKPIs>("/analytics/kpis", { params });
       if (!data) throw new Error("No se devolvieron los KPIs.");
       return data;
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+
+  async getRolePermissions(): Promise<RolePermissionsMatrix> {
+    try {
+      const { data } = await apiClient.get<RolePermissionsMatrix>("/permissions/role-matrix");
+      return data ?? { matrix: {} };
+    } catch (error) {
+      throw new Error(getMessageFromError(error));
+    }
+  },
+
+  async updateRolePermissions(matrix: RolePermissionsMatrix): Promise<RolePermissionsMatrix> {
+    try {
+      const { data } = await apiClient.put<RolePermissionsMatrix>(
+        "/permissions/role-matrix",
+        matrix,
+      );
+      return data ?? { matrix: {} };
     } catch (error) {
       throw new Error(getMessageFromError(error));
     }

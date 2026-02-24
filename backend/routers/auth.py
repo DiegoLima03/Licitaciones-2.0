@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from backend.config import supabase_client, SUPABASE_JWT_SECRET
 from backend.deps import get_current_user
-from backend.models import CurrentUser, UserLogin, UserResponse
+from backend.schemas.auth import CurrentUser, UserLogin, UserResponse
 from backend.roles import DEFAULT_ROLE, ROLES_VALIDOS, can_delete_user, normalize_role
 from pydantic import BaseModel, Field
 
@@ -95,6 +95,39 @@ def _login_tbl_usuarios(email: str, password: str) -> dict | None:
         }
     except Exception:
         return None
+
+
+def _can_manage_users(user: CurrentUser) -> bool:
+    """
+    Devuelve True si el usuario puede gestionar usuarios (ver /usuarios, crear, borrar, cambiar rol/contraseña).
+
+    Regla:
+    - admin siempre puede.
+    - Además, cualquier rol que tenga feature 'usuarios' = True en la tabla role_permissions
+      para su organización.
+    """
+    if user.role == "admin":
+        return True
+
+    org_s = str(user.org_id)
+    try:
+        res = (
+            supabase_client.table("role_permissions")
+            .select("feature, allowed")
+            .eq("organization_id", org_s)
+            .eq("role", normalize_role(user.role))
+            .eq("feature", "usuarios")
+            .limit(1)
+            .execute()
+        )
+    except Exception:
+        # Si la tabla no existe o hay error, por seguridad consideramos que no puede.
+        return False
+
+    rows = res.data or []
+    if not rows:
+        return False
+    return bool(rows[0].get("allowed"))
 
 
 @router.post("/login", response_model=dict)
@@ -249,10 +282,10 @@ def list_users(
     GET /auth/users
     Requiere: Bearer token de un usuario con role=admin.
     """
-    if current_user.role != "admin":
+    if not _can_manage_users(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo administradores pueden listar usuarios.",
+            detail="No tienes permisos para listar usuarios.",
         )
 
     try:
@@ -308,10 +341,10 @@ def update_user_role(
     Body: { "role": uno de admin, admin_planta, admin_licitaciones, member_planta, member_licitaciones }
     Requiere: Bearer token de un usuario con role=admin.
     """
-    if current_user.role != "admin":
+    if not _can_manage_users(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo administradores pueden cambiar roles.",
+            detail="No tienes permisos para cambiar roles.",
         )
     if payload.role not in ROLES_VALIDOS:
         raise HTTPException(
@@ -319,12 +352,34 @@ def update_user_role(
             detail=f"Rol inválido. Valores permitidos: {', '.join(sorted(ROLES_VALIDOS))}",
         )
 
-    # Solo actualizar si el usuario pertenece a nuestra organización
+    # Normalizar id (por si viene con espacios o tipo distinto)
+    uid = str(user_id).strip() if user_id else ""
+    if not uid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Identificador de usuario no válido.",
+        )
+
+    # Comprobar que el usuario existe y pertenece a nuestra organización antes de actualizar
+    org_id_str = str(current_user.org_id)
+    check = (
+        supabase_client.table("profiles")
+        .select("id")
+        .eq("id", uid)
+        .eq("organization_id", org_id_str)
+        .execute()
+    )
+    if not check.data or len(check.data) == 0:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Usuario no encontrado o no pertenece a tu organización.",
+        )
+
     upd = (
         supabase_client.table("profiles")
         .update({"role": payload.role})
-        .eq("id", user_id)
-        .eq("organization_id", str(current_user.org_id))
+        .eq("id", uid)
+        .eq("organization_id", org_id_str)
         .execute()
     )
     if not upd.data or len(upd.data) == 0:
@@ -332,7 +387,7 @@ def update_user_role(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Usuario no encontrado o no pertenece a tu organización.",
         )
-    return {"id": user_id, "role": payload.role}
+    return {"id": uid, "role": payload.role}
 
 
 @router.patch("/users/{user_id}/password", response_model=dict)
@@ -348,10 +403,10 @@ def update_user_password(
     Body: { "password": "nueva_contraseña" }
     Requiere: Bearer token de un usuario con role=admin.
     """
-    if current_user.role != "admin":
+    if not _can_manage_users(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo administradores pueden cambiar contraseñas.",
+            detail="No tienes permisos para cambiar contraseñas de otros usuarios.",
         )
 
     # Verificar que el usuario pertenece a nuestra organización
@@ -385,14 +440,12 @@ def delete_user(
     user_id: str,
     current_user: CurrentUser = Depends(get_current_user),
 ) -> None:
-    """
-    Elimina un usuario de la organización. Solo puedes eliminar usuarios con rol inferior al tuyo.
-
-    DELETE /auth/users/{user_id}
-    - admin: puede eliminar a admin_planta, admin_licitaciones, member_planta, member_licitaciones.
-    - admin_planta: solo puede eliminar a member_planta.
-    - admin_licitaciones: solo puede eliminar a member_licitaciones.
-    """
+    """Elimina un usuario de la organización. Respeta jerarquía de roles."""
+    if not _can_manage_users(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para eliminar usuarios.",
+        )
     profile_resp = (
         supabase_client.table("profiles")
         .select("id, role")
@@ -413,13 +466,13 @@ def delete_user(
             detail="No puedes eliminar a un usuario con tu mismo rol o superior.",
         )
 
+    # Intentar borrar también en Supabase Auth (pero si falla, no bloqueamos el borrado lógico).
     try:
         supabase_client.auth.admin.delete_user(user_id)
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"No se pudo eliminar el usuario: {e!s}",
-        ) from e
+        # En entornos donde no se dispone de service role o la API de Auth falla,
+        # seguimos adelante borrando el perfil para que el usuario no pueda usar la app.
+        print(f"[auth.delete_user] Error eliminando en Supabase Auth: {e!r}")
 
     try:
         supabase_client.table("profiles").delete().eq("id", user_id).execute()

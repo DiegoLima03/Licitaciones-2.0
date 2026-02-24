@@ -10,7 +10,9 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
 from backend.deps import CurrentUserDep
-from backend.models import CurrentUser, DeliveryCreate, DeliveryLineUpdate, ESTADOS_PERMITEN_ENTREGAS
+from backend.schemas.auth import CurrentUser
+from backend.schemas.deliveries import DeliveryCreate, DeliveryLineUpdate
+from backend.schemas.tenders import ESTADOS_PERMITEN_ENTREGAS
 
 
 router = APIRouter(prefix="/deliveries", tags=["deliveries"])

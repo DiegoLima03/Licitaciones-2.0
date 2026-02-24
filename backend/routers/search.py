@@ -12,7 +12,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client
 from backend.deps import CurrentUserDep
-from backend.models import ProductSearchItem
+from backend.schemas.products import ProductSearchItem
 
 
 router = APIRouter(prefix="/search", tags=["search"])

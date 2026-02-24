@@ -10,7 +10,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from backend.config import supabase_client
 from backend.deps import CurrentUserDep
-from backend.models import PrecioReferencia, PrecioReferenciaCreate
+from backend.schemas.products import PrecioReferencia, PrecioReferenciaCreate
 
 
 router = APIRouter(prefix="/precios-referencia", tags=["precios-referencia"])

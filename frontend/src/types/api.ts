@@ -415,3 +415,9 @@ export interface PriceDeviationResult {
   historical_avg: number;
   recommendation: string;
 }
+
+// ----- Role permissions -----
+
+export interface RolePermissionsMatrix {
+  matrix: Record<string, Record<string, boolean>>;
+}

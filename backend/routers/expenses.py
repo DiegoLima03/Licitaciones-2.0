@@ -13,9 +13,9 @@ from fastapi import APIRouter, HTTPException, Path, status
 
 from backend.config import supabase_client
 from backend.deps import CurrentUserDep
-from backend.models import (
-    CurrentUser,
-    ESTADOS_PERMITEN_ENTREGAS,
+from backend.schemas.auth import CurrentUser
+from backend.schemas.tenders import ESTADOS_PERMITEN_ENTREGAS
+from backend.schemas.expenses import (
     ProjectExpense,
     ProjectExpenseCreate,
     ProjectExpenseUpdate,

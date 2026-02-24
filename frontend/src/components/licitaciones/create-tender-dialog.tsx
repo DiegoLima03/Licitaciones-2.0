@@ -104,6 +104,14 @@ const formSchema = z.object({
       });
     }
   }
+  // La fecha de presentación no puede ser posterior a la de adjudicación
+  if (data.f_presentacion && data.f_adjudicacion && data.f_presentacion > data.f_adjudicacion) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "La fecha de presentación debe ser anterior o igual a la de adjudicación",
+      path: ["f_presentacion"],
+    });
+  }
   if (
     data.tipo_procedimiento === "CONTRATO_BASADO" &&
     (!data.id_licitacion_padre || String(data.id_licitacion_padre).trim() === "")

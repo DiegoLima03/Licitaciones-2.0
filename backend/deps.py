@@ -15,7 +15,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend.config import SKIP_AUTH, SUPABASE_JWT_SECRET, supabase_client
-from backend.models import CurrentUser
+from backend.schemas.auth import CurrentUser
 from backend.roles import normalize_role
 
 security = HTTPBearer(auto_error=False)

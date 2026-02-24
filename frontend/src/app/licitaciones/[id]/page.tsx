@@ -231,7 +231,14 @@ function CobradoLineaCell({
     <div className="flex justify-center">
       <Switch
         checked={checked}
-        onCheckedChange={(c) => onUpdate(idReal, { cobrado: c })}
+        onCheckedChange={(c) => {
+          // Si marcamos como cobrado, forzamos estado FACTURADO.
+          if (c && lin.estado !== "FACTURADO") {
+            onUpdate(idReal, { cobrado: true, estado: "FACTURADO" });
+          } else {
+            onUpdate(idReal, { cobrado: c });
+          }
+        }}
         disabled={isUpdating}
       />
     </div>
@@ -422,6 +429,54 @@ export default function LicitacionDetallePage() {
     return map;
   }, [entregas, lic?.partidas]);
 
+  // Coste real de entregas y gastos extraordinarios (a partir de las líneas de albarán)
+  const { costeRealEntregado, gastosExtraEntregas } = React.useMemo(() => {
+    let costeReal = 0;
+    let gastosExtra = 0;
+
+    for (const ent of entregas) {
+      for (const lin of ent.lineas) {
+        const idDet = lin.id_detalle;
+        const idTipoGasto = (lin as any).id_tipo_gasto as number | null | undefined;
+        const pcu = Number(lin.pcu) || 0;
+
+        // Línea de gasto extraordinario: sin partida presupuestada, con tipo de gasto
+        if (idDet == null && idTipoGasto != null) {
+          gastosExtra += pcu;
+        } else {
+          const cantidad = Number(lin.cantidad) || 0;
+          costeReal += cantidad * pcu;
+        }
+      }
+    }
+
+    return { costeRealEntregado: costeReal, gastosExtraEntregas: gastosExtra };
+  }, [entregas]);
+
+  // Métricas de cobro: cuánto hay cobrado y pendiente (solo líneas de partidas presupuestadas)
+  const { totalCobrado, totalPendiente } = React.useMemo(() => {
+    let cobrado = 0;
+    let pendiente = 0;
+
+    for (const ent of entregas) {
+      for (const lin of ent.lineas) {
+        const esGastoExtra =
+          lin.id_detalle == null && (lin as any).id_tipo_gasto != null;
+        if (esGastoExtra) continue;
+
+        const cantidad = Number(lin.cantidad) || 0;
+        const pcu = Number(lin.pcu) || 0;
+        const importe = cantidad * pcu;
+        if (!importe) continue;
+
+        if (lin.cobrado) cobrado += importe;
+        else pendiente += importe;
+      }
+    }
+
+    return { totalCobrado: cobrado, totalPendiente: pendiente };
+  }, [entregas]);
+
   const showLoading = !Number.isFinite(id) || loading;
   const showError = !showLoading && (!!error || !lic);
   const showContent = !showLoading && !showError;
@@ -496,7 +551,7 @@ export default function LicitacionDetallePage() {
       if (nuevoEstadoId === ID_ESTADO_ADJUDICADA) {
         // Validar localmente que no haya partidas activas sin producto de Belneo
         const partidasSinProducto = (lic.partidas ?? []).filter(
-          (p) => (p.activo ?? true) && (p.id_producto == null)
+          (p) => (p.activo ?? true) && p.id_producto == null
         );
         if (partidasSinProducto.length > 0) {
           setPartidasInvalidas(partidasSinProducto);
@@ -683,10 +738,42 @@ export default function LicitacionDetallePage() {
         // Por defecto consideramos todos los lotes como ganados; si alguno se pierde se marca manualmente.
         ganado: true,
       }));
+
+      // Saber si antes ya había lotes configurados
+      const teniaLotesAntes =
+        Array.isArray(lic.lotes_config) && (lic.lotes_config as LoteConfigItem[]).length > 0;
+
+      // 1) Guardar configuración de lotes
       const actualizado = await TendersService.update(lic.id_licitacion, { lotes_config: cfg });
       setLic((prev) => (prev ? { ...prev, ...actualizado, lotes_config: cfg } : null));
+
+      // 2) Si es la primera vez que se configuran lotes, mover las partidas "sueltas"
+      //    (sin lote o con lote="General") al primer lote para que no queden en "Otros".
+      if (!teniaLotesAntes && cfg.length > 0 && (lic.partidas ?? []).length > 0) {
+        const nombrePrimerLote = cfg[0].nombre;
+        const partidasAMover = (lic.partidas ?? []).filter((p) => {
+          const lote = (p.lote ?? "").trim().toLowerCase();
+          return !lote || lote === "general";
+        });
+
+        if (partidasAMover.length > 0) {
+          await Promise.all(
+            partidasAMover.map((p) =>
+              TendersService.updatePartida(lic.id_licitacion, p.id_detalle, {
+                lote: nombrePrimerLote,
+              })
+            )
+          );
+          // Refrescamos la licitación para que las tablas por lote reflejen el cambio.
+          refetchLicitacion();
+        }
+      }
     } catch (e) {
-      setErrorLotes(e instanceof Error ? e.message : "Error al generar lotes. ¿Has ejecutado la migración lotes_config en Supabase?");
+      setErrorLotes(
+        e instanceof Error
+          ? e.message
+          : "Error al generar lotes. ¿Has ejecutado la migración lotes_config en Supabase?"
+      );
     } finally {
       setSubmittingLotes(false);
     }
@@ -712,33 +799,25 @@ export default function LicitacionDetallePage() {
       }
       const allocPorDetalle = new Map<number, number>();
 
-      const lineas = albaranForm.lineas
-        .filter((l) =>
-          tipoLinea === "extraordinario"
-            ? l.id_tipo_gasto != null
-            : l.id_producto != null
-        )
+      const presupuestadas = albaranForm.lineas.filter(
+        (l) => (l as { tipo?: LineaTipo }).tipo === "presupuestada" && l.id_detalle != null
+      );
+      const extraordinarias = albaranForm.lineas.filter(
+        (l) => (l as { tipo?: LineaTipo }).tipo === "extraordinario" && l.id_tipo_gasto != null
+      );
+
+      const lineasPresu = presupuestadas
         .map((l) => {
-          let cantidad = tipoLinea === "extraordinario" ? 0 : parseFloat(String(l.cantidad)) || 0;
-          if (tipoLinea === "presupuestada" && l.id_detalle != null) {
+          let cantidad = parseFloat(String(l.cantidad)) || 0;
+          if (l.id_detalle != null) {
             const presu = partidasMap.get(l.id_detalle) ?? 0;
             const entregadas = unidadesEntregadasPorDetalle.get(l.id_detalle) ?? 0;
             const yaAlloc = allocPorDetalle.get(l.id_detalle) ?? 0;
             const maxPermitido = Math.max(0, presu - entregadas - yaAlloc);
             cantidad = Math.min(cantidad, maxPermitido);
-            allocPorDetalle.set(l.id_detalle, yaAlloc + cantidad);
+            allocPorDetalle.set(l.id_detalle, (allocPorDetalle.get(l.id_detalle) ?? 0) + cantidad);
           }
           const coste = parseFloat(String(l.coste_unit)) || 0;
-          if (tipoLinea === "extraordinario") {
-            return {
-              id_producto: null as number | null,
-              id_detalle: null,
-              id_tipo_gasto: l.id_tipo_gasto ?? null,
-              proveedor: undefined,
-              cantidad: 0,
-              coste_unit: coste,
-            };
-          }
           return {
             id_producto: l.id_producto as number,
             id_detalle: l.id_detalle ?? null,
@@ -749,18 +828,30 @@ export default function LicitacionDetallePage() {
           };
         })
         .filter((l) => l.cantidad > 0 || l.coste_unit > 0);
+
+      const lineasExt = extraordinarias
+        .map((l) => ({
+          id_producto: null as number | null,
+          id_detalle: null,
+          id_tipo_gasto: l.id_tipo_gasto ?? null,
+          proveedor: undefined,
+          cantidad: 0,
+          coste_unit: parseFloat(String(l.coste_unit)) || 0,
+        }))
+        .filter((l) => l.coste_unit > 0);
+
+      const lineas = [...lineasPresu, ...lineasExt];
       if (lineas.length === 0) {
         setAlbaranError(
-          tipoLinea === "extraordinario"
-            ? "Añade al menos una línea con tipo de gasto y coste."
-            : "Añade al menos una línea con producto seleccionado."
+          "Añade al menos una línea (partida presupuestada o gasto extraordinario) con importe."
         );
         setSubmittingAlbaran(false);
         return;
       }
       const observacionesOtros = albaranForm.lineas
         .map((l, i) => {
-          if (tipoLinea !== "extraordinario" || l.id_tipo_gasto == null) return null;
+          if ((l as { tipo?: LineaTipo }).tipo !== "extraordinario" || l.id_tipo_gasto == null)
+            return null;
           const tipo = tiposGasto.find((t) => t.id === l.id_tipo_gasto);
           if ((tipo?.nombre ?? "").trim().toLowerCase() !== "otros") return null;
           const libre = (l.tipoGastoLibre ?? "").trim();
@@ -1305,6 +1396,103 @@ export default function LicitacionDetallePage() {
         </Card>
       </section>
 
+      {lic.id_estado >= ID_ESTADO_ADJUDICADA && (
+        <section className="grid gap-3 sm:grid-cols-3 mt-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xs font-semibold text-slate-500">
+                Coste real (entregado)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-lg font-semibold text-amber-900">
+                {formatEuro(costeRealEntregado)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xs font-semibold text-slate-500">
+                Gastos extraordinarios
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-lg font-semibold text-amber-900">
+                {formatEuro(gastosExtraEntregas)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xs font-semibold text-slate-500">
+                Beneficio real
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const beneficioReal = ofertado - (costeRealEntregado + gastosExtraEntregas);
+                return (
+                  <p
+                    className={`text-lg font-semibold ${
+                      beneficioReal >= 0 ? "text-emerald-900" : "text-rose-700"
+                    }`}
+                  >
+                    {formatEuro(beneficioReal)}
+                  </p>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
+      {lic.id_estado >= ID_ESTADO_ADJUDICADA && (
+        <section className="grid gap-3 sm:grid-cols-3 mt-2">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xs font-semibold text-slate-500">
+                Importe cobrado
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-lg font-semibold text-emerald-900">
+                {formatEuro(totalCobrado)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xs font-semibold text-slate-500">
+                Importe pendiente de cobro
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-lg font-semibold text-amber-900">
+                {formatEuro(totalPendiente)}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-xs font-semibold text-slate-500">
+                % cobrado sobre entregado
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {(() => {
+                const total = totalCobrado + totalPendiente;
+                const pct = total > 0 ? Math.round((totalCobrado / total) * 100) : 0;
+                return (
+                  <p className="text-lg font-semibold text-slate-900">
+                    {pct}%
+                  </p>
+                );
+              })()}
+            </CardContent>
+          </Card>
+        </section>
+      )}
+
       {isAmSda && (
         <div className="rounded-lg border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
           Este es un Acuerdo Marco / SDA. La gestión de presupuesto, entregas y remaining se hace en cada contrato derivado.
@@ -1347,6 +1535,9 @@ export default function LicitacionDetallePage() {
                       En contratos basados y específicos no se usan lotes; todas las partidas en una sola tabla.
                     </p>
                     <EditableBudgetTable
+                      key={(lic.partidas ?? [])
+                        .map((p) => `${p.id_detalle}-${p.id_producto ?? "null"}-${p.lote ?? "General"}`)
+                        .join("|")}
                       lic={lic}
                       onPartidaAdded={refetchLicitacion}
                       isLocked={isLocked}
@@ -1416,6 +1607,12 @@ export default function LicitacionDetallePage() {
                     )}
                     <div className="min-h-0 flex-1">
                       <EditableBudgetTable
+                        key={(lic.partidas ?? [])
+                          .map(
+                            (p) =>
+                              `${p.id_detalle}-${p.id_producto ?? "null"}-${p.lote ?? "General"}`
+                          )
+                          .join("|")}
                         lic={lic}
                         onPartidaAdded={refetchLicitacion}
                         onUniqueLotesChange={setUniqueLotesFromTable}
@@ -1452,7 +1649,14 @@ export default function LicitacionDetallePage() {
                         <CardContent className="pt-0">
                           <div className="min-h-0 flex-1">
                             <EditableBudgetTable
-                              key={`lote-${loteItem.nombre}`}
+                              key={`lote-${loteItem.nombre}-${(lic.partidas ?? [])
+                                .map(
+                                  (p) =>
+                                    `${p.id_detalle}-${p.id_producto ?? "null"}-${
+                                      p.lote ?? "General"
+                                    }`
+                                )
+                                .join("|")}`}
                               lic={lic}
                               onPartidaAdded={refetchLicitacion}
                               loteFilter={loteItem.nombre}
@@ -1478,7 +1682,14 @@ export default function LicitacionDetallePage() {
                           <CardContent className="pt-0">
                             <div className="min-h-0 flex-1">
                               <EditableBudgetTable
-                                key="lote-otros"
+                                key={`lote-otros-${(lic.partidas ?? [])
+                                  .map(
+                                    (p) =>
+                                      `${p.id_detalle}-${p.id_producto ?? "null"}-${
+                                        p.lote ?? "General"
+                                      }`
+                                  )
+                                  .join("|")}`}
                                 lic={lic}
                                 onPartidaAdded={refetchLicitacion}
                                 lotesExcluidos={lotesConfig.map((l) => l.nombre)}
@@ -1611,29 +1822,42 @@ export default function LicitacionDetallePage() {
                               </td>
                             </tr>
                           ) : (
-                            entrega.lineas.map((lin, idx) => (
-                              <tr key={lin.id_real ?? idx} className="border-b border-slate-100 last:border-0">
-                                <td className="py-1.5 pr-3 text-slate-900">{lin.product_nombre ?? "—"}</td>
-                                <td className="py-1.5 pr-3 text-slate-600">{lin.proveedor ?? "—"}</td>
-                                <td className="py-1.5 pr-3 text-right text-slate-900">{lin.cantidad}</td>
-                                <td className="py-1.5 pr-3 text-right text-slate-900">{lin.pcu}</td>
-                                <td className="py-1.5 pr-3 text-center">
-                                  <EstadoLineaCell
-                                    lin={lin}
-                                    updatingLineId={updatingLineId}
-                                    onUpdate={handleUpdateLineaEntrega}
-                                    options={ESTADOS_LINEA_ENTREGA}
-                                  />
-                                </td>
-                                <td className="py-1.5 pr-3 text-center">
-                                  <CobradoLineaCell
-                                    lin={lin}
-                                    updatingLineId={updatingLineId}
-                                    onUpdate={handleUpdateLineaEntrega}
-                                  />
-                                </td>
-                              </tr>
-                            ))
+                            entrega.lineas.map((lin, idx) => {
+                              const esGastoExtra =
+                                lin.id_detalle == null &&
+                                (lin as any).id_tipo_gasto != null;
+                              return (
+                                <tr key={lin.id_real ?? idx} className="border-b border-slate-100 last:border-0">
+                                  <td className="py-1.5 pr-3 text-slate-900">{lin.product_nombre ?? "—"}</td>
+                                  <td className="py-1.5 pr-3 text-slate-600">{lin.proveedor ?? "—"}</td>
+                                  <td className="py-1.5 pr-3 text-right text-slate-900">{lin.cantidad}</td>
+                                  <td className="py-1.5 pr-3 text-right text-slate-900">{lin.pcu}</td>
+                                  <td className="py-1.5 pr-3 text-center">
+                                    {esGastoExtra ? (
+                                      <span className="text-xs text-slate-400">—</span>
+                                    ) : (
+                                      <EstadoLineaCell
+                                        lin={lin}
+                                        updatingLineId={updatingLineId}
+                                        onUpdate={handleUpdateLineaEntrega}
+                                        options={ESTADOS_LINEA_ENTREGA}
+                                      />
+                                    )}
+                                  </td>
+                                  <td className="py-1.5 pr-3 text-center">
+                                    {esGastoExtra ? (
+                                      <span className="text-xs text-slate-400">—</span>
+                                    ) : (
+                                      <CobradoLineaCell
+                                        lin={lin}
+                                        updatingLineId={updatingLineId}
+                                        onUpdate={handleUpdateLineaEntrega}
+                                      />
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })
                           )}
                         </tbody>
                       </table>
@@ -1696,7 +1920,6 @@ export default function LicitacionDetallePage() {
                             setAlbaranForm((f) => ({
                               ...f,
                               tipoLinea: "presupuestada",
-                              lineas: [nuevaLineaVacia("presupuestada"), nuevaLineaVacia("presupuestada"), nuevaLineaVacia("presupuestada")],
                             }))
                           }
                           className={
@@ -1714,7 +1937,6 @@ export default function LicitacionDetallePage() {
                             setAlbaranForm((f) => ({
                               ...f,
                               tipoLinea: "extraordinario",
-                              lineas: [nuevaLineaVacia("extraordinario"), nuevaLineaVacia("extraordinario"), nuevaLineaVacia("extraordinario")],
                             }))
                           }
                           className={
@@ -1734,19 +1956,24 @@ export default function LicitacionDetallePage() {
                           <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-medium uppercase tracking-wide text-slate-500">
                             <th className="w-24 py-2 pl-3 pr-2">Tipo</th>
                             <th className="min-w-[180px] py-2 pl-3 pr-2">Concepto</th>
-                            <th className="w-16 py-2 pr-2 text-right">Cant.</th>
+                            {tipoLinea === "presupuestada" && (
+                              <th className="w-16 py-2 pr-2 text-right">Cant.</th>
+                            )}
                             <th className="w-20 py-2 pr-2 text-right">Coste €</th>
                             <th className="w-10 py-2 pr-3"></th>
                           </tr>
                         </thead>
                         <tbody>
-                          {albaranForm.lineas.map((lin, idx) => (
-                            <tr key={idx} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
-                              <td className="py-1.5 pl-3 pr-2 align-middle text-xs text-slate-500">
-                                {(lin as { tipo?: LineaTipo }).tipo === "extraordinario" ? "Gasto ext." : "Partida"}
-                              </td>
-                              <td className="py-1.5 pl-3 pr-2 align-top">
-                                {(lin as { tipo?: LineaTipo }).tipo === "presupuestada" ? (
+                          {albaranForm.lineas.map((lin, idx) => {
+                            const tipoLin = (lin as { tipo?: LineaTipo }).tipo ?? "presupuestada";
+                            if (tipoLin !== tipoLinea) return null;
+                            return (
+                              <tr key={idx} className="border-b border-slate-100 last:border-0 hover:bg-slate-50/50">
+                                <td className="py-1.5 pl-3 pr-2 align-middle text-xs text-slate-500">
+                                  {tipoLin === "extraordinario" ? "Gasto ext." : "Partida"}
+                                </td>
+                                <td className="py-1.5 pl-3 pr-2 align-top">
+                                  {tipoLin === "presupuestada" ? (
                                   <select
                                     className="h-8 w-full min-w-[160px] rounded border border-slate-200 bg-white px-2 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-emerald-500"
                                     value={lin.id_detalle != null ? String(lin.id_detalle) : ""}
@@ -1770,11 +1997,24 @@ export default function LicitacionDetallePage() {
                                     }}
                                   >
                                     <option value="">Selecciona partida…</option>
-                                    {(lic?.partidas ?? []).map((p) => (
-                                      <option key={p.id_detalle} value={p.id_detalle}>
-                                        {isContratoDerivado ? (p.product_nombre ?? "—") : [p.lote ?? "General", p.product_nombre].filter(Boolean).join(" – ")}
-                                      </option>
-                                    ))}
+                                    {(() => {
+                                      const partidas = lic?.partidas ?? [];
+                                      const partidasElegibles =
+                                        tieneLotes
+                                          ? partidas.filter((p) =>
+                                              lotesGanados.has(p.lote ?? "General")
+                                            )
+                                          : partidas;
+                                      return partidasElegibles.map((p) => (
+                                        <option key={p.id_detalle} value={p.id_detalle}>
+                                          {isContratoDerivado
+                                            ? (p.product_nombre ?? "—")
+                                            : [p.lote ?? "General", p.product_nombre]
+                                                .filter(Boolean)
+                                                .join(" – ")}
+                                        </option>
+                                      ));
+                                    })()}
                                   </select>
                                 ) : (
                                   <div className="flex min-w-[200px] flex-col gap-1.5">
@@ -1828,7 +2068,7 @@ export default function LicitacionDetallePage() {
                                   </div>
                                 )}
                               </td>
-                              {(lin as { tipo?: LineaTipo }).tipo === "presupuestada" ? (
+                              {tipoLinea === "presupuestada" && (
                                 <td className="py-1.5 pr-2 text-right align-top">
                                     {(() => {
                                       const partida =
@@ -1891,25 +2131,54 @@ export default function LicitacionDetallePage() {
                                       );
                                     })()}
                                 </td>
-                              ) : (
-                                <td className="py-1.5 pr-2 text-right align-top text-slate-400">—</td>
                               )}
                               <td className="py-1.5 pr-2 text-right align-top">
-                                <Input
-                                  type="number"
-                                  min={0}
-                                  step={0.01}
-                                  className="h-8 w-16 text-right text-xs"
-                                  value={lin.coste_unit}
-                                  onChange={(e) =>
-                                    setAlbaranForm((f) => ({
-                                      ...f,
-                                      lineas: f.lineas.map((l, i) =>
-                                        i === idx ? { ...l, coste_unit: e.target.value } : l
-                                      ),
-                                    }))
-                                  }
-                                />
+                                {(() => {
+                                  const isPresu = tipoLin === "presupuestada";
+                                  const partida =
+                                    isPresu && lin.id_detalle != null
+                                      ? lic?.partidas?.find((p) => p.id_detalle === lin.id_detalle)
+                                      : undefined;
+                                  // Coste presupuestado (PCU) como número fantasma
+                                  const costePresu =
+                                    partida && partida.pcu != null ? Number(partida.pcu) : 0;
+                                  const hasUserCost = String(lin.coste_unit ?? "").trim() !== "";
+                                  const showGhostCost = isPresu && !hasUserCost && costePresu > 0;
+                                  const ghostText = showGhostCost
+                                    ? costePresu.toLocaleString("es-ES", {
+                                        minimumFractionDigits: 2,
+                                        maximumFractionDigits: 2,
+                                      })
+                                    : "";
+                                  return (
+                                    <div className="relative w-20">
+                                      <Input
+                                        type="number"
+                                        min={0}
+                                        step={0.01}
+                                        className="h-8 w-20 text-right text-xs"
+                                        value={lin.coste_unit}
+                                        placeholder={showGhostCost ? " " : "Coste"}
+                                        onChange={(e) =>
+                                          setAlbaranForm((f) => ({
+                                            ...f,
+                                            lineas: f.lineas.map((l, i) =>
+                                              i === idx ? { ...l, coste_unit: e.target.value } : l
+                                            ),
+                                          }))
+                                        }
+                                      />
+                                      {showGhostCost && (
+                                        <span
+                                          className="pointer-events-none absolute inset-0 flex items-center justify-end pr-2 text-xs text-slate-400"
+                                          aria-hidden
+                                        >
+                                          {ghostText}
+                                        </span>
+                                      )}
+                                    </div>
+                                  );
+                                })()}
                               </td>
                               <td className="py-1.5 pr-3 align-top">
                                 <Button
@@ -1929,7 +2198,8 @@ export default function LicitacionDetallePage() {
                                 </Button>
                               </td>
                             </tr>
-                          ))}
+                          );
+                          })}
                         </tbody>
                       </table>
                     </div>
@@ -2063,8 +2333,10 @@ export default function LicitacionDetallePage() {
         partidasInvalidas={partidasInvalidas}
         tenderId={lic.id_licitacion}
         onSuccess={async () => {
-          await refetchLicitacion();
-          await handleCambiarEstado();
+          // Refrescar la licitación para que el presupuesto muestre los productos asignados.
+          refetchLicitacion();
+          // El usuario puede volver a pulsar "Confirmar cambio" una vez asignados
+          // todos los productos; entonces handleCambiarEstado ya no abrirá el popup.
         }}
       />
     </div>

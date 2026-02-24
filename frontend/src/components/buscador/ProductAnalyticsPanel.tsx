@@ -1,7 +1,6 @@
 "use client";
 
 import * as React from "react";
-import { Bar, BarChart, XAxis, YAxis, ResponsiveContainer, Cell } from "recharts";
 import type { ProductAnalytics } from "@/types/api";
 import { useProductAnalytics } from "@/hooks/useProductAnalytics";
 import { MaterialTrendChart } from "@/components/analytics/MaterialTrendChart";
@@ -29,9 +28,14 @@ export function ProductAnalyticsPanel({
 
   const trendBadge = React.useMemo(() => {
     if (!data || data.price_history.length < 2) return null;
-    const values = data.price_history.map((p) => p.value);
+    const values = data.price_history
+      .map((p) => Number(p.value))
+      .filter((n) => Number.isFinite(n));
+    if (values.length < 2) return null;
     const last = values[values.length - 1];
-    const avg = values.reduce((a, b) => a + b, 0) / values.length;
+    const sum = values.reduce((a, b) => a + b, 0);
+    const avg = sum / values.length;
+    if (!Number.isFinite(avg)) return null;
     const isUp = last >= avg;
     return { isUp, last, avg };
   }, [data]);
@@ -88,19 +92,6 @@ function ProductAnalyticsContent({
   data: ProductAnalytics;
   trendBadge: { isUp: boolean; last: number; avg: number } | null;
 }) {
-  const barData = React.useMemo(() => {
-    const items: { name: string; valor: number; fill: string }[] = [];
-    const precioMedio =
-      data.price_history.length > 0
-        ? data.price_history.reduce((a, p) => a + p.value, 0) / data.price_history.length
-        : 0;
-    if (data.precio_referencia_medio != null) {
-      items.push({ name: "Ref. media", valor: data.precio_referencia_medio, fill: "#64748b" });
-    }
-    items.push({ name: "Adj. real", valor: precioMedio, fill: "#10b981" });
-    return items;
-  }, [data]);
-
   return (
     <div className="space-y-6">
       {trendBadge && (
@@ -113,7 +104,8 @@ function ProductAnalyticsContent({
             {trendBadge.isUp ? "↑ Subiendo" : "↓ Bajando"}
           </Badge>
           <span className="text-xs text-slate-500">
-            Último {formatEuro(trendBadge.last)} · Media {formatEuro(trendBadge.avg)}
+            Último {Number.isFinite(trendBadge.last) ? formatEuro(trendBadge.last) : "—"} · Media{" "}
+            {Number.isFinite(trendBadge.avg) ? formatEuro(trendBadge.avg) : "—"}
           </span>
         </div>
       )}
@@ -136,17 +128,11 @@ function ProductAnalyticsContent({
         <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
           Métricas de volumen
         </h3>
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 gap-3">
           <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
             <p className="text-xs text-slate-500">Total licitado</p>
             <p className="text-lg font-semibold text-emerald-400">
               {formatEuro(data.volume_metrics.total_licitado)}
-            </p>
-          </div>
-          <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">
-            <p className="text-xs text-slate-500">Oferentes promedio</p>
-            <p className="text-lg font-semibold text-slate-200">
-              {data.volume_metrics.cantidad_oferentes_promedio.toFixed(1)}
             </p>
           </div>
         </div>
@@ -174,31 +160,6 @@ function ProductAnalyticsContent({
           </ul>
         </section>
       )}
-
-      <section>
-        <h3 className="mb-2 text-xs font-medium uppercase tracking-wide text-slate-400">
-          Precio de referencia vs adjudicación real
-        </h3>
-        <div className="h-[200px] rounded-lg border border-slate-700 bg-slate-800/50 p-2">
-          {barData.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={barData} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
-                <XAxis dataKey="name" tick={{ fill: "#94a3b8", fontSize: 11 }} />
-                <YAxis tick={{ fill: "#94a3b8", fontSize: 11 }} tickFormatter={(v) => `€${v.toFixed(2)}`} />
-                <Bar dataKey="valor" radius={4}>
-                  {barData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.fill} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="flex h-full items-center justify-center text-xs text-slate-500">
-              Sin datos para comparar
-            </div>
-          )}
-        </div>
-      </section>
 
       {data.forecast != null && (
         <div className="rounded-lg border border-slate-700 bg-slate-800/50 p-3">

@@ -115,11 +115,15 @@ function ProductCellAutocomplete({
           if (v.trim() === "" && value && onClear) {
             onClear();
           }
-          // Avisar al padre del texto libre mientras se escribe, si no hay producto oficial.
-          if (!value && onAcceptFreeText) {
-            onAcceptFreeText(v);
-          }
           if (!open) setOpen(true);
+        }}
+        onBlur={() => {
+          // Cuando el usuario termina de escribir y deja el campo,
+          // sincronizamos el texto libre con el formulario padre.
+          if (!value && onAcceptFreeText) {
+            const text = query.trim();
+            onAcceptFreeText(text);
+          }
         }}
         onFocus={() => {
             if (value) setQuery(value.nombre);
@@ -288,6 +292,8 @@ export function EditableBudgetTable({
   } | null>(null);
   /** Por cada índice de fila: si el PVU tiene desviación aceptable (verde) o no (rojo). null = sin datos o cargando. */
   const [deviationByIndex, setDeviationByIndex] = React.useState<Record<number, boolean | null>>({});
+  /** Media histórica de PVU por fila (para mostrar como número fantasma/sugerido). */
+  const [historicalAvgByIndex, setHistoricalAvgByIndex] = React.useState<Record<number, number | null>>({});
   /** Descuento global para tipo 5 (sobre PMAXU → PVU) */
   const [globalDiscountPct, setGlobalDiscountPct] = React.useState<number>(0);
   const initialDiscountSetRef = React.useRef(false);
@@ -376,11 +382,20 @@ export function EditableBudgetTable({
         const hasProduct = row.id_producto != null;
         const nombre = (row.product_nombre ?? "").trim();
         const pvuVal = Number(row.pvu);
-        // Solo tiene sentido comprobar desviación para productos del catálogo con precio informado
-        if (!hasProduct || !nombre || pvuVal <= 0) toClear.push(index);
-        else toFetch.push({ index, nombre, pvu: pvuVal });
+        // Solo tiene sentido comprobar desviación/media histórica para productos del catálogo
+        if (!hasProduct || !nombre) {
+          toClear.push(index);
+        } else {
+          // Aunque el PVU aún sea 0, pedimos histórico para poder mostrar el PVU medio como placeholder
+          toFetch.push({ index, nombre, pvu: pvuVal > 0 ? pvuVal : 0 });
+        }
       });
       setDeviationByIndex((prev) => {
+        const next = { ...prev };
+        toClear.forEach((i) => (next[i] = null));
+        return next;
+      });
+      setHistoricalAvgByIndex((prev) => {
         const next = { ...prev };
         toClear.forEach((i) => (next[i] = null));
         return next;
@@ -389,9 +404,14 @@ export function EditableBudgetTable({
         AnalyticsService.getPriceDeviationCheck(nombre, pvu)
           .then((res) => {
             setDeviationByIndex((prev) => ({ ...prev, [index]: res.is_deviated }));
+            setHistoricalAvgByIndex((prev) => ({
+              ...prev,
+              [index]: Number.isFinite(Number(res.historical_avg)) ? Number(res.historical_avg) : null,
+            }));
           })
           .catch(() => {
             setDeviationByIndex((prev) => ({ ...prev, [index]: null }));
+            setHistoricalAvgByIndex((prev) => ({ ...prev, [index]: null }));
           });
       });
     }, DEVIATION_DEBOUNCE_MS);
@@ -640,6 +660,7 @@ export function EditableBudgetTable({
               // Observadores para renderizado
               const idProd = form.watch(`partidas.${index}.id_producto`);
               const prodName = form.watch(`partidas.${index}.product_nombre`);
+              const historicalAvg = historicalAvgByIndex[index] ?? null;
 
               return (
                 <tr 
@@ -769,7 +790,11 @@ export function EditableBudgetTable({
                       <Input
                         type="text"
                         inputMode="decimal"
-                        placeholder="0"
+                        placeholder={
+                          historicalAvg != null && !Number.isNaN(historicalAvg) && historicalAvg > 0
+                            ? String(historicalAvg)
+                            : "0"
+                        }
                         className={`${inputCellClass} text-right`}
                         disabled={isLocked}
                         value={

@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from backend.config import supabase_client, get_maestros
 from backend.deps import CurrentUserDep
-from backend.models import (
+from backend.schemas.analytics import (
     CompetitorItem,
     KPIDashboard,
     MaterialTrendPoint,
@@ -43,8 +43,28 @@ ESTADOS_ADJUDICADAS_TERMINADAS_NORM = {s.lower() for s in ESTADOS_ADJUDICADAS_TE
 ESTADOS_DESCARTADA_NORM = {s.lower() for s in ESTADOS_DESCARTADA}
 ESTADOS_EN_ANALISIS_NORM = {s.lower() for s in ESTADOS_EN_ANALISIS}
 
-# Tipos de procedimiento facturables (excluimos AM y SDA "padre" para totales económicos)
-TIPOS_FACTURABLES = {"ORDINARIO", "CONTRATO_BASADO"}
+# Tipos de procedimiento que cuentan en el dashboard: solo ordinarios y "hijos" (contratos derivados).
+# Excluimos ACUERDO_MARCO y SDA (padres); incluimos ORDINARIO, CONTRATO_BASADO y ESPECIFICO_SDA.
+TIPOS_INCLUIDOS_DASHBOARD = {"ORDINARIO", "CONTRATO_BASADO", "ESPECIFICO_SDA"}
+
+
+def _empty_kpis() -> KPIDashboard:
+    """Devuelve un objeto KPIDashboard vacío/neutral para casos de error o sin datos."""
+    return KPIDashboard(
+        timeline=[],
+        total_oportunidades_uds=0,
+        total_oportunidades_euros=0.0,
+        total_ofertado_uds=0,
+        total_ofertado_euros=0.0,
+        ratio_ofertado_oportunidades_uds=0.0,
+        ratio_ofertado_oportunidades_euros=0.0,
+        ratio_adjudicadas_terminadas_ofertado=0.0,
+        margen_medio_ponderado_presupuestado=None,
+        margen_medio_ponderado_real=None,
+        pct_descartadas_uds=None,
+        pct_descartadas_euros=None,
+        ratio_adjudicacion=0.0,
+    )
 
 
 def _get_licitaciones_df(org_id: str) -> pd.DataFrame:
@@ -80,13 +100,19 @@ def _compute_margen_ponderado(
     org_id: str,
 ) -> Optional[float]:
     """Margen medio ponderado: venta-weighted. presupuestado=True usa detalle (pvu,pcu,unidades); False usa real."""
-    if not id_licitaciones:
+    # Normalizar siempre los IDs a enteros puros (evita "118.0" -> error 22P02 en Postgres)
+    try:
+        id_licitaciones_int = [int(x) for x in id_licitaciones if x is not None]
+    except (TypeError, ValueError):
+        id_licitaciones_int = []
+
+    if not id_licitaciones_int:
         return None
     if presupuestado:
         # Sum (pvu*ud - pcu*ud) / Sum(pvu*ud) por licitación, luego ponderar por venta total
         det = client.table("tbl_licitaciones_detalle").select(
             "id_licitacion, unidades, pvu, pcu"
-        ).eq("organization_id", org_id).in_("id_licitacion", id_licitaciones).eq("activo", True).execute()
+        ).eq("organization_id", org_id).in_("id_licitacion", id_licitaciones_int).eq("activo", True).execute()
         rows = det.data or []
         if not rows:
             return None
@@ -105,7 +131,7 @@ def _compute_margen_ponderado(
         # Real: tbl_licitaciones_real cantidad, pcu; venta aproximada con pvu de detalle por id_detalle
         real = client.table("tbl_licitaciones_real").select(
             "id_licitacion, id_detalle, cantidad, pcu"
-        ).eq("organization_id", org_id).in_("id_licitacion", id_licitaciones).execute()
+        ).eq("organization_id", org_id).in_("id_licitacion", id_licitaciones_int).execute()
         real_rows = real.data or []
         if not real_rows:
             return None
@@ -114,7 +140,11 @@ def _compute_margen_ponderado(
         df_real["pcu"] = pd.to_numeric(df_real["pcu"], errors="coerce").fillna(0)
         df_real["coste_real"] = df_real["cantidad"] * df_real["pcu"]
         # Obtener pvu por id_detalle para venta
-        id_detalles = df_real["id_detalle"].dropna().unique().tolist()
+        raw_id_detalles = df_real["id_detalle"].dropna().unique().tolist()
+        try:
+            id_detalles = [int(x) for x in raw_id_detalles if x is not None]
+        except (TypeError, ValueError):
+            id_detalles = []
         if not id_detalles:
             return None
         det = client.table("tbl_licitaciones_detalle").select("id_detalle, pvu").eq("organization_id", org_id).in_("id_detalle", id_detalles).execute()
@@ -156,21 +186,7 @@ def get_kpis(
         ) from e
 
     if df.empty:
-        return KPIDashboard(
-            timeline=[],
-            total_oportunidades_uds=0,
-            total_oportunidades_euros=0.0,
-            total_ofertado_uds=0,
-            total_ofertado_euros=0.0,
-            ratio_ofertado_oportunidades_uds=0.0,
-            ratio_ofertado_oportunidades_euros=0.0,
-            ratio_adjudicadas_terminadas_ofertado=0.0,
-            margen_medio_ponderado_presupuestado=None,
-            margen_medio_ponderado_real=None,
-            pct_descartadas_uds=None,
-            pct_descartadas_euros=None,
-            ratio_adjudicacion=0.0,
-        )
+        return _empty_kpis()
 
     # Filtro temporal por fecha de adjudicación
     if fecha_adjudicacion_desde or fecha_adjudicacion_hasta:
@@ -182,120 +198,139 @@ def get_kpis(
             mask = mask & (f_adj <= pd.Timestamp(fecha_adjudicacion_hasta))
         df = df[mask]
         if df.empty:
-            return KPIDashboard(
-                timeline=[],
-                total_oportunidades_uds=0,
-                total_oportunidades_euros=0.0,
-                total_ofertado_uds=0,
-                total_ofertado_euros=0.0,
-                ratio_ofertado_oportunidades_uds=0.0,
-                ratio_ofertado_oportunidades_euros=0.0,
-                ratio_adjudicadas_terminadas_ofertado=0.0,
-                margen_medio_ponderado_presupuestado=None,
-                margen_medio_ponderado_real=None,
-                pct_descartadas_uds=None,
-                pct_descartadas_euros=None,
-                ratio_adjudicacion=0.0,
-            )
+            return _empty_kpis()
 
     try:
         df = _enriquecer_estados(df, maestros)
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error procesando KPIs: {e!s}",
-        ) from e
 
-    # Normalizar nombre de estado para comparación insensible a mayúsculas (ej. "TERMINADA" en BD)
-    df["_estado_norm"] = df["estado_nombre"].astype(str).str.strip().str.lower()
+        # Normalizar nombre de estado para comparación insensible a mayúsculas (ej. "TERMINADA" en BD)
+        df["_estado_norm"] = df["estado_nombre"].astype(str).str.strip().str.lower()
 
-    # Solo facturables para totales económicos y timeline (excluir ACUERDO_MARCO y SDA "padre")
-    tipo = df.get("tipo_procedimiento")
-    if tipo is not None:
-        mask_facturable = tipo.fillna("ORDINARIO").astype(str).str.upper().isin(TIPOS_FACTURABLES)
-    else:
-        mask_facturable = pd.Series(True, index=df.index)
-    df_fact = df[mask_facturable]
-    timeline_records = _build_timeline_all(df_fact)
+        # Solo licitaciones que cuentan en el dashboard: ORDINARIO, CONTRATO_BASADO, ESPECIFICO_SDA.
+        # Excluimos ACUERDO_MARCO y SDA (solo los hijos/contratos derivados entran).
+        tipo = df.get("tipo_procedimiento")
+        if tipo is not None:
+            tipo_norm = tipo.fillna("").astype(str).str.upper().str.strip()
+            mask_facturable = tipo_norm.isin(TIPOS_INCLUIDOS_DASHBOARD)
+        else:
+            # Columna inexistente: no filtrar por tipo (evitar vaciar el dashboard).
+            mask_facturable = pd.Series(True, index=df.index)
+        df_fact = df[mask_facturable]
+        timeline_records = _build_timeline_all(df_fact)
 
-    # Total oportunidades = solo licitaciones facturables (ORDINARIO, BASADO_AM, ESPECIFICO_SDA)
-    total_oportunidades_uds = len(df_fact)
-    total_oportunidades_euros = float(df_fact["pres_maximo"].sum())
+        # Total oportunidades = solo incluidas (ORDINARIO, CONTRATO_BASADO, ESPECIFICO_SDA)
+        total_oportunidades_uds = len(df_fact)
+        total_oportunidades_euros = float(df_fact["pres_maximo"].sum())
 
-    # Total ofertado = facturables en estados Adjudicada, No Adjudicada, Presentada, Terminada
-    mask_ofertado = df_fact["_estado_norm"].isin(ESTADOS_OFERTADO_NORM)
-    df_ofertado = df_fact[mask_ofertado]
-    total_ofertado_uds = len(df_ofertado)
-    total_ofertado_euros = float(df_ofertado["pres_maximo"].sum())
+        # Total ofertado = facturables en estados Adjudicada, No Adjudicada, Presentada, Terminada
+        mask_ofertado = df_fact["_estado_norm"].isin(ESTADOS_OFERTADO_NORM)
+        df_ofertado = df_fact[mask_ofertado]
+        total_ofertado_uds = len(df_ofertado)
+        total_ofertado_euros = float(df_ofertado["pres_maximo"].sum())
 
-    # Ratios ofertado/oportunidades
-    ratio_ofertado_oportunidades_uds = (
-        (total_ofertado_uds / total_oportunidades_uds * 100) if total_oportunidades_uds else 0.0
-    )
-    ratio_ofertado_oportunidades_euros = (
-        (total_ofertado_euros / total_oportunidades_euros * 100) if total_oportunidades_euros else 0.0
-    )
-
-    # Adjudicadas + Terminadas (solo facturables)
-    mask_adj_ter = df_fact["_estado_norm"].isin(ESTADOS_ADJUDICADAS_TERMINADAS_NORM)
-    count_adj_ter = mask_adj_ter.sum()
-    ratio_adjudicadas_terminadas_ofertado = (
-        (count_adj_ter / total_ofertado_uds * 100) if total_ofertado_uds else 0.0
-    )
-
-    # Margen medio ponderado (adjudicadas + terminadas, solo facturables)
-    ids_adj_ter = df_fact.loc[mask_adj_ter, "id_licitacion"].astype(int).tolist()
-    org_s = str(current_user.org_id)
-    margen_presu = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=True, org_id=org_s)
-    margen_real = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=False, org_id=org_s)
-
-    # % descartadas = descartadas / (total facturables - en análisis)
-    mask_des = df_fact["_estado_norm"].isin(ESTADOS_DESCARTADA_NORM)
-    mask_an_val = df_fact["_estado_norm"].isin(ESTADOS_EN_ANALISIS_NORM)
-    count_des = mask_des.sum()
-    denom = total_oportunidades_uds - mask_an_val.sum()
-    pct_descartadas_uds = (count_des / denom * 100) if denom and denom > 0 else None
-    euros_des = float(df_fact.loc[mask_des, "pres_maximo"].sum())
-    euros_total_menos_an_val = float(df_fact.loc[~mask_an_val, "pres_maximo"].sum())
-    pct_descartadas_euros = (euros_des / euros_total_menos_an_val * 100) if euros_total_menos_an_val else None
-
-    # Ratio adjudicación = (Adjudicadas+Terminadas) / (Adjudicadas+No Adjudicadas+Terminadas)
-    # Ofertado ya es ese conjunto; entonces ratio_adjudicadas_terminadas_ofertado es el ratio adjudicación en uds.
-    ratio_adjudicacion = ratio_adjudicadas_terminadas_ofertado / 100.0 if total_ofertado_uds else 0.0
-
-    def _norm_timeline_record(r: Dict[str, Any]) -> TimelineItem:
-        raw_nombre = r.get("nombre")
-        nombre = (str(raw_nombre).strip() if raw_nombre is not None and str(raw_nombre) != "nan" else "") or f"Licitación {r['id_licitacion']}"
-        raw_adj = r.get("fecha_adjudicacion")
-        raw_fin = r.get("fecha_finalizacion")
-        fecha_adj = str(raw_adj).strip() if raw_adj is not None and str(raw_adj) != "nan" else None
-        fecha_fin = str(raw_fin).strip() if raw_fin is not None and str(raw_fin) != "nan" else None
-        return TimelineItem(
-            id_licitacion=int(r["id_licitacion"]),
-            nombre=nombre,
-            fecha_adjudicacion=fecha_adj or None,
-            fecha_finalizacion=fecha_fin or None,
-            estado_nombre=r.get("estado_nombre"),
-            pres_maximo=float(r["pres_maximo"]) if r.get("pres_maximo") is not None else None,
+        # Ratios ofertado/oportunidades
+        ratio_ofertado_oportunidades_uds = (
+            (total_ofertado_uds / total_oportunidades_uds * 100) if total_oportunidades_uds else 0.0
+        )
+        ratio_ofertado_oportunidades_euros = (
+            (total_ofertado_euros / total_oportunidades_euros * 100) if total_oportunidades_euros else 0.0
         )
 
-    timeline_items = [_norm_timeline_record(r) for r in timeline_records]
+        # Adjudicadas + Terminadas (solo facturables)
+        mask_adj_ter = df_fact["_estado_norm"].isin(ESTADOS_ADJUDICADAS_TERMINADAS_NORM)
+        count_adj_ter = mask_adj_ter.sum()
+        ratio_adjudicadas_terminadas_ofertado = (
+            (count_adj_ter / total_ofertado_uds * 100) if total_ofertado_uds else 0.0
+        )
 
-    return KPIDashboard(
-        timeline=timeline_items,
-        total_oportunidades_uds=int(total_oportunidades_uds),
-        total_oportunidades_euros=total_oportunidades_euros,
-        total_ofertado_uds=int(total_ofertado_uds),
-        total_ofertado_euros=total_ofertado_euros,
-        ratio_ofertado_oportunidades_uds=round(ratio_ofertado_oportunidades_uds, 2),
-        ratio_ofertado_oportunidades_euros=round(ratio_ofertado_oportunidades_euros, 2),
-        ratio_adjudicadas_terminadas_ofertado=round(ratio_adjudicadas_terminadas_ofertado, 2),
-        margen_medio_ponderado_presupuestado=round(margen_presu, 2) if margen_presu is not None else None,
-        margen_medio_ponderado_real=round(margen_real, 2) if margen_real is not None else None,
-        pct_descartadas_uds=round(pct_descartadas_uds, 2) if pct_descartadas_uds is not None else None,
-        pct_descartadas_euros=round(pct_descartadas_euros, 2) if pct_descartadas_euros is not None else None,
-        ratio_adjudicacion=round(ratio_adjudicacion, 4),
-    )
+        # Margen medio ponderado (adjudicadas + terminadas, solo facturables)
+        raw_ids_adj_ter = df_fact.loc[mask_adj_ter, "id_licitacion"].dropna().tolist()
+        try:
+            ids_adj_ter = [int(x) for x in raw_ids_adj_ter]
+        except (TypeError, ValueError):
+            ids_adj_ter = []
+        org_s = str(current_user.org_id)
+        margen_presu = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=True, org_id=org_s)
+        margen_real = _compute_margen_ponderado(supabase_client, ids_adj_ter, presupuestado=False, org_id=org_s)
+
+        # % descartadas = descartadas / (total facturables - en análisis)
+        mask_des = df_fact["_estado_norm"].isin(ESTADOS_DESCARTADA_NORM)
+        mask_an_val = df_fact["_estado_norm"].isin(ESTADOS_EN_ANALISIS_NORM)
+        count_des = mask_des.sum()
+        denom = total_oportunidades_uds - mask_an_val.sum()
+        pct_descartadas_uds = (count_des / denom * 100) if denom and denom > 0 else None
+        euros_des = float(df_fact.loc[mask_des, "pres_maximo"].sum())
+        euros_total_menos_an_val = float(df_fact.loc[~mask_an_val, "pres_maximo"].sum())
+        pct_descartadas_euros = (euros_des / euros_total_menos_an_val * 100) if euros_total_menos_an_val else None
+
+        # Ratio adjudicación = (Adjudicadas+Terminadas) / (Adjudicadas+No Adjudicadas+Terminadas)
+        # Ofertado ya es ese conjunto; entonces ratio_adjudicadas_terminadas_ofertado es el ratio adjudicación en uds.
+        ratio_adjudicacion = ratio_adjudicadas_terminadas_ofertado / 100.0 if total_ofertado_uds else 0.0
+
+        def _norm_timeline_record(r: Dict[str, Any]) -> TimelineItem:
+            """Normaliza un registro del timeline siendo tolerante con datos raros o faltantes."""
+            raw_id = r.get("id_licitacion")
+            try:
+                id_lic = int(raw_id) if raw_id is not None else -1
+            except (TypeError, ValueError):
+                id_lic = -1
+
+            raw_nombre = r.get("nombre")
+            nombre = (
+                str(raw_nombre).strip()
+                if raw_nombre is not None and str(raw_nombre) != "nan"
+                else ""
+            ) or f"Licitación {id_lic}"
+
+            raw_adj = r.get("fecha_adjudicacion")
+            raw_fin = r.get("fecha_finalizacion")
+            fecha_adj = (
+                str(raw_adj).strip()
+                if raw_adj is not None and str(raw_adj) != "nan"
+                else None
+            )
+            fecha_fin = (
+                str(raw_fin).strip()
+                if raw_fin is not None and str(raw_fin) != "nan"
+                else None
+            )
+
+            raw_pres = r.get("pres_maximo")
+            try:
+                pres_max = float(raw_pres) if raw_pres is not None else None
+            except (TypeError, ValueError):
+                pres_max = None
+
+            return TimelineItem(
+                id_licitacion=id_lic,
+                nombre=nombre,
+                fecha_adjudicacion=fecha_adj or None,
+                fecha_finalizacion=fecha_fin or None,
+                estado_nombre=r.get("estado_nombre"),
+                pres_maximo=pres_max,
+            )
+
+        timeline_items = [_norm_timeline_record(r) for r in timeline_records]
+
+        return KPIDashboard(
+            timeline=timeline_items,
+            total_oportunidades_uds=int(total_oportunidades_uds),
+            total_oportunidades_euros=total_oportunidades_euros,
+            total_ofertado_uds=int(total_ofertado_uds),
+            total_ofertado_euros=total_ofertado_euros,
+            ratio_ofertado_oportunidades_uds=round(ratio_ofertado_oportunidades_uds, 2),
+            ratio_ofertado_oportunidades_euros=round(ratio_ofertado_oportunidades_euros, 2),
+            ratio_adjudicadas_terminadas_ofertado=round(ratio_adjudicadas_terminadas_ofertado, 2),
+            margen_medio_ponderado_presupuestado=round(margen_presu, 2) if margen_presu is not None else None,
+            margen_medio_ponderado_real=round(margen_real, 2) if margen_real is not None else None,
+            pct_descartadas_uds=round(pct_descartadas_uds, 2) if pct_descartadas_uds is not None else None,
+            pct_descartadas_euros=round(pct_descartadas_euros, 2) if pct_descartadas_euros is not None else None,
+            ratio_adjudicacion=round(ratio_adjudicacion, 4),
+        )
+    except Exception as e:  # pragma: no cover - protección defensiva en producción
+        # En caso de cualquier error inesperado devolvemos KPIs vacíos en vez de 500
+        print(f"[analytics.get_kpis] Error calculando KPIs: {e!r}")
+        return _empty_kpis()
 
 
 # ---------- Endpoints de analítica avanzada ----------

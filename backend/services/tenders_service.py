@@ -10,7 +10,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
 
-from backend.models import (
+from backend.schemas.tenders import (
     ESTADOS_BLOQUEO_EDICION,
     EstadoLicitacion,
     PartidaCreate,
@@ -95,6 +95,12 @@ class TenderService:
         """Crea licitación en estado EN_ANALISIS. organization_id lo inyecta el repo.
         Si se pasa id_licitacion_padre, se fuerza tipo_procedimiento a CONTRATO_BASADO.
         URL Gover: se muta /tenders/ -> /public/ antes de guardar."""
+        # Validación de fechas: presentación <= adjudicación (si ambas están informadas)
+        if payload.fecha_presentacion and payload.fecha_adjudicacion:
+            if payload.fecha_presentacion > payload.fecha_adjudicacion:
+                raise ValueError(
+                    "La fecha de presentación debe ser anterior o igual a la fecha de adjudicación."
+                )
         if payload.id_licitacion_padre is not None:
             tipo = TipoProcedimiento.CONTRATO_BASADO
         else:
@@ -263,10 +269,13 @@ class TenderService:
         """Actualiza partida. Lanza ValueError si edición bloqueada."""
         if not self._repo.get_by_id(tender_id):
             raise NotFoundError("Licitación no encontrada.")
-        if self._is_edition_blocked(tender_id):
-            raise ValueError("No se pueden modificar partidas cuando la licitación ya está presentada o posterior.")
-
         update_data = payload.model_dump(exclude_unset=True, mode="json")
+        # Si la licitación está en estado bloqueado, solo permitimos mapear producto Belneo
+        # (id_producto / nombre_producto_libre) para partidas ya existentes.
+        if self._is_edition_blocked(tender_id):
+            allowed_when_blocked = {"id_producto", "nombre_producto_libre"}
+            if not set(update_data.keys()).issubset(allowed_when_blocked):
+                raise ValueError("No se pueden modificar partidas cuando la licitación ya está presentada o posterior.")
         if not update_data:
             partida = self._repo.get_partida(tender_id, detalle_id)
             if not partida:

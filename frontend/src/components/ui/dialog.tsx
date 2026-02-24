@@ -143,3 +143,16 @@ export function DialogDescription({
   );
 }
 
+export function DialogFooter({
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLDivElement>) {
+  return (
+    <div
+      className={cn("mt-4 flex justify-end gap-2", className)}
+      {...props}
+    />
+  );
+}
+
+

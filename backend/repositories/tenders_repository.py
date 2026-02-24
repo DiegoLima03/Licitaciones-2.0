@@ -9,7 +9,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, Dict, List
 
-from backend.models import EstadoLicitacion
+from backend.schemas.tenders import EstadoLicitacion
 from backend.repositories.base_repository import BaseTenantRepository
 
 

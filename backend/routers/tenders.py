@@ -10,7 +10,7 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from backend.deps import CurrentUserDep
-from backend.models import PartidaCreate, PartidaUpdate, TenderCreate, TenderStatusChange, TenderUpdate
+from backend.schemas.tenders import PartidaCreate, PartidaUpdate, TenderCreate, TenderStatusChange, TenderUpdate
 from backend.repositories.tenders_repository import TendersRepository
 from backend.services.exceptions import ConflictError, NotFoundError
 from backend.services.tenders_service import TenderService

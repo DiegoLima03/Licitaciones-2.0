@@ -5,7 +5,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { BarChart3, FolderKanban, KeyRound, LineChart, ListPlus, LogOut, Search, Users } from "lucide-react";
 
-import { AuthService } from "@/services/api";
+import { AuthService, AnalyticsService } from "@/services/api";
+import type { RolePermissionsMatrix } from "@/types/api";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,30 +36,51 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
   const [passwordConfirm, setPasswordConfirm] = React.useState("");
   const [passwordChanging, setPasswordChanging] = React.useState(false);
   const [passwordError, setPasswordError] = React.useState<string | null>(null);
+  const [role, setRole] = React.useState<string | null>(null);
+  const [roleMatrix, setRoleMatrix] = React.useState<RolePermissionsMatrix["matrix"] | null>(null);
+
   const isAdmin = React.useMemo(() => {
     if (SKIP_LOGIN) return true; // En modo desarrollo, mostrar siempre el menú Usuarios
-    if (!user) return false;
-    try {
-      const parsed = JSON.parse(user);
-      const role = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
-      return role === "admin";
-    } catch {
-      return false;
-    }
-  }, [user]);
+    return role === "admin";
+  }, [role]);
 
-  /** Rol Planta (admin_planta, member_planta): sin Dashboard general; vista limitada a CRM Presupuestos y Buscador. */
-  const isPlanta = React.useMemo(() => {
-    if (SKIP_LOGIN) return false;
-    if (!user) return false;
-    try {
-      const parsed = JSON.parse(user);
-      const role = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
-      return role.includes("planta");
-    } catch {
-      return false;
+  const permissions = React.useMemo(() => {
+    // Modo desarrollo: todo visible
+    if (SKIP_LOGIN) {
+      return {
+        dashboard: true,
+        licitaciones: true,
+        buscador: true,
+        lineas: true,
+        analytics: true,
+        usuarios: true,
+      };
     }
-  }, [user]);
+
+    // Si tenemos matriz y rol, respetamos 100% lo que diga la matriz
+    if (role && roleMatrix && roleMatrix[role]) {
+      const p = roleMatrix[role]!;
+      return {
+        dashboard: !!p.dashboard,
+        licitaciones: !!p.licitaciones,
+        buscador: !!p.buscador,
+        lineas: !!p.lineas,
+        analytics: !!p.analytics,
+        usuarios: !!p.usuarios,
+      };
+    }
+
+    // Fallback: comportamiento antiguo si aún no se ha cargado la matriz
+    const isPlantaRole = role?.includes("planta") ?? false;
+    return {
+      dashboard: !isPlantaRole,
+      licitaciones: true,
+      buscador: true,
+      lineas: !isPlantaRole,
+      analytics: !isPlantaRole,
+      usuarios: isAdmin,
+    };
+  }, [role, roleMatrix, isAdmin]);
   const [mounted, setMounted] = React.useState(false);
 
   React.useEffect(() => {
@@ -69,7 +91,32 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
     if (!mounted) return;
     const raw = window.localStorage.getItem(STORAGE_KEY);
     setUser(raw);
+    if (raw) {
+      try {
+        const parsed = JSON.parse(raw);
+        const r = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
+        setRole(r || null);
+      } catch {
+        setRole(null);
+      }
+    } else {
+      setRole(null);
+    }
   }, [mounted, pathname]);
+
+  // Cargar matriz de permisos una vez montado, solo si hay sesión (token)
+  React.useEffect(() => {
+    if (!mounted) return;
+    if (SKIP_LOGIN) return;
+    if (typeof window === "undefined") return;
+    const token = window.localStorage.getItem(TOKEN_KEY);
+    if (!token) return;
+    AnalyticsService.getRolePermissions()
+      .then((data) => setRoleMatrix(data.matrix || {}))
+      .catch(() => {
+        // En caso de error dejamos los permisos por defecto
+      });
+  }, [mounted]);
 
   React.useEffect(() => {
     if (!accountPopoverOpen || SKIP_LOGIN) return;
@@ -125,27 +172,15 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const isLoggedIn = SKIP_LOGIN || !!raw;
 
+    // Si no hay sesión y no estamos en /login → ir al login
     if (!SKIP_LOGIN && !isLoggedIn && pathname !== "/login") {
       router.replace("/login");
-    } else if (isLoggedIn && pathname === "/login") {
-      let role = "";
-      try {
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          role = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
-        }
-      } catch {
-        // ignore
-      }
-      router.replace(role.includes("planta") ? "/buscador" : "/");
-    } else if (isLoggedIn && !SKIP_LOGIN && pathname === "/" && raw) {
-      try {
-        const parsed = JSON.parse(raw);
-        const role = String(parsed?.role ?? parsed?.rol ?? "").toLowerCase();
-        if (role.includes("planta")) router.replace("/buscador");
-      } catch {
-        // ignore
-      }
+      return;
+    }
+
+    // Si ya hay sesión y estamos en /login → ir al Dashboard por defecto
+    if (isLoggedIn && pathname === "/login") {
+      router.replace("/");
     }
   }, [mounted, pathname, router]);
 
@@ -254,7 +289,7 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
         </Popover>
 
         <nav className="mt-4 space-y-1 px-3 text-sm">
-          {!isPlanta && (
+          {permissions.dashboard && (
             <Link
               href="/"
               className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
@@ -263,21 +298,25 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
               <span>Dashboard</span>
             </Link>
           )}
-          <Link
-            href="/licitaciones"
-            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white ${pathname.startsWith("/licitaciones") ? "bg-slate-800" : ""}`}
-          >
-            <FolderKanban className="h-4 w-4" />
-            <span>{isPlanta ? "CRM Presupuestos" : "Mis Licitaciones"}</span>
-          </Link>
-          <Link
-            href="/buscador"
-            className={`flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white ${pathname === "/buscador" ? "bg-slate-800" : ""}`}
-          >
-            <Search className="h-4 w-4" />
-            <span>Buscador Histórico</span>
-          </Link>
-          {!isPlanta && (
+          {permissions.licitaciones && (
+            <Link
+              href="/licitaciones"
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white ${pathname.startsWith("/licitaciones") ? "bg-slate-800" : ""}`}
+            >
+              <FolderKanban className="h-4 w-4" />
+              <span>{role && role.includes("planta") ? "CRM Presupuestos" : "Mis Licitaciones"}</span>
+            </Link>
+          )}
+          {permissions.buscador && (
+            <Link
+              href="/buscador"
+              className={`flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white ${pathname === "/buscador" ? "bg-slate-800" : ""}`}
+            >
+              <Search className="h-4 w-4" />
+              <span>Buscador Histórico</span>
+            </Link>
+          )}
+          {permissions.lineas && (
             <>
               <Link
                 href="/lineas-referencia"
@@ -286,16 +325,18 @@ export function AuthLayout({ children }: { children: React.ReactNode }) {
                 <ListPlus className="h-4 w-4" />
                 <span>Añadir líneas</span>
               </Link>
-              <Link
-                href="/dashboard/analytics"
-                className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
-              >
-                <LineChart className="h-4 w-4" />
-                <span>Analítica</span>
-              </Link>
             </>
           )}
-          {(SKIP_LOGIN || isAdmin) && (
+          {permissions.analytics && (
+            <Link
+              href="/dashboard/analytics"
+              className="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+            >
+              <LineChart className="h-4 w-4" />
+              <span>Analítica</span>
+            </Link>
+          )}
+          {(SKIP_LOGIN || permissions.usuarios) && (
             <Link
               href="/usuarios"
               className={`flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white ${pathname === "/usuarios" ? "bg-slate-800" : ""}`}
