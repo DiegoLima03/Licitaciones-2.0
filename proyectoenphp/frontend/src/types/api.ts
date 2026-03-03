@@ -1,10 +1,6 @@
 /**
- * Tipos de la API (equivalentes a backend/models.py y backend/schemas.py).
- * Mantener alineados con los modelos Pydantic del backend.
- *
- * Tipos generados: Ejecutar `npm run generate-types` (backend en 127.0.0.1:8000)
- * para generar src/generated/api.d.ts desde OpenAPI. Los tipos que coincidan
- * con el esquema pueden sustituirse progresivamente por los generados para evitar duplicados.
+ * Tipos de la API (equivalentes a backend/models.py y backend/schemas.php).
+ * Versión para el frontend alojado dentro de proyectoenphp/frontend, usando el backend PHP.
  */
 
 // ----- Auth -----
@@ -55,6 +51,12 @@ export type TipoProcedimiento =
   | "SDA"
   | "CONTRATO_BASADO";
 
+export interface LoteConfigItem {
+  nombre: string;
+  ganado: boolean;
+}
+
+/** Estructura base que devuelve el backend PHP para una licitación (tbl_licitaciones). */
 export interface Tender {
   id_licitacion: number;
   /** Organización (RLS) a la que pertenece la licitación, tal y como la devuelve el backend PHP. */
@@ -79,11 +81,6 @@ export interface Tender {
   coste_real?: number | null;
   gastos_extraordinarios?: number | null;
   [key: string]: unknown;
-}
-
-export interface LoteConfigItem {
-  nombre: string;
-  ganado: boolean;
 }
 
 export interface TenderCreate {
@@ -422,3 +419,4 @@ export interface PriceDeviationResult {
 export interface RolePermissionsMatrix {
   matrix: Record<string, Record<string, boolean>>;
 }
+

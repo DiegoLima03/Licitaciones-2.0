@@ -12,9 +12,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
-
-// Usar /api (proxy de Next.js) para evitar Network Error
-const API_AUTH = "/api";
+import { AuthService } from "@/services/api";
 
 type UserResponse = {
   id: number | string | null;
@@ -41,33 +39,14 @@ export default function LoginPage() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${API_AUTH}/auth/login`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email, password }),
-      });
-
-      const data = await res.json().catch(() => ({}));
-
-      if (!res.ok) {
-        const detail = data.detail;
-        const message =
-          typeof detail === "string"
-            ? detail
-            : Array.isArray(detail)
-              ? detail.map((d: { msg?: string }) => d.msg ?? JSON.stringify(d)).join(". ")
-              : "Credenciales inválidas. Inténtalo de nuevo.";
-        setError(message);
-        setLoading(false);
-        return;
-      }
+      const data = await AuthService.login(email, password);
 
       const user: UserResponse = {
         id: data.id ?? null,
         email: data.email ?? "",
-        rol: data.rol ?? data.role ?? null,
-        role: data.role ?? data.rol ?? null,
-        nombre: data.nombre ?? null,
+        rol: (data as any).rol ?? data.role ?? null,
+        role: data.role ?? (data as any).rol ?? null,
+        nombre: (data as any).nombre ?? data.full_name ?? null,
         access_token: data.access_token ?? null,
       };
 
@@ -80,11 +59,9 @@ export default function LoginPage() {
         }
       }
 
-      router.push("/");
+      router.push("/dashboard");
     } catch (err) {
-      setError(
-        "No se pudo conectar con el backend. Comprueba que el backend esté en marcha (arrancar-backend.bat o uvicorn backend.main:app --reload)."
-      );
+      setError(err instanceof Error ? err.message : "No se pudo iniciar sesión.");
     } finally {
       setLoading(false);
     }

@@ -1,0 +1,267 @@
+:root {
+    --vz-negro: #10180e;
+    --vz-marron1: #46331f;
+    --vz-marron2: #85725e;
+    --vz-crema: #e5e2dc;
+    --vz-verde: #8e8b30;
+    --vz-rojo: #c83c32;
+    --vz-amarillo: #d4a830;
+    --vz-blanco: #ffffff;
+    --vz-verde-suave: rgba(142, 139, 48, 0.1);
+}
+
+/* Base */
+html,
+body {
+    background: var(--vz-crema) !important;
+    color: var(--vz-negro) !important;
+}
+
+body {
+    font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif !important;
+}
+
+.layout {
+    background: radial-gradient(circle at top right, rgba(142, 139, 48, 0.12), transparent 42%), var(--vz-crema);
+}
+
+/* Shell */
+.sidebar {
+    background: linear-gradient(180deg, #5c472f, var(--vz-marron1) 52%, var(--vz-negro)) !important;
+    border-right: 1px solid rgba(229, 226, 220, 0.25) !important;
+}
+
+.sidebar-logo,
+.sidebar-nav .nav-link,
+.sidebar-footer {
+    color: var(--vz-crema) !important;
+}
+
+.sidebar-logo span {
+    color: #efe7bf !important;
+}
+
+.nav-link {
+    border: 1px solid transparent;
+}
+
+.nav-link:hover {
+    background: rgba(229, 226, 220, 0.14) !important;
+    border-color: rgba(229, 226, 220, 0.25);
+}
+
+.nav-link.active {
+    background: var(--vz-crema) !important;
+    color: var(--vz-negro) !important;
+    border-color: rgba(70, 51, 31, 0.45);
+}
+
+header {
+    background: var(--vz-verde) !important;
+    border-bottom: 1px solid rgba(16, 24, 14, 0.24) !important;
+    box-shadow: 0 2px 8px rgba(16, 24, 14, 0.08);
+}
+
+header h1,
+.user-info,
+.user-info > div {
+    color: var(--vz-crema) !important;
+}
+
+.pill {
+    background: var(--vz-crema) !important;
+    color: var(--vz-negro) !important;
+    border: 1px solid rgba(70, 51, 31, 0.28);
+}
+
+a[href="logout.php"] {
+    color: #ffe3de !important;
+}
+
+/* Cards and containers */
+.card,
+.panel,
+.modal-dialog,
+.modal-content {
+    background: var(--vz-blanco) !important;
+    border: 1px solid var(--vz-marron2) !important;
+    color: var(--vz-negro) !important;
+    box-shadow: 0 2px 8px rgba(16, 24, 14, 0.08) !important;
+}
+
+.card h1,
+.card h2,
+.card h3,
+.card p,
+.meta-label,
+.meta-value,
+.hint,
+.text-muted,
+.cuelga-de {
+    color: var(--vz-negro) !important;
+}
+
+.hint,
+.text-muted,
+.meta-label,
+.cuelga-de {
+    opacity: 0.78;
+}
+
+.back-link,
+.link-external,
+.link-row {
+    color: #5a4b2f !important;
+}
+
+/* Buttons */
+.btn,
+.btn-primary,
+.actions button,
+.search-row button,
+.btn-new,
+.btn-popup-form-sample,
+.detail-actions .primary,
+.filters button {
+    background: var(--vz-verde) !important;
+    border: 1px solid var(--vz-verde) !important;
+    color: var(--vz-crema) !important;
+    box-shadow: none !important;
+}
+
+.btn:hover,
+.btn-primary:hover,
+.actions button:hover,
+.search-row button:hover,
+.btn-new:hover,
+.btn-popup-form-sample:hover,
+.detail-actions .primary:hover,
+.filters button:hover {
+    filter: brightness(1.04);
+}
+
+.btn-secondary,
+.detail-actions button,
+.modal-actions .btn-secondary,
+.date-picker-btn,
+.modal-close,
+.detail-close {
+    background: var(--vz-crema) !important;
+    border: 1px solid var(--vz-marron2) !important;
+    color: var(--vz-marron1) !important;
+}
+
+/* Forms */
+input,
+select,
+textarea {
+    background: var(--vz-blanco) !important;
+    color: var(--vz-negro) !important;
+    border: 1px solid var(--vz-marron2) !important;
+}
+
+label {
+    color: var(--vz-marron1) !important;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+    outline: none;
+    border-color: var(--vz-verde) !important;
+    box-shadow: 0 0 0 1px rgba(142, 139, 48, 0.3);
+}
+
+/* Tables */
+table {
+    background: var(--vz-blanco);
+}
+
+thead {
+    background: var(--vz-verde) !important;
+    color: var(--vz-crema) !important;
+}
+
+th,
+td {
+    border-bottom: 1px solid rgba(133, 114, 94, 0.35) !important;
+    color: var(--vz-negro) !important;
+}
+
+tbody tr:hover,
+tbody tr.row-active {
+    background: var(--vz-verde-suave) !important;
+}
+
+.badge-estado,
+.status {
+    border: 1px solid transparent;
+}
+
+.badge-estado {
+    background: rgba(70, 51, 31, 0.12) !important;
+    color: var(--vz-marron1) !important;
+}
+
+.badge-estado.estado-5,
+.status.ok {
+    background: rgba(142, 139, 48, 0.18) !important;
+    color: var(--vz-marron1) !important;
+    border-color: rgba(142, 139, 48, 0.4);
+}
+
+.badge-estado.estado-3,
+.status.pending {
+    background: rgba(212, 168, 48, 0.18) !important;
+    color: #5f460d !important;
+    border-color: rgba(212, 168, 48, 0.4);
+}
+
+.badge-estado.estado-descartada,
+.status.warn {
+    background: rgba(200, 60, 50, 0.18) !important;
+    color: #7a2722 !important;
+    border-color: rgba(200, 60, 50, 0.4);
+}
+
+/* Tabs and detail panes */
+.tabs-list {
+    background: var(--vz-crema) !important;
+    border: 1px solid var(--vz-marron2);
+}
+
+.tab-trigger {
+    color: var(--vz-marron1) !important;
+}
+
+.tab-trigger.active {
+    background: var(--vz-blanco) !important;
+    color: var(--vz-negro) !important;
+    box-shadow: 0 0 0 1px rgba(133, 114, 94, 0.4) !important;
+}
+
+.detail-note,
+.result-row td {
+    background: var(--vz-verde-suave) !important;
+    color: var(--vz-marron1) !important;
+}
+
+.modal-overlay {
+    background: rgba(16, 24, 14, 0.45) !important;
+}
+
+.modal-header {
+    border-bottom: 1px solid rgba(133, 114, 94, 0.4) !important;
+}
+
+.error {
+    background: rgba(200, 60, 50, 0.14) !important;
+    color: #7a2722 !important;
+    border: 1px solid rgba(200, 60, 50, 0.38) !important;
+}
+
+/* Login specific */
+body > .card {
+    background: var(--vz-blanco) !important;
+    border: 1px solid rgba(133, 114, 94, 0.45) !important;
+}

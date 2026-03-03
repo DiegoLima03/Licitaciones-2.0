@@ -1,6 +1,6 @@
 /**
- * Cliente HTTP para la API (FastAPI).
- * baseURL = /api (Next.js hace proxy al backend en puerto 8000).
+ * Cliente HTTP para la API PHP.
+ * baseURL = process.env.NEXT_PUBLIC_API_URL (por defecto /api).
  * Interceptors: inyectar token en requests; en 401 redirigir a /login y borrar token.
  */
 
@@ -8,8 +8,11 @@ import axios, { type AxiosError } from "axios";
 
 const STORAGE_TOKEN_KEY = "token";
 
-// Siempre usar /api: Next.js hace proxy al backend. Evita Network Error.
-const baseURL = "/api";
+// baseURL desde variable de entorno; fallback a /api para desarrollo.
+const baseURL =
+  typeof process !== "undefined" && process.env.NEXT_PUBLIC_API_URL
+    ? process.env.NEXT_PUBLIC_API_URL
+    : "/api";
 
 export const apiClient = axios.create({
   baseURL,

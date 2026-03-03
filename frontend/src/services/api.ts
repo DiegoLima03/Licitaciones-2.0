@@ -34,7 +34,7 @@ import type {
 } from "@/types/api";
 
 const CONNECTION_ERROR_MSG =
-  "No se puede conectar con el backend. Comprueba que uvicorn esté en marcha: uvicorn backend.main:app --reload --host 0.0.0.0";
+  "No se puede conectar con el backend. Comprueba que el backend PHP esté en marcha (servidor web apuntando a proyectoenphp/public/index.php).";
 
 function getMessageFromError(error: unknown): string {
   if (error && typeof error === "object" && "response" in error) {
@@ -345,6 +345,28 @@ export const TendersService = {
     }
   },
 };
+
+// Helpers CRUD planos para licitaciones, pensados para usar directamente en React Query y componentes.
+
+export async function getTenders(filters?: TenderListFilters): Promise<Tender[]> {
+  return TendersService.getAll(filters);
+}
+
+export async function getTenderById(id: number): Promise<TenderDetail> {
+  return TendersService.getById(id);
+}
+
+export async function createTender(payload: TenderCreate): Promise<Tender> {
+  return TendersService.create(payload);
+}
+
+export async function updateTender(id: number, payload: TenderUpdate): Promise<Tender> {
+  return TendersService.update(id, payload);
+}
+
+export async function deleteTender(id: number): Promise<void> {
+  return TendersService.delete(id);
+}
 
 // ----- ImportService -----
 

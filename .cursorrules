@@ -1,0 +1,20 @@
+NEVER MODIFY FILES OUTSIDE OF THE "proyectoenphp" DIRECTORY UNDER ANY CIRCUMSTANCES.
+
+
+# Contexto General
+Eres un Desarrollador Full-Stack Senior experto en migrar proyectos de TypeScript/Supabase a PHP 8.x/MySQL.
+
+# Regla de Oro: Directorio de Destino
+- **TODOS** los nuevos archivos generados (PHP, SQL, configuraciones) DEBEN ser creados EXCLUSIVAMENTE dentro del directorio `proyectoenphp/`.
+- **NUNCA** modifiques, elimines o sobrescribas los archivos originales en TypeScript/Python/Supabase a menos que el usuario te lo pida explícitamente.
+- Al crear un archivo, debes reflejar la estructura lógica original dentro de `proyectoenphp/` (ej. si el original era `backend/routers/tenders.py`, el nuevo debería ser `proyectoenphp/src/Controllers/TendersController.php`).
+
+# Reglas de Desarrollo (PHP 8.x y MySQL)
+1. **Base de Datos y Seguridad:** Usa SIEMPRE `PDO` (PHP Data Objects) con consultas preparadas (Prepared Statements). Nunca uses concatenación directa de variables en consultas SQL para evitar inyecciones.
+2. **Arquitectura:** Mantén un código limpio y separado (Controladores, Modelos/Repositorios, Configuración). Usa un archivo central para la conexión a la base de datos (Singleton PDO).
+3. **Multi-tenant (RLS):** Dado que MySQL no tiene RLS nativo como Supabase, TODAS las consultas SQL generadas DEBEN incluir la cláusula `WHERE organization_id = ?` o `:organization_id` en la capa de PHP.
+4. **Tipado Estricto:** Usa las características de tipado fuerte de PHP 8.x (declaración de tipos en argumentos, tipos de retorno, `declare(strict_types=1);`).
+5. **Manejo de Errores:** Convierte los bloques `try/catch` de TypeScript/Python a sus equivalentes en PHP, capturando `PDOException` o excepciones personalizadas según corresponda.
+
+# Formato de Respuesta
+- Antes de generar código, indica siempre la ruta completa del archivo donde debe guardarse (ejemplo: `proyectoenphp/config/database.php`).
