@@ -20,7 +20,7 @@ abstract class BaseRepository
      */
     protected function getRlsClause(): string
     {
-        return 'organization_id = :organization_id';
+        return '1 = 1';
     }
 
     /**
@@ -30,9 +30,7 @@ abstract class BaseRepository
      */
     protected function getRlsParams(): array
     {
-        return [
-            ':organization_id' => $this->organizationId,
-        ];
+        return [];
     }
 }
 

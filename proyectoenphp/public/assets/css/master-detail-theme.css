@@ -68,6 +68,31 @@ header h1,
     color: var(--vz-crema) !important;
 }
 
+.user-info {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 4px;
+    text-align: right !important;
+    min-width: 150px;
+}
+
+.user-info > div:first-child {
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    color: var(--vz-crema) !important;
+}
+
+.user-info .pill {
+    margin-top: 0 !important;
+    padding: 2px 10px !important;
+    font-size: 0.74rem !important;
+    font-weight: 700;
+    background: rgba(229, 226, 220, 0.96) !important;
+    color: var(--vz-marron1) !important;
+    border: 1px solid rgba(70, 51, 31, 0.35) !important;
+}
+
 .pill {
     background: var(--vz-crema) !important;
     color: var(--vz-negro) !important;
@@ -75,7 +100,20 @@ header h1,
 }
 
 a[href="logout.php"] {
-    color: #ffe3de !important;
+    display: inline-flex;
+    align-items: center;
+    border-radius: 9999px;
+    border: 1px solid rgba(229, 226, 220, 0.4);
+    background: rgba(16, 24, 14, 0.14);
+    color: #fff4f2 !important;
+    padding: 2px 10px;
+    line-height: 1.2;
+    transition: background-color 120ms ease, border-color 120ms ease;
+}
+
+a[href="logout.php"]:hover {
+    background: rgba(16, 24, 14, 0.26);
+    border-color: rgba(229, 226, 220, 0.55);
 }
 
 /* Cards and containers */
@@ -240,6 +278,85 @@ tbody tr.row-active {
     box-shadow: 0 0 0 1px rgba(133, 114, 94, 0.4) !important;
 }
 
+.remaining-intro {
+    margin: 0 0 10px;
+    font-size: 0.9rem;
+    color: var(--vz-marron1);
+}
+
+.remaining-card {
+    border-radius: 10px;
+    border: 1px solid rgba(133, 114, 94, 0.55);
+    background: var(--vz-blanco) !important;
+    padding: 10px 12px;
+    overflow-x: auto;
+}
+
+.remaining-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.remaining-table th,
+.remaining-table td {
+    padding: 6px 8px !important;
+}
+
+.remaining-lote {
+    font-size: 0.78rem;
+    color: var(--vz-marron2) !important;
+}
+
+.remaining-partida {
+    max-width: 260px;
+    color: var(--vz-negro) !important;
+}
+
+.remaining-num {
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+    color: var(--vz-negro) !important;
+}
+
+.remaining-progress-cell {
+    min-width: 210px;
+}
+
+.remaining-progress-track {
+    height: 8px;
+    width: 100%;
+    border-radius: 9999px;
+    background: #ece8df;
+    border: 1px solid rgba(133, 114, 94, 0.45);
+    overflow: hidden;
+}
+
+.remaining-progress-fill {
+    height: 100%;
+    border-radius: 9999px;
+    transition: width 180ms ease;
+}
+
+.remaining-progress-fill.is-low {
+    background: #c83c32;
+}
+
+.remaining-progress-fill.is-mid {
+    background: #d4a830;
+}
+
+.remaining-progress-fill.is-high {
+    background: #8e8b30;
+}
+
+.remaining-progress-value {
+    margin-top: 3px;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--vz-marron2);
+}
+
 .detail-note,
 .result-row td {
     background: var(--vz-verde-suave) !important;
@@ -264,4 +381,355 @@ tbody tr.row-active {
 body > .card {
     background: var(--vz-blanco) !important;
     border: 1px solid rgba(133, 114, 94, 0.45) !important;
+}
+
+/* Boton Anadir (detalle licitacion) */
+.btn-add-partida {
+    min-width: 70px;
+    height: 32px;
+    border-radius: 10px !important;
+    border: 1px solid #77762b !important;
+    background: linear-gradient(180deg, #a19d3e 0%, #898531 100%) !important;
+    color: #f7f3e8 !important;
+    font-size: 0.82rem !important;
+    font-weight: 700 !important;
+    letter-spacing: 0.01em;
+    box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.24),
+        0 2px 6px rgba(16, 24, 14, 0.16) !important;
+    transition: transform 120ms ease, filter 120ms ease;
+}
+
+.btn-add-partida:hover {
+    filter: brightness(1.05);
+    transform: translateY(-1px);
+}
+
+.btn-add-partida:active {
+    filter: brightness(0.98);
+    transform: translateY(0);
+}
+
+.btn-add-partida:focus-visible {
+    outline: 2px solid rgba(142, 139, 48, 0.45);
+    outline-offset: 2px;
+}
+
+/* Modal Registrar albaran (detalle licitacion) */
+#modal-nuevo-albaran {
+    padding: 16px;
+    background: rgba(16, 24, 14, 0.46) !important;
+    backdrop-filter: blur(2px);
+}
+
+#modal-nuevo-albaran .albaran-modal-dialog {
+    width: min(92vw, 860px) !important;
+    max-width: 860px !important;
+    background: var(--vz-blanco) !important;
+    border: 1px solid var(--vz-marron2) !important;
+    box-shadow: 0 14px 30px rgba(16, 24, 14, 0.24) !important;
+    color: var(--vz-negro) !important;
+}
+
+#modal-nuevo-albaran h3,
+#modal-nuevo-albaran p,
+#modal-nuevo-albaran label,
+#modal-nuevo-albaran span {
+    color: var(--vz-marron1) !important;
+}
+
+#modal-nuevo-albaran #modal-nuevo-albaran-close {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    border: 1px solid transparent !important;
+    color: var(--vz-marron2) !important;
+    font-size: 1rem !important;
+    line-height: 1;
+    display: grid;
+    place-items: center;
+}
+
+#modal-nuevo-albaran #modal-nuevo-albaran-close:hover {
+    background: var(--vz-verde-suave) !important;
+    color: var(--vz-negro) !important;
+    border-color: rgba(133, 114, 94, 0.45) !important;
+}
+
+#modal-nuevo-albaran .albaran-type-switch {
+    border: 1px solid rgba(133, 114, 94, 0.55) !important;
+    background: #ece8df !important;
+    padding: 2px;
+}
+
+#modal-nuevo-albaran .albaran-tab-btn {
+    border: none !important;
+    border-radius: 9999px !important;
+    background: transparent !important;
+    color: var(--vz-marron2) !important;
+    font-size: 0.75rem !important;
+    font-weight: 600 !important;
+    padding: 5px 12px !important;
+}
+
+#modal-nuevo-albaran .albaran-tab-btn.is-active {
+    background: var(--vz-blanco) !important;
+    color: var(--vz-negro) !important;
+    box-shadow: 0 0 0 1px rgba(133, 114, 94, 0.45) inset;
+}
+
+#modal-nuevo-albaran #albaran-section-presu,
+#modal-nuevo-albaran #albaran-section-ext {
+    border: 1px solid rgba(133, 114, 94, 0.5) !important;
+    background: var(--vz-blanco) !important;
+}
+
+#modal-nuevo-albaran table {
+    background: var(--vz-blanco) !important;
+}
+
+#modal-nuevo-albaran td {
+    color: var(--vz-negro) !important;
+    border-bottom: 1px solid rgba(133, 114, 94, 0.35) !important;
+}
+
+#modal-nuevo-albaran tbody tr:hover {
+    background: var(--vz-verde-suave) !important;
+}
+
+#modal-nuevo-albaran input,
+#modal-nuevo-albaran select,
+#modal-nuevo-albaran textarea {
+    background: var(--vz-blanco) !important;
+    color: var(--vz-negro) !important;
+    border: 1px solid var(--vz-marron2) !important;
+}
+
+#modal-nuevo-albaran input::placeholder,
+#modal-nuevo-albaran textarea::placeholder {
+    color: #8d836e !important;
+}
+
+#modal-nuevo-albaran .albaran-cancel-btn {
+    border: 1px solid var(--vz-marron2) !important;
+    border-radius: 8px !important;
+    background: var(--vz-crema) !important;
+    color: var(--vz-marron1) !important;
+    font-weight: 600;
+}
+
+#modal-nuevo-albaran .albaran-submit-btn {
+    border: 1px solid var(--vz-verde) !important;
+    border-radius: 8px !important;
+    background: var(--vz-verde) !important;
+    color: var(--vz-crema) !important;
+    font-weight: 700;
+}
+
+#modal-nuevo-albaran .albaran-submit-btn:hover {
+    filter: brightness(1.04);
+}
+
+/* Vincular productos (adjudicacion) */
+.mapped-success-banner {
+    margin-top: 10px;
+    border: 1px solid rgba(142, 139, 48, 0.55);
+    border-radius: 10px;
+    background: rgba(142, 139, 48, 0.14);
+    color: #4f4b1c;
+    padding: 8px 10px;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.missing-products-banner {
+    margin-top: 10px;
+    border: 1px solid rgba(200, 60, 50, 0.45);
+    border-radius: 10px;
+    background: rgba(200, 60, 50, 0.1);
+    color: #7a2722;
+    padding: 8px 10px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    font-size: 0.82rem;
+}
+
+.btn-vincular-productos {
+    border: 1px solid #7a2722 !important;
+    border-radius: 9999px !important;
+    background: #fff !important;
+    color: #7a2722 !important;
+    font-size: 0.76rem !important;
+    font-weight: 700 !important;
+    padding: 4px 12px !important;
+    cursor: pointer;
+}
+
+.btn-vincular-productos:hover {
+    background: #fff6f5 !important;
+}
+
+.map-products-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    padding: 16px;
+    background: rgba(16, 24, 14, 0.46);
+    backdrop-filter: blur(2px);
+    align-items: center;
+    justify-content: center;
+}
+
+.map-products-dialog {
+    width: min(92vw, 820px);
+    max-height: 88vh;
+    overflow: auto;
+    border-radius: 12px;
+    border: 1px solid var(--vz-marron2);
+    background: var(--vz-blanco);
+    box-shadow: 0 14px 30px rgba(16, 24, 14, 0.24);
+    padding: 14px 16px;
+}
+
+.map-products-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.map-products-header h3 {
+    margin: 0;
+    color: var(--vz-marron1);
+    font-size: 0.95rem;
+}
+
+.map-products-close {
+    width: 28px;
+    height: 28px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--vz-marron2);
+    cursor: pointer;
+    font-size: 1rem;
+}
+
+.map-products-close:hover {
+    background: var(--vz-verde-suave);
+    border-color: rgba(133, 114, 94, 0.45);
+}
+
+.map-products-note {
+    margin: 6px 0 10px;
+    color: var(--vz-marron2);
+    font-size: 0.82rem;
+}
+
+.map-products-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.map-products-row {
+    border: 1px solid rgba(133, 114, 94, 0.35);
+    background: #fcfbf8;
+    border-radius: 10px;
+    padding: 8px 10px;
+}
+
+.map-products-row-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 0.73rem;
+    color: var(--vz-marron2);
+}
+
+.map-products-row-text {
+    margin-top: 4px;
+    margin-bottom: 6px;
+    font-size: 0.82rem;
+    color: var(--vz-marron1);
+}
+
+.map-products-input-wrap {
+    position: relative;
+}
+
+.map-product-input {
+    width: 100%;
+    height: 32px;
+    border-radius: 8px;
+    border: 1px solid var(--vz-marron2);
+    background: #fff;
+    color: var(--vz-negro);
+    padding: 4px 8px;
+    font-size: 0.82rem;
+}
+
+.map-product-suggestions {
+    display: none;
+    position: absolute;
+    left: 0;
+    right: 0;
+    margin-top: 2px;
+    border: 1px solid rgba(133, 114, 94, 0.5);
+    border-radius: 8px;
+    background: #fff;
+    box-shadow: 0 10px 18px rgba(16, 24, 14, 0.12);
+    max-height: 210px;
+    overflow-y: auto;
+    z-index: 5;
+}
+
+.map-product-option {
+    width: 100%;
+    border: none;
+    border-bottom: 1px solid rgba(133, 114, 94, 0.25);
+    background: transparent;
+    text-align: left;
+    color: var(--vz-negro);
+    font-size: 0.8rem;
+    padding: 7px 8px;
+    cursor: pointer;
+}
+
+.map-product-option:last-child {
+    border-bottom: none;
+}
+
+.map-product-option:hover {
+    background: var(--vz-verde-suave);
+}
+
+.map-products-actions {
+    margin-top: 10px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.map-products-cancel {
+    border: 1px solid var(--vz-marron2);
+    border-radius: 8px;
+    background: var(--vz-crema);
+    color: var(--vz-marron1);
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 6px 11px;
+}
+
+.map-products-save {
+    border: 1px solid var(--vz-verde);
+    border-radius: 8px;
+    background: var(--vz-verde);
+    color: var(--vz-crema);
+    font-size: 0.8rem;
+    font-weight: 700;
+    padding: 6px 11px;
 }

@@ -337,29 +337,16 @@ final class TendersRepository extends BaseRepository
         // En esta consulta usamos alias "d" para tbl_licitaciones_detalle,
         // por lo que la cláusula RLS debe estar cualificada para evitar ambigüedad
         // con otras tablas (ej. tbl_productos).
-        $where = 'd.organization_id = :organization_id'
+        $where = $this->getRlsClause()
             . ' AND ' . self::PK_LICITACION . ' = :tender_id';
         $params = $this->getRlsParams();
         $params[':tender_id'] = $tenderId;
 
         $sql = sprintf(
             'SELECT d.*, p.nombre AS producto_nombre, p.nombre_proveedor AS producto_nombre_proveedor
-             FROM %1$s d
-             LEFT JOIN tbl_productos p
-               ON p.id_producto = d.id_producto
-              AND p.organization_id = d.organization_id
-             WHERE %2$s
-             ORDER BY d.lote, d.%2$s',
-            self::TABLE_DETALLE,
-            self::PK_DETALLE
-        );
-
-        // Corrige el WHERE y ORDER BY con la cláusula RLS construida arriba.
-        // En algunos esquemas legacy tbl_licitaciones_detalle no tiene id_producto;
-        // en esos casos usamos solo nombre_producto_libre y prescindimos del join.
-        $sql = sprintf(
-            'SELECT d.*
              FROM %s d
+             LEFT JOIN tbl_productos p
+               ON p.id = d.id_producto
              WHERE %s
              ORDER BY d.lote, d.%s',
             self::TABLE_DETALLE,
@@ -367,8 +354,23 @@ final class TendersRepository extends BaseRepository
             self::PK_DETALLE
         );
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+        } catch (\PDOException $e) {
+            // Fallback para esquemas legacy sin id_producto o sin tabla/columnas de productos.
+            $sqlFallback = sprintf(
+                'SELECT d.*
+                 FROM %s d
+                 WHERE %s
+                 ORDER BY d.lote, d.%s',
+                self::TABLE_DETALLE,
+                $where,
+                self::PK_DETALLE
+            );
+            $stmt = $this->pdo->prepare($sqlFallback);
+            $stmt->execute($params);
+        }
 
         /** @var array<int, array<string, mixed>> $rawList */
         $rawList = $stmt->fetchAll() ?: [];
@@ -508,16 +510,31 @@ final class TendersRepository extends BaseRepository
         $params[':detalle_id'] = $detalleId;
 
         $sql = sprintf(
-            'SELECT d.*
+            'SELECT d.*, p.nombre AS producto_nombre
              FROM %s d
+             LEFT JOIN tbl_productos p
+               ON p.id = d.id_producto
              WHERE %s
              LIMIT 1',
             self::TABLE_DETALLE,
             $where
         );
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+        } catch (\PDOException $e) {
+            $sqlFallback = sprintf(
+                'SELECT d.*
+                 FROM %s d
+                 WHERE %s
+                 LIMIT 1',
+                self::TABLE_DETALLE,
+                $where
+            );
+            $stmt = $this->pdo->prepare($sqlFallback);
+            $stmt->execute($params);
+        }
         $row = $stmt->fetch();
 
         if ($row === false || $row === null) {

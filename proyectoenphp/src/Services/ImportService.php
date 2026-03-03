@@ -311,7 +311,7 @@ final class ImportService
 
     private function getRlsClause(): string
     {
-        return 'organization_id = :organization_id';
+        return '1 = 1';
     }
 
     /**
@@ -319,9 +319,7 @@ final class ImportService
      */
     private function getRlsParams(): array
     {
-        return [
-            ':organization_id' => $this->organizationId,
-        ];
+        return [];
     }
 }
 

@@ -5,16 +5,16 @@ declare(strict_types=1);
 final class AuthMiddleware
 {
     /**
-     * Autentica la petición usando el header Authorization: Bearer <jwt>.
+     * Autentica la peticiÃ³n usando el header Authorization: Bearer <jwt>.
      *
-     * Este método:
+     * Este mÃ©todo:
      *  - Lee la cabecera HTTP_AUTHORIZATION.
      *  - Extrae el token Bearer.
-     *  - Decodifica el payload del JWT (segundo segmento, base64url → JSON).
-     *  - Devuelve el array de payload (debe contener al menos organization_id y user_id).
+     *  - Decodifica el payload del JWT (segundo segmento, base64url â†’ JSON).
+     *  - Devuelve el array de payload (debe contener al menos user_id).
      *
-     * NOTA: Aquí no se verifica la firma ni la expiración; en producción,
-     *       integrar una librería como firebase/php-jwt y validar correctamente.
+     * NOTA: AquÃ­ no se verifica la firma ni la expiraciÃ³n; en producciÃ³n,
+     *       integrar una librerÃ­a como firebase/php-jwt y validar correctamente.
      *
      * @return array<string, mixed>
      */
@@ -58,10 +58,7 @@ final class AuthMiddleware
         }
 
         // En Supabase, los claims pueden incluir sub, role y custom claims.
-        // Aquí asumimos que el payload contiene organization_id y user_id (o sub).
-        if (!isset($payload['organization_id']) && !isset($payload['org_id'])) {
-            self::unauthorized('Missing organization_id in token.');
-        }
+        // AquÃ­ asumimos que el payload contiene user_id (o sub).
 
         if (!isset($payload['user_id']) && !isset($payload['sub'])) {
             self::unauthorized('Missing user_id in token.');
@@ -71,7 +68,7 @@ final class AuthMiddleware
     }
 
     /**
-     * Envía 401 Unauthorized en JSON y termina la ejecución.
+     * EnvÃ­a 401 Unauthorized en JSON y termina la ejecuciÃ³n.
      */
     private static function unauthorized(string $message): void
     {
@@ -89,4 +86,6 @@ final class AuthMiddleware
         exit;
     }
 }
+
+
 

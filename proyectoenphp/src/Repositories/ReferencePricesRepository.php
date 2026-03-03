@@ -28,7 +28,6 @@ final class ReferencePricesRepository extends BaseRepository
              FROM %1$s pr
              LEFT JOIN %2$s p
                ON p.id = pr.id_producto
-              AND p.organization_id = pr.organization_id
              WHERE pr.%3$s
              ORDER BY pr.fecha_presupuesto DESC, pr.id DESC',
             self::TABLE_PRECIOS_REFERENCIA,
@@ -121,7 +120,6 @@ final class ReferencePricesRepository extends BaseRepository
              FROM %1$s pr
              LEFT JOIN %2$s p
                ON p.id = pr.id_producto
-              AND p.organization_id = pr.organization_id
              WHERE pr.%3$s
                AND pr.id = :id
              LIMIT 1',

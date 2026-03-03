@@ -190,8 +190,6 @@ final class AnalyticsRepository extends BaseRepository
      */
     public function getMaterialTrends(string $materialName): array
     {
-        $orgParams = $this->getRlsParams();
-
         // Productos que contienen el nombre
         $sqlProd = sprintf(
             'SELECT id FROM %s WHERE %s AND nombre LIKE :nombre',
@@ -199,10 +197,9 @@ final class AnalyticsRepository extends BaseRepository
             $this->getRlsClause()
         );
         $stmtProd = $this->pdo->prepare($sqlProd);
-        $stmtProd->execute([
-            ':organization_id' => $orgParams[':organization_id'],
-            ':nombre' => '%' . $materialName . '%',
-        ]);
+        $paramsProd = $this->getRlsParams();
+        $paramsProd[':nombre'] = '%' . $materialName . '%';
+        $stmtProd->execute($paramsProd);
         $productIds = array_map(
             static fn (array $r): int => (int)$r['id'],
             $stmtProd->fetchAll(\PDO::FETCH_ASSOC) ?: []
@@ -1064,18 +1061,15 @@ final class AnalyticsRepository extends BaseRepository
      */
     public function getPriceDeviationCheck(string $materialName, float $currentPrice): array
     {
-        $orgParams = $this->getRlsParams();
-
         $sqlProd = sprintf(
             'SELECT id FROM %s WHERE %s AND nombre LIKE :nombre',
             self::TABLE_PRODUCTOS,
             $this->getRlsClause()
         );
         $stmtProd = $this->pdo->prepare($sqlProd);
-        $stmtProd->execute([
-            ':organization_id' => $orgParams[':organization_id'],
-            ':nombre' => '%' . $materialName . '%',
-        ]);
+        $paramsProd = $this->getRlsParams();
+        $paramsProd[':nombre'] = '%' . $materialName . '%';
+        $stmtProd->execute($paramsProd);
         $productIds = array_map(
             static fn (array $r): int => (int)$r['id'],
             $stmtProd->fetchAll(\PDO::FETCH_ASSOC) ?: []

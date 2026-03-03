@@ -116,10 +116,9 @@ final class TendersController
             $organizationId = $this->resolveOrganizationId();
 
             // Eliminar todas las partidas existentes de esta licitación para la organización actual.
-            $sqlDelete = 'DELETE FROM tbl_licitaciones_detalle WHERE organization_id = :organization_id AND id_licitacion = :tender_id';
+            $sqlDelete = 'DELETE FROM tbl_licitaciones_detalle WHERE id_licitacion = :tender_id';
             $stmtDelete = $pdo->prepare($sqlDelete);
             $stmtDelete->execute([
-                ':organization_id' => $organizationId,
                 ':tender_id' => $tenderId,
             ]);
 
@@ -320,13 +319,11 @@ final class TendersController
                              FROM tbl_entregas
                              WHERE id_entrega = :id_entrega
                                AND id_licitacion = :id_licitacion
-                               AND organization_id = :organization_id
                              LIMIT 1';
                 $stmtCheck = $pdo->prepare($sqlCheck);
                 $stmtCheck->execute([
                     ':id_entrega' => $idEntrega,
                     ':id_licitacion' => $tenderId,
-                    ':organization_id' => $organizationId,
                 ]);
 
                 if ($stmtCheck->fetchColumn() === false) {
@@ -337,20 +334,16 @@ final class TendersController
                 if ($deletedEntrega) {
                     // Borrado completo de entrega + líneas
                     $sqlDelReal = 'DELETE FROM tbl_licitaciones_real
-                                   WHERE organization_id = :organization_id
-                                     AND id_entrega = :id_entrega';
+                                   WHERE id_entrega = :id_entrega';
                     $stmtDelReal = $pdo->prepare($sqlDelReal);
                     $stmtDelReal->execute([
-                        ':organization_id' => $organizationId,
                         ':id_entrega' => $idEntrega,
                     ]);
 
                     $sqlDelEnt = 'DELETE FROM tbl_entregas
-                                  WHERE organization_id = :organization_id
-                                    AND id_entrega = :id_entrega';
+                                  WHERE id_entrega = :id_entrega';
                     $stmtDelEnt = $pdo->prepare($sqlDelEnt);
                     $stmtDelEnt->execute([
-                        ':organization_id' => $organizationId,
                         ':id_entrega' => $idEntrega,
                     ]);
 
@@ -365,15 +358,13 @@ final class TendersController
                               SET fecha_entrega = :fecha_entrega,
                                   observaciones = :observaciones
                               WHERE id_entrega = :id_entrega
-                                AND id_licitacion = :id_licitacion
-                                AND organization_id = :organization_id';
+                                AND id_licitacion = :id_licitacion';
                 $stmtUpdEnt = $pdo->prepare($sqlUpdEnt);
                 $stmtUpdEnt->execute([
                     ':fecha_entrega' => $fechaEntrega,
                     ':observaciones' => $observaciones,
                     ':id_entrega' => $idEntrega,
                     ':id_licitacion' => $tenderId,
-                    ':organization_id' => $organizationId,
                 ]);
 
                 // Procesar líneas de la entrega
@@ -392,12 +383,10 @@ final class TendersController
                     if ($idReal > 0) {
                         if ($deletedLinea) {
                             $sqlDelLinea = 'DELETE FROM tbl_licitaciones_real
-                                            WHERE organization_id = :organization_id
-                                              AND id_entrega = :id_entrega
+                                            WHERE id_entrega = :id_entrega
                                               AND id_real = :id_real';
                             $stmtDelLinea = $pdo->prepare($sqlDelLinea);
                             $stmtDelLinea->execute([
-                                ':organization_id' => $organizationId,
                                 ':id_entrega' => $idEntrega,
                                 ':id_real' => $idReal,
                             ]);
@@ -417,8 +406,7 @@ final class TendersController
                                             proveedor = :proveedor,
                                             estado = :estado,
                                             cobrado = :cobrado
-                                        WHERE organization_id = :organization_id
-                                          AND id_entrega = :id_entrega
+                                        WHERE id_entrega = :id_entrega
                                           AND id_real = :id_real';
                         $stmtUpdLinea = $pdo->prepare($sqlUpdLinea);
                         $stmtUpdLinea->execute([
@@ -427,7 +415,6 @@ final class TendersController
                             ':proveedor' => $proveedor,
                             ':estado' => $estado !== '' ? $estado : 'EN ESPERA',
                             ':cobrado' => $cobrado ? 1 : 0,
-                            ':organization_id' => $organizationId,
                             ':id_entrega' => $idEntrega,
                             ':id_real' => $idReal,
                         ]);

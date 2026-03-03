@@ -262,10 +262,8 @@ final class SearchRepository extends BaseRepository
              FROM %1$s d
              JOIN %2$s l
                ON l.id_licitacion = d.id_licitacion
-              AND l.organization_id = d.organization_id
              JOIN %3$s p
                ON p.id = d.id_producto
-              AND p.organization_id = d.organization_id
              WHERE %4$s
                AND d.activo = 1
                AND d.id_producto IN (%5$s)',
@@ -364,7 +362,6 @@ final class SearchRepository extends BaseRepository
              FROM %1$s pr
              JOIN %2$s p
                ON p.id = pr.id_producto
-              AND p.organization_id = pr.organization_id
              WHERE %3$s
                AND pr.id_producto IN (%4$s)',
             self::TABLE_PRECIOS_REFERENCIA,

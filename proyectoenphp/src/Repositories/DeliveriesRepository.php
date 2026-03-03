@@ -72,10 +72,8 @@ final class DeliveriesRepository extends BaseRepository
                  FROM %1$s lr
                  LEFT JOIN %2$s p
                    ON p.id_producto = lr.id_producto
-                  AND p.organization_id = lr.organization_id
                  LEFT JOIN %3$s tg
                    ON tg.id_tipo_gasto = lr.id_tipo_gasto
-                  AND tg.organization_id = lr.organization_id
                  WHERE %4$s
                  ORDER BY lr.id_real',
                 self::TABLE_LICITACIONES_REAL,
