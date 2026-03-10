@@ -147,14 +147,6 @@ $organizationId = (string)($user['organization_id'] ?? '');
         a.btn:hover {
             filter: brightness(1.05);
         }
-        .logout-link {
-            color: #f97373;
-            font-size: 0.85rem;
-            text-decoration: none;
-        }
-        .logout-link:hover {
-            text-decoration: underline;
-        }
         @media (max-width: 768px) {
             .layout {
                 flex-direction: column;
@@ -177,14 +169,14 @@ $organizationId = (string)($user['organization_id'] ?? '');
     <div class="layout">
         <aside class="sidebar">
             <div class="sidebar-logo">
-                Licitaciones <span>PHP</span>
+                Licitaciones
             </div>
             <nav class="sidebar-nav">
                 <a href="dashboard.php" class="nav-link active">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador histÃ³rico</a>
-                <a href="lineas-referencia.php" class="nav-link">AÃ±adir lÃ­neas</a>
-                <a href="analytics.php" class="nav-link">AnalÃ­tica</a>
+                <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
+                <a href="lineas-referencia.php" class="nav-link">A&ntilde;adir l&iacute;neas</a>
+                <a href="analytics.php" class="nav-link">Anal&iacute;tica</a>
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
             <div class="sidebar-footer">
@@ -200,7 +192,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
                         <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php endif; ?>
                     <div>
-                        <a href="logout.php" class="logout-link">Cerrar sesiÃ³n</a>
+                        <a href="logout.php">Cerrar sesi&oacute;n</a>
                     </div>
                 </div>
             </header>
@@ -209,20 +201,18 @@ $organizationId = (string)($user['organization_id'] ?? '');
                 <div class="card">
                     <h2>Bienvenido al panel de licitaciones</h2>
                     <p>
-                        Has iniciado sesiÃ³n correctamente. Desde aquÃ­ podrÃ¡s ir construyendo
-                        el resto de pantallas (listado de licitaciones, analÃ­tica, buscador, etc.)
-                        reutilizando la lÃ³gica de PHP y las tablas MySQL.
+                        Has iniciado sesi&oacute;n correctamente. Desde aqu&iacute; podr&aacute;s ir construyendo
+                        el resto de pantallas (listado de licitaciones, anal&iacute;tica, buscador, etc.)
+                        reutilizando la l&oacute;gica de PHP y las tablas MySQL.
                     </p>
                     <p>
                         <strong>Organization ID:</strong>
                         <?php echo htmlspecialchars($organizationId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                     </p>
-                    <a href="login.php" class="btn">Volver al inicio de sesiÃ³n</a>
+                    <a href="login.php" class="btn">Volver al inicio de sesi&oacute;n</a>
                 </div>
             </main>
         </div>
     </div>
 </body>
 </html>
-
-

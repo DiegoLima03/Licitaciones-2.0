@@ -8,7 +8,7 @@ require_once __DIR__ . '/../config/database.php';
 
 $error = null;
 
-// Si ya hay sesiÃ³n iniciada, ir al dashboard.
+// Si ya hay sesión iniciada, ir al dashboard.
 if (isset($_SESSION['user'])) {
     header('Location: dashboard.php');
     exit;
@@ -19,7 +19,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $password = $_POST['password'] ?? '';
 
     if ($email === '' || $password === '') {
-        $error = 'Email y contraseÃ±a son obligatorios.';
+        $error = 'Email y contraseña son obligatorios.';
     } else {
         try {
             $pdo = Database::getConnection();
@@ -39,7 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 exit;
             }
 
-            $error = 'Credenciales invÃ¡lidas. Revisa tu email y contraseÃ±a.';
+            $error = 'Credenciales inválidas. Revisa tu email y contraseña.';
         } catch (\Throwable $e) {
             $error = 'Error al conectar con la base de datos: ' . $e->getMessage();
         }
@@ -51,7 +51,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Iniciar sesiÃ³n</title>
+    <title>Iniciar sesión</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { box-sizing: border-box; }
@@ -152,8 +152,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 </head>
 <body>
     <div class="card">
-        <h1>Iniciar sesiÃ³n</h1>
-        <p>Introduce tu email y contraseÃ±a para acceder al panel de licitaciones.</p>
+        <h1>Iniciar sesión</h1>
+        <p>Introduce tu email y contraseña para acceder al panel de licitaciones.</p>
 
         <?php if ($error !== null): ?>
             <div class="error" role="alert">
@@ -174,7 +174,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
 
             <div class="field">
-                <label for="password">ContraseÃ±a</label>
+                <label for="password">Contraseña</label>
                 <input
                     type="password"
                     id="password"
@@ -187,7 +187,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         </form>
 
         <div class="footer-text">
-            Proyecto licitaciones Â· PHP 8 &amp; MySQL
+            Proyecto licitaciones · PHP 8 &amp; MySQL
         </div>
     </div>
 </body>

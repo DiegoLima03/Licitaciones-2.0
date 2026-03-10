@@ -20,6 +20,62 @@ $role = (string)($user['role'] ?? '');
 $organizationId = (string)($user['organization_id'] ?? '');
 
 $createError = null;
+$filterEstadoRaw = trim((string)($_GET['estado'] ?? ''));
+$filterPaisRaw = trim((string)($_GET['pais'] ?? ''));
+
+/**
+ * Normaliza un país para comparaciones, ignorando mayúsculas, tildes y n/ñ.
+ */
+function normalizeCountryKey(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+
+    $normalized = mb_strtolower($value, 'UTF-8');
+    $normalized = strtr($normalized, [
+        'á' => 'a', 'à' => 'a', 'ä' => 'a', 'â' => 'a', 'ã' => 'a',
+        'é' => 'e', 'è' => 'e', 'ë' => 'e', 'ê' => 'e',
+        'í' => 'i', 'ì' => 'i', 'ï' => 'i', 'î' => 'i',
+        'ó' => 'o', 'ò' => 'o', 'ö' => 'o', 'ô' => 'o', 'õ' => 'o',
+        'ú' => 'u', 'ù' => 'u', 'ü' => 'u', 'û' => 'u',
+        'ñ' => 'n',
+        'ç' => 'c',
+    ]);
+
+    $normalized = preg_replace('/\s+/u', ' ', $normalized);
+    return trim((string)$normalized);
+}
+
+/**
+ * Devuelve la etiqueta canónica para evitar variantes como "Espana" / "España".
+ */
+function canonicalCountryLabel(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+
+    $key = normalizeCountryKey($value);
+    if ($key === 'espana') {
+        return 'España';
+    }
+
+    return $value;
+}
+
+$filterEstadoId = null;
+if ($filterEstadoRaw !== '' && ctype_digit($filterEstadoRaw)) {
+    $estadoIdParsed = (int)$filterEstadoRaw;
+    if ($estadoIdParsed > 0) {
+        $filterEstadoId = $estadoIdParsed;
+    }
+}
+
+$filterPais = $filterPaisRaw !== '' ? canonicalCountryLabel($filterPaisRaw) : null;
+$filterPaisKey = $filterPais !== null ? normalizeCountryKey($filterPais) : null;
 
 // Si viene un POST desde el formulario del modal, crear la licitacion en la BD.
 if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
@@ -31,7 +87,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             throw new \InvalidArgumentException('El nombre del proyecto es obligatorio.');
         }
 
-        $pais = (string)($_POST['pais'] ?? '');
+        $pais = canonicalCountryLabel((string)($_POST['pais'] ?? ''));
         $numeroExpediente = (string)($_POST['numero_expediente'] ?? '');
         $enlaceGober = (string)($_POST['enlace_gober'] ?? '');
         $enlaceSharepoint = (string)($_POST['enlace_sharepoint'] ?? '');
@@ -46,6 +102,25 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         $idTipo = (string)($_POST['id_tipolicitacion'] ?? '');
         $idPadre = (string)($_POST['id_licitacion_padre'] ?? '');
         $descripcion = (string)($_POST['descripcion'] ?? '');
+        $crearLotes = (string)($_POST['crear_lotes'] ?? '0');
+        $numLotesRaw = (string)($_POST['num_lotes'] ?? '');
+
+        $lotesConfigJson = null;
+        if ($crearLotes === '1') {
+            $numLotes = (int)$numLotesRaw;
+            if ($numLotes < 2) {
+                throw new \InvalidArgumentException('Si activas lotes, debes indicar al menos 2.');
+            }
+
+            $lotesConfig = [];
+            for ($i = 1; $i <= $numLotes; $i++) {
+                $lotesConfig[] = [
+                    'nombre' => 'Lote ' . $i,
+                    'ganado' => true,
+                ];
+            }
+            $lotesConfigJson = json_encode($lotesConfig, JSON_UNESCAPED_UNICODE);
+        }
 
         $row = [
             'nombre' => $nombre,
@@ -63,11 +138,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             // Estado inicial igual que en el proyecto anterior: "En analisis" (id_estado = 3)
             'id_estado' => 3,
             'descripcion' => $descripcion !== '' ? $descripcion : null,
+            'lotes_config' => $lotesConfigJson,
         ];
 
         $repoPost->create($row);
 
-        header('Location: licitaciones.php?created=1');
+        header('Location: licitaciones.php');
         exit;
     } catch (\Throwable $e) {
         $createError = $e->getMessage();
@@ -80,13 +156,31 @@ $estados = [];
 $catalogError = '';
 /** @var array<int, string> id_estado -> nombre_estado */
 $estadoNombreById = [];
+/** @var array<int, array<string, mixed>> */
+$licitacionesBase = [];
+/** @var array<int, string> */
+$paisesDisponibles = [];
 
 try {
     $repo = new TendersRepository($organizationId);
+    $licitacionesBase = $repo->listTenders();
     /** @var array<int, array<string, mixed>> $licitaciones */
-    $licitaciones = $repo->listTenders();
+    $licitaciones = $repo->listTenders($filterEstadoId, null, null);
+    if ($filterPaisKey !== null && $filterPaisKey !== '') {
+        $licitaciones = array_values(array_filter(
+            $licitaciones,
+            static function (array $row) use ($filterPaisKey): bool {
+                $rowPais = trim((string)($row['pais'] ?? ''));
+                if ($rowPais === '') {
+                    return false;
+                }
+                return normalizeCountryKey($rowPais) === $filterPaisKey;
+            }
+        ));
+    }
     $parentTenders = $repo->getParentTenders();
 } catch (\Throwable $e) {
+    $licitacionesBase = [];
     $licitaciones = [];
     $loadError = $e->getMessage();
 }
@@ -123,9 +217,42 @@ $estadoNombreById += [
     7 => 'Terminada',
 ];
 
+if ($estados === []) {
+    foreach ($estadoNombreById as $estadoIdFallback => $estadoNombreFallback) {
+        $estados[] = [
+            'id_estado' => $estadoIdFallback,
+            'nombre_estado' => $estadoNombreFallback,
+        ];
+    }
+}
+
+// Opciones de pais para filtro (a partir del listado base sin filtros).
+$paisesByKey = [];
+foreach ($licitacionesBase as $licBase) {
+    $paisRaw = trim((string)($licBase['pais'] ?? ''));
+    if ($paisRaw === '') {
+        continue;
+    }
+    $key = normalizeCountryKey($paisRaw);
+    $label = canonicalCountryLabel($paisRaw);
+    if ($key === '') {
+        continue;
+    }
+    if (!isset($paisesByKey[$key])) {
+        $paisesByKey[$key] = $label;
+    }
+}
+if ($filterPaisKey !== null && $filterPaisKey !== '') {
+    if (!isset($paisesByKey[$filterPaisKey])) {
+        $paisesByKey[$filterPaisKey] = $filterPais;
+    }
+}
+natcasesort($paisesByKey);
+$paisesDisponibles = array_values($paisesByKey);
+
 // Mapa id_licitacion -> nombre para "Cuelga de" (licitaciones raiz = sin padre)
 $parentNameById = [];
-foreach ($licitaciones as $lic) {
+foreach ($licitacionesBase as $lic) {
     $padre = $lic['id_licitacion_padre'] ?? null;
     if ($padre === null || $padre === '' || (is_string($padre) && trim($padre) === '')) {
         $id = (int)($lic['id_licitacion'] ?? 0);
@@ -231,9 +358,10 @@ foreach ($licitaciones as $lic) {
             margin-top: 2px;
         }
         main {
-            max-width: 1100px;
-            margin: 32px auto;
-            padding: 0 16px 32px;
+            width: 100%;
+            max-width: none;
+            margin: 24px 0;
+            padding: 0 clamp(16px, 2.4vw, 36px) 32px;
         }
         .card {
             background-color: #020617;
@@ -368,10 +496,10 @@ foreach ($licitaciones as $lic) {
             border: 1px solid rgba(220, 38, 38, 0.4);
             color: #fecaca;
             font-size: 0.8rem;
-            animation: urgent-pill 1s ease-in-out infinite;
+            animation: urgent-pill 1.8s ease-in-out infinite;
         }
         tr.row-urgent {
-            animation: urgent-row 1s ease-in-out infinite;
+            animation: urgent-row 1.8s ease-in-out infinite;
         }
         .badge-estado.estado-3 {
             background-color: #422006;
@@ -473,22 +601,6 @@ foreach ($licitaciones as $lic) {
         .date-row input[type="date"] {
             flex: 1;
         }
-        .date-picker-btn {
-            border-radius: 8px;
-            border: 1px solid #1f2937;
-            background: #111827;
-            color: #e5e7eb;
-            width: 34px;
-            height: 34px;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 0.9rem;
-            cursor: pointer;
-        }
-        .date-picker-btn:hover {
-            background: #1f2937;
-        }
         .modal-actions {
             margin-top: 18px;
             display: flex;
@@ -511,6 +623,52 @@ foreach ($licitaciones as $lic) {
         .modal-actions .btn-primary {
             background: linear-gradient(135deg, #10b981, #0ea5e9);
             color: #020617;
+        }
+        .tenders-filters {
+            margin-top: 14px;
+            margin-bottom: 12px;
+            padding: 12px;
+            border-radius: 12px;
+            border: 1px solid rgba(133, 114, 94, 0.55);
+            background:
+                linear-gradient(180deg, #ffffff 0%, #f6f3ec 100%);
+            box-shadow:
+                0 2px 8px rgba(16, 24, 14, 0.08),
+                inset 0 1px 0 rgba(255, 255, 255, 0.9);
+        }
+        .tenders-filters-grid {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(190px, 1fr));
+            gap: 10px;
+            align-items: end;
+        }
+        .tenders-filters .filter-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+            min-width: 0;
+        }
+        .tenders-filters .filter-field label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #85725e;
+        }
+        .tenders-filters .filter-field select {
+            height: 40px;
+            border-radius: 8px;
+            border: 1px solid rgba(133, 114, 94, 0.65);
+            background: #ffffff;
+            color: #10180e;
+            padding: 7px 10px;
+            font-size: 0.9rem;
+            font-weight: 600;
+        }
+        @media (max-width: 980px) {
+            .tenders-filters-grid {
+                grid-template-columns: 1fr;
+            }
         }
         .empty {
             margin-top: 12px;
@@ -547,7 +705,7 @@ foreach ($licitaciones as $lic) {
     <div class="layout">
         <aside class="sidebar">
             <div class="sidebar-logo">
-                Licitaciones <span>PHP</span>
+                Licitaciones
             </div>
             <nav class="sidebar-nav">
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
@@ -570,7 +728,7 @@ foreach ($licitaciones as $lic) {
                         <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php endif; ?>
                     <div>
-                        <a href="logout.php" style="color:#f97373;text-decoration:none;font-size:0.85rem;">Cerrar sesion</a>
+                        <a href="logout.php">Cerrar sesion</a>
                     </div>
                 </div>
             </header>
@@ -591,11 +749,47 @@ foreach ($licitaciones as $lic) {
                         <div class="error">
                             Error guardando la licitacion: <?php echo htmlspecialchars($createError, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                         </div>
-                    <?php elseif (isset($_GET['created'])): ?>
-                        <div class="error" style="background-color:#14532d;color:#bbf7d0;">
-                            Licitacion creada correctamente.
-                        </div>
                     <?php endif; ?>
+
+                    <form method="get" action="licitaciones.php" class="tenders-filters">
+                        <div class="tenders-filters-grid">
+                            <div class="filter-field">
+                                <label for="filter-pais">Pais</label>
+                                <select id="filter-pais" name="pais">
+                                    <option value="">Todos los paises</option>
+                                    <?php foreach ($paisesDisponibles as $paisOption): ?>
+                                        <option
+                                            value="<?php echo htmlspecialchars($paisOption, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                            <?php echo $filterPaisKey !== null && normalizeCountryKey($paisOption) === $filterPaisKey ? 'selected' : ''; ?>
+                                        >
+                                            <?php echo htmlspecialchars($paisOption, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="filter-field">
+                                <label for="filter-estado">Estado</label>
+                                <select id="filter-estado" name="estado">
+                                    <option value="">Todos los estados</option>
+                                    <?php foreach ($estados as $estadoOption): ?>
+                                        <?php
+                                        $estadoIdOption = (int)($estadoOption['id_estado'] ?? 0);
+                                        if ($estadoIdOption <= 0) {
+                                            continue;
+                                        }
+                                        $estadoNombreOption = (string)($estadoOption['nombre_estado'] ?? ('Estado ' . $estadoIdOption));
+                                        ?>
+                                        <option
+                                            value="<?php echo $estadoIdOption; ?>"
+                                            <?php echo $filterEstadoId === $estadoIdOption ? 'selected' : ''; ?>
+                                        >
+                                            <?php echo htmlspecialchars($estadoNombreOption, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                        </option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                        </div>
+                    </form>
 
                     <?php if (isset($loadError)): ?>
                         <div class="error">
@@ -686,8 +880,8 @@ foreach ($licitaciones as $lic) {
                                                 <?php endif; ?>
                                             </td>
                                             <td style="text-align:center;">
-                                                <?php if ($fechaUrgente): ?>
-                                                    <span class="fecha-urgente" title="Menos de 5 dias para presentacion">! <?php echo htmlspecialchars($fechaPresFormatted, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
+                                                    <?php if ($fechaUrgente): ?>
+                                                    <span class="fecha-urgente" title="Menos de 5 dias para presentacion">&#9888; <?php echo htmlspecialchars($fechaPresFormatted, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
                                                 <?php else: ?>
                                                     <?php echo htmlspecialchars($fechaPresFormatted, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                                                 <?php endif; ?>
@@ -727,7 +921,7 @@ foreach ($licitaciones as $lic) {
                             <label for="modal-pais">Pais</label>
                             <select id="modal-pais" name="pais" required>
                                 <option value="">Selecciona pais...</option>
-                                <option value="Espana">Espana</option>
+                                <option value="España">España</option>
                                 <option value="Portugal">Portugal</option>
                             </select>
                         </div>
@@ -745,27 +939,24 @@ foreach ($licitaciones as $lic) {
                         </div>
                         <div class="field half">
                             <label for="modal-pres_maximo">Presupuesto max. (EUR)</label>
-                            <input id="modal-pres_maximo" name="pres_maximo" type="number" step="0.01" min="0" value="0" />
+                            <input id="modal-pres_maximo" name="pres_maximo" type="number" step="0.01" min="0" placeholder="0,00" />
                         </div>
                         <div class="field half">
                             <label for="modal-fecha_presentacion">F. presentacion</label>
                             <div class="date-row">
                                 <input id="modal-fecha_presentacion" name="fecha_presentacion" type="date" />
-                                <button type="button" class="date-picker-btn" data-target="modal-fecha_presentacion">...</button>
                             </div>
                         </div>
                         <div class="field half">
                             <label for="modal-fecha_adjudicacion">F. adjudicacion</label>
                             <div class="date-row">
                                 <input id="modal-fecha_adjudicacion" name="fecha_adjudicacion" type="date" />
-                                <button type="button" class="date-picker-btn" data-target="modal-fecha_adjudicacion">...</button>
                             </div>
                         </div>
                         <div class="field half">
                             <label for="modal-fecha_finalizacion">F. finalizacion</label>
                             <div class="date-row">
                                 <input id="modal-fecha_finalizacion" name="fecha_finalizacion" type="date" />
-                                <button type="button" class="date-picker-btn" data-target="modal-fecha_finalizacion">...</button>
                             </div>
                         </div>
                         <div class="field half">
@@ -778,7 +969,18 @@ foreach ($licitaciones as $lic) {
                             </select>
                         </div>
                         <div class="field half">
-                            <label for="modal-tipo_id">Tipo</label>
+                            <label for="modal-crear_lotes">Quieres crear lotes</label>
+                            <select id="modal-crear_lotes" name="crear_lotes">
+                                <option value="0" selected>No</option>
+                                <option value="1">Si</option>
+                            </select>
+                        </div>
+                        <div class="field half" id="modal-num-lotes-wrap" style="display:none;">
+                            <label for="modal-num_lotes">Cuantos lotes</label>
+                            <input id="modal-num_lotes" name="num_lotes" type="number" min="2" step="1" value="2" />
+                        </div>
+                        <div class="field half">
+                            <label for="modal-tipo_id">Tipo de licitacion</label>
                             <select id="modal-tipo_id" name="id_tipolicitacion">
                                 <option value=""><?php echo count($tipos) === 0 ? ($catalogError !== '' ? 'Error: ' . htmlspecialchars(mb_substr($catalogError, 0, 60), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : 'No hay tipos (ejecuta seed_tipos_licitacion.sql)') : 'Selecciona un tipo'; ?></option>
                                 <?php foreach ($tipos as $t): ?>
@@ -838,26 +1040,33 @@ foreach ($licitaciones as $lic) {
 
         var tipoProc = document.getElementById('modal-tipo_procedimiento');
         var expedientePadreWrap = document.getElementById('modal-expediente-padre-wrap');
+        var crearLotes = document.getElementById('modal-crear_lotes');
+        var numLotesWrap = document.getElementById('modal-num-lotes-wrap');
+        var numLotesInput = document.getElementById('modal-num_lotes');
         function toggleExpedientePadre() {
             expedientePadreWrap.style.display = tipoProc.value === 'CONTRATO_BASADO' ? 'block' : 'none';
         }
+        function toggleNumLotes() {
+            if (!crearLotes || !numLotesWrap || !numLotesInput) return;
+            var enabled = crearLotes.value === '1';
+            numLotesWrap.style.display = enabled ? 'block' : 'none';
+            numLotesInput.disabled = !enabled;
+        }
         tipoProc.addEventListener('change', toggleExpedientePadre);
+        if (crearLotes) crearLotes.addEventListener('change', toggleNumLotes);
         toggleExpedientePadre();
+        toggleNumLotes();
 
-        var dateButtons = document.querySelectorAll('.date-picker-btn');
-        dateButtons.forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var targetId = btn.getAttribute('data-target');
-                if (!targetId) return;
-                var input = document.getElementById(targetId);
-                if (!input) return;
-                if (typeof input.showPicker === 'function') {
-                    input.showPicker();
-                } else {
-                    input.focus();
-                }
+        // Filtros del listado: aplicar automaticamente al cambiar pais/estado.
+        var filtersForm = document.querySelector('form.tenders-filters');
+        if (filtersForm) {
+            var filters = filtersForm.querySelectorAll('select[name="pais"], select[name="estado"]');
+            filters.forEach(function (control) {
+                control.addEventListener('change', function () {
+                    filtersForm.submit();
+                });
             });
-        });
+        }
 
         // Enviar el formulario de forma normal (POST a licitaciones.php) para que se guarde en la BD.
         // No interceptamos el submit con AJAX para reutilizar la logica PHP del listado.
@@ -865,5 +1074,6 @@ foreach ($licitaciones as $lic) {
     </script>
 </body>
 </html>
+
 
 

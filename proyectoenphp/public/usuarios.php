@@ -177,14 +177,14 @@ $organizationId = (string)($user['organization_id'] ?? '');
     <div class="layout">
         <aside class="sidebar">
             <div class="sidebar-logo">
-                Licitaciones <span>PHP</span>
+                Licitaciones
             </div>
             <nav class="sidebar-nav">
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador histÃ³rico</a>
-                <a href="lineas-referencia.php" class="nav-link">AÃ±adir lÃ­neas</a>
-                <a href="analytics.php" class="nav-link">AnalÃ­tica</a>
+                <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
+                <a href="lineas-referencia.php" class="nav-link">A&ntilde;adir l&iacute;neas</a>
+                <a href="analytics.php" class="nav-link">Anal&iacute;tica</a>
                 <a href="usuarios.php" class="nav-link active">Usuarios</a>
             </nav>
             <div class="sidebar-footer">
@@ -193,24 +193,24 @@ $organizationId = (string)($user['organization_id'] ?? '');
         </aside>
         <div class="main">
             <header>
-                <h1>Usuarios de la organizaciÃ³n</h1>
+                <h1>Usuarios de la organizaci&oacute;n</h1>
                 <div class="user-info">
                     <div><?php echo htmlspecialchars($fullName !== '' ? $fullName : $email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php if ($role !== ''): ?>
                         <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php endif; ?>
                     <div>
-                        <a href="logout.php" style="color:#f97373;text-decoration:none;font-size:0.85rem;">Cerrar sesiÃ³n</a>
+                        <a href="logout.php">Cerrar sesi&oacute;n</a>
                     </div>
                 </div>
             </header>
 
             <main>
                 <div class="card">
-                    <h2>GestiÃ³n de usuarios</h2>
+                    <h2>Gesti&oacute;n de usuarios</h2>
                     <p>
-                        AquÃ­ podrÃ¡s ver y administrar los usuarios de tu organizaciÃ³n
-                        (roles, permisos, alta/baja, etc.). MÃ¡s adelante conectaremos
+                        Aqu&iacute; podr&aacute;s ver y administrar los usuarios de tu organizaci&oacute;n
+                        (roles, permisos, alta/baja, etc.). M&aacute;s adelante conectaremos
                         esta tabla con el backend PHP que ya prepara los permisos.
                     </p>
 
@@ -225,7 +225,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
                         <tbody>
                             <tr>
                                 <td><?php echo htmlspecialchars($email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
-                                <td><?php echo htmlspecialchars($fullName !== '' ? $fullName : 'â€”', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
+                                <td><?php echo htmlspecialchars($fullName !== '' ? $fullName : '-', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
                                 <td><?php echo htmlspecialchars($role !== '' ? $role : 'member_licitaciones', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
                             </tr>
                         </tbody>
@@ -233,8 +233,8 @@ $organizationId = (string)($user['organization_id'] ?? '');
 
                     <p class="hint">
                         De momento mostramos solo tu propio usuario a modo de ejemplo.
-                        DespuÃ©s leeremos todos los usuarios desde la tabla <code>profiles</code>
-                        y aplicaremos la lÃ³gica de permisos.
+                        Despu&eacute;s leeremos todos los usuarios desde la tabla <code>profiles</code>
+                        y aplicaremos la l&oacute;gica de permisos.
                     </p>
                 </div>
             </main>
@@ -242,5 +242,6 @@ $organizationId = (string)($user['organization_id'] ?? '');
     </div>
 </body>
 </html>
+
 
 

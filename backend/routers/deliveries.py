@@ -16,6 +16,7 @@ from backend.schemas.tenders import ESTADOS_PERMITEN_ENTREGAS
 
 
 router = APIRouter(prefix="/deliveries", tags=["deliveries"])
+QTY_EPSILON = 1e-4
 
 
 def _org_str(user: CurrentUser) -> str:
@@ -95,6 +96,113 @@ def _get_mapa_id_detalle_by_id_producto(licitacion_id: int, org_id: str) -> Dict
     return mapa
 
 
+def _get_presupuestado_by_detalle(licitacion_id: int, org_id: str, id_detalles: List[int]) -> Dict[int, float]:
+    """Obtiene unidades presupuestadas por partida activa."""
+    ids = sorted({int(v) for v in id_detalles if int(v) > 0})
+    if not ids:
+        return {}
+
+    response = (
+        supabase_client.table("tbl_licitaciones_detalle")
+        .select("id_detalle, unidades")
+        .eq("id_licitacion", licitacion_id)
+        .eq("organization_id", org_id)
+        .eq("activo", True)
+        .in_("id_detalle", ids)
+        .execute()
+    )
+
+    out: Dict[int, float] = {}
+    for row in response.data or []:
+        id_det = row.get("id_detalle")
+        if id_det is None:
+            continue
+        out[int(id_det)] = float(row.get("unidades") or 0.0)
+    return out
+
+
+def _get_entregado_by_detalle(licitacion_id: int, org_id: str, id_detalles: List[int]) -> Dict[int, float]:
+    """Suma cantidades entregadas por partida."""
+    ids = sorted({int(v) for v in id_detalles if int(v) > 0})
+    if not ids:
+        return {}
+
+    response = (
+        supabase_client.table("tbl_licitaciones_real")
+        .select("id_detalle, cantidad")
+        .eq("id_licitacion", licitacion_id)
+        .eq("organization_id", org_id)
+        .in_("id_detalle", ids)
+        .execute()
+    )
+
+    out: Dict[int, float] = {}
+    for row in response.data or []:
+        id_det = row.get("id_detalle")
+        if id_det is None:
+            continue
+        key = int(id_det)
+        out[key] = out.get(key, 0.0) + float(row.get("cantidad") or 0.0)
+    return out
+
+
+def _validate_no_over_delivery(licitacion_id: int, org_id: str, lineas: List[Dict[str, Any]]) -> None:
+    """Impide registrar unidades por encima de lo pendiente en partidas presupuestadas."""
+    nueva_cantidad_por_detalle: Dict[int, float] = {}
+
+    for row in lineas:
+        if row.get("id_tipo_gasto") is not None:
+            # Gasto extraordinario: no consume unidades presupuestadas.
+            continue
+
+        cantidad = float(row.get("cantidad") or 0.0)
+        if cantidad <= 0.0:
+            continue
+
+        id_detalle = row.get("id_detalle")
+        if id_detalle is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No se puede registrar una linea con cantidad sin partida de presupuesto asociada.",
+            )
+
+        id_det = int(id_detalle)
+        if id_det <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Partida de presupuesto invalida en linea de albaran.",
+            )
+
+        nueva_cantidad_por_detalle[id_det] = nueva_cantidad_por_detalle.get(id_det, 0.0) + cantidad
+
+    if not nueva_cantidad_por_detalle:
+        return
+
+    id_detalles = list(nueva_cantidad_por_detalle.keys())
+    presupuestado_por_detalle = _get_presupuestado_by_detalle(licitacion_id, org_id, id_detalles)
+    entregado_por_detalle = _get_entregado_by_detalle(licitacion_id, org_id, id_detalles)
+
+    for id_detalle, cantidad_nueva in nueva_cantidad_por_detalle.items():
+        if id_detalle not in presupuestado_por_detalle:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"La partida #{id_detalle} no existe o no esta activa en el presupuesto de esta licitacion.",
+            )
+
+        presupuestado = float(presupuestado_por_detalle[id_detalle])
+        entregado = float(entregado_por_detalle.get(id_detalle, 0.0))
+        pendiente = max(0.0, presupuestado - entregado)
+
+        if (cantidad_nueva - pendiente) > QTY_EPSILON:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"La partida #{id_detalle} excede la cantidad pendiente. "
+                    f"Pendiente: {pendiente:.2f}, intentado: {cantidad_nueva:.2f}."
+                ),
+            )
+
+
 @router.post("", response_model=dict, status_code=status.HTTP_201_CREATED)
 def create_delivery(payload: DeliveryCreate, current_user: CurrentUserDep) -> dict:
     """
@@ -154,52 +262,63 @@ def create_delivery(payload: DeliveryCreate, current_user: CurrentUserDep) -> di
             detail=f"Error creando cabecera: {e!s}",
         ) from e
 
-    mapa_id_detalle = _get_mapa_id_detalle_by_id_producto(payload.id_licitacion, _org_str(current_user))
-    lineas_a_insertar: List[dict[str, Any]] = []
-
-    for line in payload.lineas:
-        qty = float(line.cantidad)
-        cost = float(line.coste_unit)
-        if qty == 0 and cost == 0:
-            continue
-        is_extraordinario = line.id_tipo_gasto is not None
-        id_producto = int(line.id_producto) if line.id_producto is not None else None
-        if not is_extraordinario and id_producto is None:
-            continue
-        id_detalle = line.id_detalle
-        prov_linea = (line.proveedor or "").strip()
-        row: Dict[str, Any] = {
-            "id_licitacion": payload.id_licitacion,
-            "organization_id": _org_str(current_user),
-            "id_entrega": new_id_entrega,
-            "id_detalle": id_detalle,
-            "fecha_entrega": cabecera.fecha,
-            "cantidad": qty,
-            "pcu": cost,
-            "proveedor": prov_linea,
-            "estado": "EN ESPERA",
-            "cobrado": False,
-        }
-        if is_extraordinario:
-            row["id_tipo_gasto"] = line.id_tipo_gasto
-            row["id_producto"] = None
-        else:
-            row["id_producto"] = id_producto
-        lineas_a_insertar.append(row)
-
-    if not lineas_a_insertar:
-        supabase_client.table("tbl_entregas").delete().eq(
-            "id_entrega", new_id_entrega
-        ).execute()
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El documento no tenía líneas válidas.",
-        )
-
     try:
+        org_s = _org_str(current_user)
+        mapa_id_detalle = _get_mapa_id_detalle_by_id_producto(payload.id_licitacion, org_s)
+        lineas_a_insertar: List[dict[str, Any]] = []
+
+        for line in payload.lineas:
+            qty = float(line.cantidad)
+            cost = float(line.coste_unit)
+            if qty == 0 and cost == 0:
+                continue
+
+            is_extraordinario = line.id_tipo_gasto is not None
+            id_producto = int(line.id_producto) if line.id_producto is not None else None
+            if not is_extraordinario and id_producto is None:
+                continue
+
+            id_detalle = int(line.id_detalle) if line.id_detalle is not None else None
+            if not is_extraordinario and id_detalle is None and id_producto is not None:
+                id_detalle = mapa_id_detalle.get(id_producto)
+
+            prov_linea = (line.proveedor or "").strip()
+            row: Dict[str, Any] = {
+                "id_licitacion": payload.id_licitacion,
+                "organization_id": org_s,
+                "id_entrega": new_id_entrega,
+                "id_detalle": id_detalle,
+                "fecha_entrega": cabecera.fecha,
+                "cantidad": qty,
+                "pcu": cost,
+                "proveedor": prov_linea,
+                "estado": "EN ESPERA",
+                "cobrado": False,
+                "id_producto": None,
+                "id_tipo_gasto": None,
+            }
+            if is_extraordinario:
+                row["id_tipo_gasto"] = line.id_tipo_gasto
+            else:
+                row["id_producto"] = id_producto
+            lineas_a_insertar.append(row)
+
+        if not lineas_a_insertar:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El documento no tenía líneas válidas.",
+            )
+
+        _validate_no_over_delivery(payload.id_licitacion, org_s, lineas_a_insertar)
+
         supabase_client.table("tbl_licitaciones_real").insert(
             lineas_a_insertar
         ).execute()
+    except HTTPException:
+        supabase_client.table("tbl_entregas").delete().eq(
+            "id_entrega", new_id_entrega
+        ).execute()
+        raise
     except Exception as e:
         supabase_client.table("tbl_entregas").delete().eq(
             "id_entrega", new_id_entrega
@@ -264,3 +383,4 @@ def delete_delivery(delivery_id: int, current_user: CurrentUserDep) -> None:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error eliminando entrega: {e!s}",
         ) from e
+

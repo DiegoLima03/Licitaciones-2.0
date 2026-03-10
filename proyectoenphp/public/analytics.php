@@ -21,7 +21,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>AnalÃ­tica</title>
+    <title>Anal&iacute;tica</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { box-sizing: border-box; }
@@ -175,14 +175,14 @@ $organizationId = (string)($user['organization_id'] ?? '');
     <div class="layout">
         <aside class="sidebar">
             <div class="sidebar-logo">
-                Licitaciones <span>PHP</span>
+                Licitaciones
             </div>
             <nav class="sidebar-nav">
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador histÃ³rico</a>
-                <a href="lineas-referencia.php" class="nav-link">AÃ±adir lÃ­neas</a>
-                <a href="analytics.php" class="nav-link active">AnalÃ­tica</a>
+                <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
+                <a href="lineas-referencia.php" class="nav-link">A&ntilde;adir l&iacute;neas</a>
+                <a href="analytics.php" class="nav-link active">Anal&iacute;tica</a>
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
             <div class="sidebar-footer">
@@ -191,14 +191,14 @@ $organizationId = (string)($user['organization_id'] ?? '');
         </aside>
         <div class="main">
             <header>
-                <h1>AnalÃ­tica de licitaciones</h1>
+                <h1>Anal&iacute;tica de licitaciones</h1>
                 <div class="user-info">
                     <div><?php echo htmlspecialchars($fullName !== '' ? $fullName : $email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php if ($role !== ''): ?>
                         <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php endif; ?>
                     <div>
-                        <a href="logout.php" style="color:#f97373;text-decoration:none;font-size:0.85rem;">Cerrar sesiÃ³n</a>
+                        <a href="logout.php">Cerrar sesi&oacute;n</a>
                     </div>
                 </div>
             </header>
@@ -208,23 +208,23 @@ $organizationId = (string)($user['organization_id'] ?? '');
                     <div class="card">
                         <h2>KPIs principales</h2>
                         <p>Ganadas vs perdidas, importe total, etc.</p>
-                        <div class="kpi-value">â€”</div>
+                        <div class="kpi-value">-</div>
                         <div class="placeholder-chart">
-                            AquÃ­ pintaremos los KPIs desde el repositorio de Analytics en PHP.
+                            Aqu&iacute; pintaremos los KPIs desde el repositorio de Analytics en PHP.
                         </div>
                     </div>
                     <div class="card">
                         <h2>Tendencia materiales</h2>
-                        <p>CÃ³mo evolucionan los materiales clave en el tiempo.</p>
+                        <p>C&oacute;mo evolucionan los materiales clave en el tiempo.</p>
                         <div class="placeholder-chart">
-                            GrÃ¡fico de tendencia (mock).
+                            Gr&aacute;fico de tendencia (mock).
                         </div>
                     </div>
                     <div class="card">
                         <h2>Pipeline ajustado por riesgo</h2>
-                        <p>VisiÃ³n de las oportunidades ponderadas por probabilidad.</p>
+                        <p>Visi&oacute;n de las oportunidades ponderadas por probabilidad.</p>
                         <div class="placeholder-chart">
-                            AquÃ­ conectaremos con <code>AnalyticsRepository::getRiskAdjustedPipeline()</code>.
+                            Aqu&iacute; conectaremos con <code>AnalyticsRepository::getRiskAdjustedPipeline()</code>.
                         </div>
                     </div>
                 </div>
@@ -233,5 +233,6 @@ $organizationId = (string)($user['organization_id'] ?? '');
     </div>
 </body>
 </html>
+
 
 

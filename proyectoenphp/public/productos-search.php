@@ -4,32 +4,9 @@ declare(strict_types=1);
 
 session_start();
 
-require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/../src/Repositories/ProductsRepository.php';
 
 header('Content-Type: application/json; charset=utf-8');
-
-/**
- * Comprueba si una columna existe en la tabla indicada.
- */
-function tableColumnExists(\PDO $pdo, string $table, string $column): bool
-{
-    $sql = '
-        SELECT 1
-        FROM information_schema.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME = :table_name
-          AND COLUMN_NAME = :column_name
-        LIMIT 1
-    ';
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute([
-        ':table_name' => $table,
-        ':column_name' => $column,
-    ]);
-
-    return $stmt->fetchColumn() !== false;
-}
 
 try {
     /** @var array<string, mixed>|null $user */
@@ -40,66 +17,44 @@ try {
         exit;
     }
 
+    $organizationId = trim((string)($user['organization_id'] ?? ''));
+    if ($organizationId === '') {
+        http_response_code(403);
+        echo json_encode([], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     $q = trim((string)($_GET['q'] ?? ''));
-    if ($q === '') {
+    if ($q === '' || mb_strlen($q, 'UTF-8') < 4) {
         echo json_encode([], JSON_UNESCAPED_UNICODE);
         exit;
     }
 
     $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 12;
-    if ($limit < 1) {
-        $limit = 1;
-    } elseif ($limit > 30) {
-        $limit = 30;
+    if ($limit < 5) {
+        $limit = 5;
+    } elseif ($limit > 120) {
+        $limit = 120;
     }
 
-    $pdo = Database::getConnection();
+    $repo = new ProductsRepository($organizationId);
+    $results = $repo->searchProductos($q, $limit, false);
 
-    $hasNombreProveedor = tableColumnExists($pdo, 'tbl_productos', 'nombre_proveedor');
-    $hasReferencia = tableColumnExists($pdo, 'tbl_productos', 'referencia');
-    $hasCodigoBarras = tableColumnExists($pdo, 'tbl_productos', 'codigo_barras');
+    $rows = [];
+    foreach ($results as $row) {
+        $id = isset($row['id']) ? (int)$row['id'] : 0;
+        if ($id <= 0) {
+            continue;
+        }
 
-    $selectCols = [
-        'id AS id_producto',
-        'nombre',
-        $hasNombreProveedor ? 'nombre_proveedor' : 'NULL AS nombre_proveedor',
-        $hasReferencia ? 'referencia' : 'NULL AS referencia',
-        $hasCodigoBarras ? 'codigo_barras' : 'NULL AS codigo_barras',
-    ];
-
-    $likeValue = '%' . $q . '%';
-    $searchCols = ['nombre LIKE :q_nombre'];
-    $params = [
-        ':q_nombre' => $likeValue,
-        ':q_prefijo' => $q . '%',
-    ];
-
-    if ($hasReferencia) {
-        $searchCols[] = 'referencia LIKE :q_referencia';
-        $params[':q_referencia'] = $likeValue;
+        $rows[] = [
+            'id_producto' => $id,
+            'nombre' => (string)($row['nombre'] ?? ''),
+            'nombre_proveedor' => isset($row['nombre_proveedor']) ? (string)$row['nombre_proveedor'] : null,
+            'referencia' => isset($row['referencia']) ? (string)$row['referencia'] : null,
+            'codigo_barras' => isset($row['codigo_barras']) ? (string)$row['codigo_barras'] : null,
+        ];
     }
-    if ($hasCodigoBarras) {
-        $searchCols[] = 'codigo_barras LIKE :q_codigo_barras';
-        $params[':q_codigo_barras'] = $likeValue;
-    }
-
-    $sql = sprintf(
-        'SELECT %s
-         FROM tbl_productos
-         WHERE (%s)
-         ORDER BY
-           CASE WHEN nombre LIKE :q_prefijo THEN 0 ELSE 1 END,
-           nombre
-         LIMIT %d',
-        implode(', ', $selectCols),
-        implode(' OR ', $searchCols),
-        $limit
-    );
-
-    $stmt = $pdo->prepare($sql);
-    $stmt->execute($params);
-
-    $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
 
     echo json_encode($rows, JSON_UNESCAPED_UNICODE);
 } catch (\Throwable $e) {
@@ -109,4 +64,3 @@ try {
         'details' => $e->getMessage(),
     ], JSON_UNESCAPED_UNICODE);
 }
-

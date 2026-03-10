@@ -16,6 +16,7 @@ final class DeliveriesRepository extends BaseRepository
     // Estados permitidos para imputar entregas (equivalente a ESTADOS_PERMITEN_ENTREGAS)
     private const ESTADO_ADJUDICADA = 5;
     private const ESTADOS_PERMITEN_ENTREGAS = [self::ESTADO_ADJUDICADA];
+    private const QTY_EPSILON = 0.0001;
 
     public function __construct(string $organizationId)
     {
@@ -59,11 +60,11 @@ final class DeliveriesRepository extends BaseRepository
 
             $rlsLines = str_replace(
                 'organization_id',
-                self::TABLE_LICITACIONES_REAL . '.organization_id',
+                'lr.organization_id',
                 $this->getRlsClause()
             );
 
-            $whereLines = $rlsLines . ' AND ' . self::TABLE_LICITACIONES_REAL . '.id_entrega = :id_entrega';
+            $whereLines = $rlsLines . ' AND lr.id_entrega = :id_entrega';
             $paramsLines = $this->getRlsParams();
             $paramsLines[':id_entrega'] = (int)$idEntrega;
 
@@ -71,9 +72,9 @@ final class DeliveriesRepository extends BaseRepository
                 'SELECT lr.*, p.nombre AS producto_nombre, tg.nombre AS tipo_gasto_nombre
                  FROM %1$s lr
                  LEFT JOIN %2$s p
-                   ON p.id_producto = lr.id_producto
+                   ON p.id = lr.id_producto
                  LEFT JOIN %3$s tg
-                   ON tg.id_tipo_gasto = lr.id_tipo_gasto
+                   ON tg.id = lr.id_tipo_gasto
                  WHERE %4$s
                  ORDER BY lr.id_real',
                 self::TABLE_LICITACIONES_REAL,
@@ -153,6 +154,9 @@ final class DeliveriesRepository extends BaseRepository
                 $this->pdo->rollBack();
                 throw new \InvalidArgumentException('El documento no tenía líneas válidas.', 400);
             }
+
+            // Regla de negocio: impedir sobre-entregar cantidades frente al presupuesto.
+            $this->validateNoOverDelivery($licitacionId, $lineasAInsertar);
 
             $this->insertLineasEntrega($lineasAInsertar);
 
@@ -384,11 +388,14 @@ final class DeliveriesRepository extends BaseRepository
                 'proveedor' => $provLinea,
                 'estado' => 'EN ESPERA',
                 'cobrado' => 0,
+                // Siempre incluimos ambas columnas para mantener placeholders estables
+                // al mezclar lineas presupuestadas y extraordinarias.
+                'id_producto' => null,
+                'id_tipo_gasto' => null,
             ];
 
             if ($isExtraordinario) {
                 $row['id_tipo_gasto'] = (int)$idTipoGasto;
-                $row['id_producto'] = null;
             } else {
                 $row['id_producto'] = $idProducto;
             }
@@ -397,6 +404,193 @@ final class DeliveriesRepository extends BaseRepository
         }
 
         return $lineasAInsertar;
+    }
+
+    /**
+     * Valida que las lineas presupuestadas no exceden la cantidad pendiente por partida.
+     *
+     * @param array<int, array<string, mixed>> $lineasAInsertar
+     */
+    private function validateNoOverDelivery(int $licitacionId, array $lineasAInsertar): void
+    {
+        /** @var array<int, float> $nuevaCantidadPorDetalle */
+        $nuevaCantidadPorDetalle = [];
+
+        foreach ($lineasAInsertar as $row) {
+            $idTipoGasto = $row['id_tipo_gasto'] ?? null;
+            if ($idTipoGasto !== null) {
+                // Gastos extraordinarios: no tienen limite de unidades presupuestadas.
+                continue;
+            }
+
+            $cantidad = (float)($row['cantidad'] ?? 0.0);
+            if ($cantidad <= 0.0) {
+                continue;
+            }
+
+            $idDetalleRaw = $row['id_detalle'] ?? null;
+            if ($idDetalleRaw === null) {
+                throw new \InvalidArgumentException(
+                    'No se puede registrar una linea con cantidad sin partida de presupuesto asociada.',
+                    400
+                );
+            }
+
+            $idDetalle = (int)$idDetalleRaw;
+            if ($idDetalle <= 0) {
+                throw new \InvalidArgumentException('Partida de presupuesto invalida en linea de albaran.', 400);
+            }
+
+            if (!isset($nuevaCantidadPorDetalle[$idDetalle])) {
+                $nuevaCantidadPorDetalle[$idDetalle] = 0.0;
+            }
+            $nuevaCantidadPorDetalle[$idDetalle] += $cantidad;
+        }
+
+        if ($nuevaCantidadPorDetalle === []) {
+            return;
+        }
+
+        $idDetalles = array_keys($nuevaCantidadPorDetalle);
+        $presupuestadoPorDetalle = $this->getPresupuestadoByDetalle($licitacionId, $idDetalles);
+        $entregadoPorDetalle = $this->getEntregadoByDetalle($licitacionId, $idDetalles);
+
+        foreach ($nuevaCantidadPorDetalle as $idDetalle => $cantidadNueva) {
+            if (!array_key_exists($idDetalle, $presupuestadoPorDetalle)) {
+                throw new \InvalidArgumentException(
+                    sprintf(
+                        'La partida #%d no existe o no esta activa en el presupuesto de esta licitacion.',
+                        $idDetalle
+                    ),
+                    400
+                );
+            }
+
+            $presupuestado = (float)$presupuestadoPorDetalle[$idDetalle];
+            $entregado = (float)($entregadoPorDetalle[$idDetalle] ?? 0.0);
+            $pendiente = max(0.0, $presupuestado - $entregado);
+
+            if (($cantidadNueva - $pendiente) > self::QTY_EPSILON) {
+                throw new \InvalidArgumentException(
+                    sprintf(
+                        'La partida #%d excede la cantidad pendiente. Pendiente: %s, intentado: %s.',
+                        $idDetalle,
+                        number_format($pendiente, 2, ',', '.'),
+                        number_format($cantidadNueva, 2, ',', '.')
+                    ),
+                    400
+                );
+            }
+        }
+    }
+
+    /**
+     * @param array<int, int> $idDetalles
+     * @return array<int, float> mapa [id_detalle => unidades_presupuestadas]
+     */
+    private function getPresupuestadoByDetalle(int $licitacionId, array $idDetalles): array
+    {
+        $idDetalles = array_values(array_unique(array_filter(
+            $idDetalles,
+            static fn (int $v): bool => $v > 0
+        )));
+
+        if ($idDetalles === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [
+            ':id_licitacion' => $licitacionId,
+            ':activo' => 1,
+        ];
+
+        foreach ($idDetalles as $idx => $idDetalle) {
+            $ph = ':d_' . $idx;
+            $placeholders[] = $ph;
+            $params[$ph] = $idDetalle;
+        }
+
+        $sql = sprintf(
+            'SELECT id_detalle, COALESCE(unidades, 0) AS unidades
+             FROM %s
+             WHERE id_licitacion = :id_licitacion
+               AND activo = :activo
+               AND id_detalle IN (%s)',
+            self::TABLE_LICITACIONES_DETALLE,
+            implode(', ', $placeholders)
+        );
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll() ?: [];
+
+        /** @var array<int, float> $out */
+        $out = [];
+        foreach ($rows as $row) {
+            $idDetalle = isset($row['id_detalle']) ? (int)$row['id_detalle'] : 0;
+            if ($idDetalle <= 0) {
+                continue;
+            }
+            $out[$idDetalle] = (float)($row['unidades'] ?? 0.0);
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<int, int> $idDetalles
+     * @return array<int, float> mapa [id_detalle => cantidad_entregada]
+     */
+    private function getEntregadoByDetalle(int $licitacionId, array $idDetalles): array
+    {
+        $idDetalles = array_values(array_unique(array_filter(
+            $idDetalles,
+            static fn (int $v): bool => $v > 0
+        )));
+
+        if ($idDetalles === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [
+            ':id_licitacion' => $licitacionId,
+        ];
+
+        foreach ($idDetalles as $idx => $idDetalle) {
+            $ph = ':r_' . $idx;
+            $placeholders[] = $ph;
+            $params[$ph] = $idDetalle;
+        }
+
+        $sql = sprintf(
+            'SELECT id_detalle, COALESCE(SUM(cantidad), 0) AS cantidad_total
+             FROM %s
+             WHERE id_licitacion = :id_licitacion
+               AND id_detalle IN (%s)
+             GROUP BY id_detalle',
+            self::TABLE_LICITACIONES_REAL,
+            implode(', ', $placeholders)
+        );
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll() ?: [];
+
+        /** @var array<int, float> $out */
+        $out = [];
+        foreach ($rows as $row) {
+            $idDetalle = isset($row['id_detalle']) ? (int)$row['id_detalle'] : 0;
+            if ($idDetalle <= 0) {
+                continue;
+            }
+            $out[$idDetalle] = (float)($row['cantidad_total'] ?? 0.0);
+        }
+
+        return $out;
     }
 
     /**
@@ -410,8 +604,18 @@ final class DeliveriesRepository extends BaseRepository
             return;
         }
 
-        $first = $lineasAInsertar[0];
-        $columns = array_keys($first);
+        // Unificamos columnas de todas las lineas para evitar desajustes de placeholders.
+        $columns = [];
+        $seen = [];
+        foreach ($lineasAInsertar as $row) {
+            foreach (array_keys($row) as $col) {
+                if (isset($seen[$col])) {
+                    continue;
+                }
+                $seen[$col] = true;
+                $columns[] = $col;
+            }
+        }
         $placeholders = array_map(
             static fn (string $col): string => ':' . $col,
             $columns
@@ -428,8 +632,8 @@ final class DeliveriesRepository extends BaseRepository
 
         foreach ($lineasAInsertar as $row) {
             $params = [];
-            foreach ($row as $col => $value) {
-                $params[':' . $col] = $value;
+            foreach ($columns as $col) {
+                $params[':' . $col] = array_key_exists($col, $row) ? $row[$col] : null;
             }
             $stmt->execute($params);
         }

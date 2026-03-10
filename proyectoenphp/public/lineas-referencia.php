@@ -21,7 +21,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>AÃ±adir lÃ­neas</title>
+    <title>A&ntilde;adir l&iacute;neas</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { box-sizing: border-box; }
@@ -201,14 +201,14 @@ $organizationId = (string)($user['organization_id'] ?? '');
     <div class="layout">
         <aside class="sidebar">
             <div class="sidebar-logo">
-                Licitaciones <span>PHP</span>
+                Licitaciones
             </div>
             <nav class="sidebar-nav">
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador histÃ³rico</a>
-                <a href="lineas-referencia.php" class="nav-link active">AÃ±adir lÃ­neas</a>
-                <a href="analytics.php" class="nav-link">AnalÃ­tica</a>
+                <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
+                <a href="lineas-referencia.php" class="nav-link active">A&ntilde;adir l&iacute;neas</a>
+                <a href="analytics.php" class="nav-link">Anal&iacute;tica</a>
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
             <div class="sidebar-footer">
@@ -217,47 +217,47 @@ $organizationId = (string)($user['organization_id'] ?? '');
         </aside>
         <div class="main">
             <header>
-                <h1>AÃ±adir lÃ­neas de referencia</h1>
+                <h1>A&ntilde;adir l&iacute;neas de referencia</h1>
                 <div class="user-info">
                     <div><?php echo htmlspecialchars($fullName !== '' ? $fullName : $email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php if ($role !== ''): ?>
                         <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php endif; ?>
                     <div>
-                        <a href="logout.php" style="color:#f97373;text-decoration:none;font-size:0.85rem;">Cerrar sesiÃ³n</a>
+                        <a href="logout.php">Cerrar sesi&oacute;n</a>
                     </div>
                 </div>
             </header>
 
             <main>
                 <div class="card">
-                    <h2>Nueva lÃ­nea de referencia</h2>
+                    <h2>Nueva l&iacute;nea de referencia</h2>
                     <p>
-                        AquÃ­ podrÃ¡s guardar precios de producto sin vincularlos a ninguna licitaciÃ³n.
-                        Estas lÃ­neas aparecerÃ¡n despuÃ©s en el Buscador HistÃ³rico.
+                        Aqu&iacute; podr&aacute;s guardar precios de producto sin vincularlos a ninguna licitaci&oacute;n.
+                        Estas l&iacute;neas aparecer&aacute;n despu&eacute;s en el Buscador Hist&oacute;rico.
                     </p>
 
                     <form method="post">
                         <div class="form-row">
                             <div class="field">
                                 <label for="producto">Producto</label>
-                                <input id="producto" name="producto" type="text" placeholder="Nombre del productoâ€¦" />
+                                <input id="producto" name="producto" type="text" placeholder="Nombre del producto..." />
                             </div>
                             <div class="field">
-                                <label for="precio">Precio (â‚¬)</label>
+                                <label for="precio">Precio (EUR)</label>
                                 <input id="precio" name="precio" type="number" step="0.01" placeholder="0,00" />
                             </div>
                             <div class="field">
                                 <label for="proveedor">Proveedor (opcional)</label>
-                                <input id="proveedor" name="proveedor" type="text" placeholder="Nombre del proveedorâ€¦" />
+                                <input id="proveedor" name="proveedor" type="text" placeholder="Nombre del proveedor..." />
                             </div>
                         </div>
                         <div class="actions">
                             <button type="button">Guardar (mock)</button>
                         </div>
                         <p class="hint">
-                            De momento el formulario es solo visual. MÃ¡s adelante lo conectaremos
-                            al backend PHP para insertar las lÃ­neas en la tabla correspondiente.
+                            De momento el formulario es solo visual. M&aacute;s adelante lo conectaremos
+                            al backend PHP para insertar las l&iacute;neas en la tabla correspondiente.
                         </p>
                     </form>
                 </div>
@@ -266,5 +266,6 @@ $organizationId = (string)($user['organization_id'] ?? '');
     </div>
 </body>
 </html>
+
 
 

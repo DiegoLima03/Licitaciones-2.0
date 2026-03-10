@@ -208,7 +208,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
     <div class="layout">
         <aside class="sidebar">
             <div class="sidebar-logo">
-                Licitaciones <span>PHP</span>
+                Licitaciones
             </div>
             <nav class="sidebar-nav">
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
@@ -231,7 +231,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
                         <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php endif; ?>
                     <div>
-                        <a href="logout.php" style="color:#f97373;text-decoration:none;font-size:0.85rem;">Cerrar sesiÃ³n</a>
+                        <a href="logout.php">Cerrar sesiÃ³n</a>
                     </div>
                 </div>
             </header>
@@ -254,7 +254,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
                             <div class="field">
                                 <label for="pais">PaÃ­s</label>
                                 <select id="pais" name="pais">
-                                    <option value="">Selecciona paÃ­sâ€¦</option>
+                                    <option value="">Selecciona paÃ­s...</option>
                                     <option value="EspaÃ±a">EspaÃ±a</option>
                                     <option value="Portugal">Portugal</option>
                                 </select>
@@ -264,7 +264,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
                                 <input id="numero_expediente" name="numero_expediente" type="text" />
                             </div>
                             <div class="field">
-                                <label for="pres_maximo">Presupuesto mÃ¡ximo (â‚¬)</label>
+                                <label for="pres_maximo">Presupuesto mÃ¡ximo (EUR)</label>
                                 <input id="pres_maximo" name="pres_maximo" type="number" step="0.01" min="0" />
                             </div>
                             <div class="field">
@@ -294,5 +294,6 @@ $organizationId = (string)($user['organization_id'] ?? '');
     </div>
 </body>
 </html>
+
 
 

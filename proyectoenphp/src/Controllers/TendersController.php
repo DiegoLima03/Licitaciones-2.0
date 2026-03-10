@@ -225,6 +225,92 @@ final class TendersController
             return (float)$normalized;
         };
 
+        $qtyEpsilon = 0.0001;
+
+        $resolveDetalleIdByLinea = static function (int $idReal, int $idEntrega) use ($pdo, $tenderId): ?int {
+            $sql = 'SELECT id_detalle
+                    FROM tbl_licitaciones_real
+                    WHERE id_real = :id_real
+                      AND id_entrega = :id_entrega
+                      AND id_licitacion = :id_licitacion
+                    LIMIT 1';
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute([
+                ':id_real' => $idReal,
+                ':id_entrega' => $idEntrega,
+                ':id_licitacion' => $tenderId,
+            ]);
+
+            $row = $stmt->fetch();
+            if ($row === false || $row === null) {
+                return null;
+            }
+
+            return isset($row['id_detalle']) && $row['id_detalle'] !== null
+                ? (int)$row['id_detalle']
+                : null;
+        };
+
+        $assertCantidadPendiente = static function (?int $idDetalle, float $cantidadNueva, ?int $excludeIdReal = null) use ($pdo, $tenderId, $qtyEpsilon): void {
+            if ($idDetalle === null || $idDetalle <= 0 || $cantidadNueva <= 0.0) {
+                return;
+            }
+
+            $sqlPresu = 'SELECT COALESCE(unidades, 0) AS unidades
+                         FROM tbl_licitaciones_detalle
+                         WHERE id_licitacion = :id_licitacion
+                           AND id_detalle = :id_detalle
+                           AND activo = 1
+                         LIMIT 1';
+            $stmtPresu = $pdo->prepare($sqlPresu);
+            $stmtPresu->execute([
+                ':id_licitacion' => $tenderId,
+                ':id_detalle' => $idDetalle,
+            ]);
+            $rowPresu = $stmtPresu->fetch();
+
+            if ($rowPresu === false || $rowPresu === null) {
+                throw new \InvalidArgumentException(
+                    sprintf('La partida #%d no existe o no esta activa en el presupuesto.', $idDetalle),
+                    400
+                );
+            }
+
+            $sqlEntregado = 'SELECT COALESCE(SUM(cantidad), 0) AS cantidad_total
+                             FROM tbl_licitaciones_real
+                             WHERE id_licitacion = :id_licitacion
+                               AND id_detalle = :id_detalle';
+            $paramsEntregado = [
+                ':id_licitacion' => $tenderId,
+                ':id_detalle' => $idDetalle,
+            ];
+
+            if ($excludeIdReal !== null && $excludeIdReal > 0) {
+                $sqlEntregado .= ' AND id_real <> :id_real_excluir';
+                $paramsEntregado[':id_real_excluir'] = $excludeIdReal;
+            }
+
+            $stmtEntregado = $pdo->prepare($sqlEntregado);
+            $stmtEntregado->execute($paramsEntregado);
+            $rowEntregado = $stmtEntregado->fetch();
+
+            $presupuestado = (float)($rowPresu['unidades'] ?? 0.0);
+            $entregado = (float)($rowEntregado['cantidad_total'] ?? 0.0);
+            $pendiente = max(0.0, $presupuestado - $entregado);
+
+            if (($cantidadNueva - $pendiente) > $qtyEpsilon) {
+                throw new \InvalidArgumentException(
+                    sprintf(
+                        'La partida #%d excede la cantidad pendiente. Pendiente: %s, intentado: %s.',
+                        $idDetalle,
+                        number_format($pendiente, 2, ',', '.'),
+                        number_format($cantidadNueva, 2, ',', '.')
+                    ),
+                    400
+                );
+            }
+        };
+
         try {
             $pdo->beginTransaction();
 
@@ -400,6 +486,9 @@ final class TendersController
                         $cobrado = isset($lin['cobrado']) && (string)$lin['cobrado'] === '1';
                         $proveedor = isset($lin['proveedor']) ? trim((string)$lin['proveedor']) : '';
 
+                        $idDetalleLinea = $resolveDetalleIdByLinea($idReal, $idEntrega);
+                        $assertCantidadPendiente($idDetalleLinea, $cantidad ?? 0.0, $idReal);
+
                         $sqlUpdLinea = 'UPDATE tbl_licitaciones_real
                                         SET cantidad = :cantidad,
                                             pcu = :pcu,
@@ -476,6 +565,14 @@ final class TendersController
 
             header('Location: /licitaciones/' . $tenderId . '?tab=ejecucion');
             exit;
+        } catch (\InvalidArgumentException $e) {
+            if ($pdo->inTransaction()) {
+                $pdo->rollBack();
+            }
+
+            http_response_code(400);
+            echo 'Error actualizando ejecucion: '
+                . htmlspecialchars($e->getMessage(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         } catch (\Throwable $e) {
             if ($pdo->inTransaction()) {
                 $pdo->rollBack();
