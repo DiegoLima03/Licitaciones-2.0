@@ -11,13 +11,12 @@ final class ExpensesController
     private string $role;
 
     /**
-     * @param string $organizationId ID de la organización del usuario autenticado.
      * @param string $userId         ID (UUID/string) del usuario autenticado.
      * @param string $role           Rol del usuario (admin, member_..., etc.).
      */
-    public function __construct(string $organizationId, string $userId, string $role)
+    public function __construct(string $userId, string $role)
     {
-        $this->repository = new ExpensesRepository($organizationId);
+        $this->repository = new ExpensesRepository();
         $this->userId = $userId;
         $this->role = $role;
     }
@@ -64,9 +63,9 @@ final class ExpensesController
             return;
         }
 
-        // Validación según ProjectExpenseCreate
+        // ValidaciÃ³n segÃºn ProjectExpenseCreate
         if (!isset($body['id_licitacion']) || !is_numeric($body['id_licitacion'])) {
-            $this->jsonResponse(400, ['error' => 'id_licitacion es obligatorio y debe ser numérico.']);
+            $this->jsonResponse(400, ['error' => 'id_licitacion es obligatorio y debe ser numÃ©rico.']);
             return;
         }
         $idLicitacion = (int)$body['id_licitacion'];
@@ -82,12 +81,12 @@ final class ExpensesController
         ];
         $tipoGasto = isset($body['tipo_gasto']) ? (string)$body['tipo_gasto'] : '';
         if ($tipoGasto === '' || !in_array($tipoGasto, $allowedTipos, true)) {
-            $this->jsonResponse(400, ['error' => 'tipo_gasto es obligatorio y debe ser un valor válido.']);
+            $this->jsonResponse(400, ['error' => 'tipo_gasto es obligatorio y debe ser un valor vÃ¡lido.']);
             return;
         }
 
         if (!isset($body['importe']) || !is_numeric($body['importe'])) {
-            $this->jsonResponse(400, ['error' => 'importe es obligatorio y debe ser numérico.']);
+            $this->jsonResponse(400, ['error' => 'importe es obligatorio y debe ser numÃ©rico.']);
             return;
         }
         $importe = (float)$body['importe'];
@@ -138,7 +137,7 @@ final class ExpensesController
 
     /**
      * GET /expenses/licitacion/{id_licitacion}
-     * Lista los gastos de una licitación.
+     * Lista los gastos de una licitaciÃ³n.
      */
     public function listByLicitacion(int $licitacionId): void
     {
@@ -192,7 +191,7 @@ final class ExpensesController
         $importe = null;
         if (array_key_exists('importe', $body) && $body['importe'] !== null) {
             if (!is_numeric($body['importe'])) {
-                $this->jsonResponse(400, ['error' => 'importe debe ser numérico.']);
+                $this->jsonResponse(400, ['error' => 'importe debe ser numÃ©rico.']);
                 return;
             }
             $importe = (float)$body['importe'];
@@ -221,7 +220,7 @@ final class ExpensesController
 
     /**
      * DELETE /expenses/{id}
-     * Elimina un gasto (solo si está en estado PENDIENTE).
+     * Elimina un gasto (solo si estÃ¡ en estado PENDIENTE).
      */
     public function destroy(string $expenseId): void
     {
@@ -243,7 +242,7 @@ final class ExpensesController
     }
 
     /**
-     * Lee y decodifica el cuerpo JSON de la petición.
+     * Lee y decodifica el cuerpo JSON de la peticiÃ³n.
      *
      * @return array<string, mixed>
      */
@@ -251,12 +250,12 @@ final class ExpensesController
     {
         $raw = file_get_contents('php://input') ?: '';
         if ($raw === '') {
-            throw new \InvalidArgumentException('El cuerpo de la petición no puede estar vacío.');
+            throw new \InvalidArgumentException('El cuerpo de la peticiÃ³n no puede estar vacÃ­o.');
         }
 
         $data = json_decode($raw, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new \InvalidArgumentException('JSON inválido en el cuerpo de la petición.');
+            throw new \InvalidArgumentException('JSON invÃ¡lido en el cuerpo de la peticiÃ³n.');
         }
 
         /** @var array<string, mixed> $data */
@@ -264,7 +263,7 @@ final class ExpensesController
     }
 
     /**
-     * Envía una respuesta JSON estándar.
+     * EnvÃ­a una respuesta JSON estÃ¡ndar.
      *
      * @param mixed $data
      */
@@ -281,7 +280,7 @@ final class ExpensesController
     }
 
     /**
-     * Envía una respuesta JSON de error incluyendo, opcionalmente, detalles internos.
+     * EnvÃ­a una respuesta JSON de error incluyendo, opcionalmente, detalles internos.
      */
     private function jsonError(int $statusCode, string $message, \Throwable $e): void
     {
@@ -293,4 +292,5 @@ final class ExpensesController
         $this->jsonResponse($statusCode, $payload);
     }
 }
+
 

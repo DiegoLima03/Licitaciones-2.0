@@ -8,9 +8,9 @@ final class ProductsController
 {
     private ProductsRepository $repository;
 
-    public function __construct(string $organizationId)
+    public function __construct()
     {
-        $this->repository = new ProductsRepository($organizationId);
+        $this->repository = new ProductsRepository();
     }
 
     /**

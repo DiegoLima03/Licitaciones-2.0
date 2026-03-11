@@ -10,14 +10,9 @@ final class CatalogsRepository extends BaseRepository
     private const TABLE_TIPOS = 'tbl_tipolicitacion';
     private const TABLE_TIPOS_GASTO = 'tbl_tipos_gasto';
 
-    public function __construct(string $organizationId)
-    {
-        parent::__construct($organizationId);
-    }
-
     /**
      * Lista todos los estados desde tbl_estados.
-     * Nota: tabla de catálogo global (no se aplica RLS por organización).
+     * Nota: tabla de catálogo global.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -39,7 +34,7 @@ final class CatalogsRepository extends BaseRepository
 
     /**
      * Lista todos los tipos desde tbl_tipolicitacion.
-     * Nota: tabla de catálogo global (no se aplica RLS por organización).
+     * Nota: tabla de catálogo global.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -61,8 +56,7 @@ final class CatalogsRepository extends BaseRepository
 
     /**
      * Lista todos los tipos de gasto desde tbl_tipos_gasto.
-     * Nota: si en tu esquema tbl_tipos_gasto es multi-tenant, aquí debería aplicarse RLS.
-     *       En el código original de Supabase no se usa organization_id, así que se asume global.
+     * Nota: se trata como catálogo global.
      *
      * @return array<int, array<string, mixed>>
      */

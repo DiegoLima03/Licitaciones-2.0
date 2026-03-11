@@ -24,7 +24,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         try {
             $pdo = Database::getConnection();
             $stmt = $pdo->prepare(
-                'SELECT id, email, password_hash, organization_id, role, full_name
+                'SELECT id, email, password_hash, role, full_name
                  FROM profiles
                  WHERE email = :email
                  LIMIT 1'

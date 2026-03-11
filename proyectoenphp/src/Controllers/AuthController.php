@@ -21,7 +21,7 @@ final class AuthController
     private const DEFAULT_ROLE = 'member_licitaciones';
 
     /**
-     * Jerarquía de borrado de usuarios.
+     * JerarquÃ­a de borrado de usuarios.
      *
      * @var array<string, array<int, string>>
      */
@@ -42,7 +42,7 @@ final class AuthController
 
     /**
      * POST /auth/login
-     * Inicio de sesión con email y contraseña.
+     * Inicio de sesiÃ³n con email y contraseÃ±a.
      */
     public function login(): void
     {
@@ -57,7 +57,7 @@ final class AuthController
         $password = isset($body['password']) ? (string)$body['password'] : '';
 
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $this->jsonResponse(400, ['error' => 'El campo email es obligatorio y debe tener un formato válido.']);
+            $this->jsonResponse(400, ['error' => 'El campo email es obligatorio y debe tener un formato vÃ¡lido.']);
             return;
         }
 
@@ -67,7 +67,7 @@ final class AuthController
         }
 
         try {
-            $repo = new AuthRepository('');
+            $repo = new AuthRepository();
             $user = $repo->findByEmail($email);
         } catch (\PDOException $e) {
             $this->jsonError(500, 'Error de base de datos durante el login.', $e);
@@ -75,24 +75,23 @@ final class AuthController
         }
 
         if ($user === null) {
-            $this->jsonResponse(401, ['error' => 'Credenciales inválidas.']);
+            $this->jsonResponse(401, ['error' => 'Credenciales invÃ¡lidas.']);
             return;
         }
 
         $hash = $user['password_hash'] ?? null;
         if (!is_string($hash) || $hash === '' || !password_verify($password, $hash)) {
-            $this->jsonResponse(401, ['error' => 'Credenciales inválidas.']);
+            $this->jsonResponse(401, ['error' => 'Credenciales invÃ¡lidas.']);
             return;
         }
 
         $userId = (string)($user['id'] ?? '');
-        $organizationId = (string)($user['organization_id'] ?? '');
         $role = $this->normalizeRole((string)($user['role'] ?? self::DEFAULT_ROLE));
         $fullName = isset($user['full_name']) ? (string)$user['full_name'] : null;
         $emailOut = (string)($user['email'] ?? $email);
 
-        if ($userId === '' || $organizationId === '') {
-            $this->jsonResponse(500, ['error' => 'El usuario no tiene datos de organización válidos.']);
+        if ($userId === '') {
+            $this->jsonResponse(500, ['error' => 'El usuario no tiene un identificador vÃ¡lido.']);
             return;
         }
 
@@ -101,8 +100,6 @@ final class AuthController
             'sub' => $userId,
             'user_id' => $userId,
             'email' => $emailOut,
-            'organization_id' => $organizationId,
-            'org_id' => $organizationId,
             'role' => $role,
             'iat' => $now,
             'exp' => $now + 60 * 60 * 12,
@@ -111,7 +108,6 @@ final class AuthController
         $response = [
             'id' => $userId,
             'email' => $emailOut,
-            'organization_id' => $organizationId,
             'role' => $role,
             'rol' => $role,
             'full_name' => $fullName,
@@ -128,16 +124,15 @@ final class AuthController
      */
     public function me(array $tokenPayload): void
     {
-        $organizationId = $this->resolveOrganizationId($tokenPayload);
         $userId = $this->resolveUserId($tokenPayload);
 
-        if ($organizationId === '' || $userId === '') {
-            $this->jsonResponse(401, ['error' => 'Token inválido.']);
+        if ($userId === '') {
+            $this->jsonResponse(401, ['error' => 'Token invÃ¡lido.']);
             return;
         }
 
         try {
-            $repo = new AuthRepository($organizationId);
+            $repo = new AuthRepository();
             $user = $repo->findById($userId);
             if ($user === null) {
                 $this->jsonResponse(404, ['error' => 'Usuario no encontrado.']);
@@ -150,7 +145,6 @@ final class AuthController
             $this->jsonResponse(200, [
                 'id' => (string)($user['id'] ?? ''),
                 'email' => (string)($user['email'] ?? ''),
-                'organization_id' => (string)($user['organization_id'] ?? $organizationId),
                 'role' => $role,
                 'full_name' => $fullName,
                 'nombre' => $fullName,
@@ -165,11 +159,10 @@ final class AuthController
      */
     public function updateMyPassword(array $tokenPayload): void
     {
-        $organizationId = $this->resolveOrganizationId($tokenPayload);
         $userId = $this->resolveUserId($tokenPayload);
 
-        if ($organizationId === '' || $userId === '') {
-            $this->jsonResponse(401, ['error' => 'Token inválido.']);
+        if ($userId === '') {
+            $this->jsonResponse(401, ['error' => 'Token invÃ¡lido.']);
             return;
         }
 
@@ -182,30 +175,30 @@ final class AuthController
 
         $password = isset($body['password']) ? (string)$body['password'] : '';
         if (mb_strlen($password) < 6) {
-            $this->jsonResponse(400, ['error' => 'La contraseña debe tener al menos 6 caracteres.']);
+            $this->jsonResponse(400, ['error' => 'La contraseÃ±a debe tener al menos 6 caracteres.']);
             return;
         }
 
         try {
-            $repo = new AuthRepository($organizationId);
+            $repo = new AuthRepository();
             $updated = $repo->updatePassword($userId, password_hash($password, PASSWORD_DEFAULT));
             if (!$updated) {
                 $this->jsonResponse(404, ['error' => 'Usuario no encontrado.']);
                 return;
             }
 
-            $this->jsonResponse(200, ['message' => 'Contraseña actualizada correctamente.']);
+            $this->jsonResponse(200, ['message' => 'ContraseÃ±a actualizada correctamente.']);
         } catch (\PDOException $e) {
-            $this->jsonError(500, 'Error actualizando contraseña.', $e);
+            $this->jsonError(500, 'Error actualizando contraseÃ±a.', $e);
         }
     }
 
     /**
      * POST /auth/users
      */
-    public function createUser(string $organizationId, string $actorRole): void
+    public function createUser(string $actorRole): void
     {
-        if (!$this->canManageUsers($organizationId, $actorRole)) {
+        if (!$this->canManageUsers($actorRole)) {
             $this->jsonResponse(403, ['error' => 'No tienes permisos para crear usuarios.']);
             return;
         }
@@ -224,20 +217,20 @@ final class AuthController
         $role = $rawRole !== '' ? mb_strtolower(trim($rawRole)) : self::DEFAULT_ROLE;
 
         if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $this->jsonResponse(400, ['error' => 'Email inválido.']);
+            $this->jsonResponse(400, ['error' => 'Email invÃ¡lido.']);
             return;
         }
         if (mb_strlen($password) < 6) {
-            $this->jsonResponse(400, ['error' => 'La contraseña debe tener al menos 6 caracteres.']);
+            $this->jsonResponse(400, ['error' => 'La contraseÃ±a debe tener al menos 6 caracteres.']);
             return;
         }
         if (!in_array($role, self::ROLES_VALIDOS, true)) {
-            $this->jsonResponse(400, ['error' => 'Rol inválido.']);
+            $this->jsonResponse(400, ['error' => 'Rol invÃ¡lido.']);
             return;
         }
 
         try {
-            $repo = new AuthRepository($organizationId);
+            $repo = new AuthRepository();
             if ($repo->emailExists($email)) {
                 $this->jsonResponse(409, ['error' => 'Ya existe un usuario con ese email.']);
                 return;
@@ -250,7 +243,7 @@ final class AuthController
             $this->jsonResponse(201, [
                 'id' => $userId,
                 'email' => $email,
-                'message' => 'Usuario creado y asignado a tu organización.',
+                'message' => 'Usuario creado correctamente.',
             ]);
         } catch (\PDOException $e) {
             $this->jsonError(500, 'Error creando usuario.', $e);
@@ -260,15 +253,15 @@ final class AuthController
     /**
      * GET /auth/users
      */
-    public function listUsers(string $organizationId, string $actorRole): void
+    public function listUsers(string $actorRole): void
     {
-        if (!$this->canManageUsers($organizationId, $actorRole)) {
+        if (!$this->canManageUsers($actorRole)) {
             $this->jsonResponse(403, ['error' => 'No tienes permisos para listar usuarios.']);
             return;
         }
 
         try {
-            $repo = new AuthRepository($organizationId);
+            $repo = new AuthRepository();
             $rows = $repo->listUsers();
             $out = [];
 
@@ -290,16 +283,16 @@ final class AuthController
     /**
      * PATCH /auth/users/{user_id}
      */
-    public function updateUserRole(string $organizationId, string $actorRole, string $userId): void
+    public function updateUserRole(string $actorRole, string $userId): void
     {
-        if (!$this->canManageUsers($organizationId, $actorRole)) {
+        if (!$this->canManageUsers($actorRole)) {
             $this->jsonResponse(403, ['error' => 'No tienes permisos para cambiar roles.']);
             return;
         }
 
         $userId = trim($userId);
         if ($userId === '') {
-            $this->jsonResponse(400, ['error' => 'Identificador de usuario inválido.']);
+            $this->jsonResponse(400, ['error' => 'Identificador de usuario invÃ¡lido.']);
             return;
         }
 
@@ -312,15 +305,15 @@ final class AuthController
 
         $role = isset($body['role']) ? mb_strtolower(trim((string)$body['role'])) : '';
         if (!in_array($role, self::ROLES_VALIDOS, true)) {
-            $this->jsonResponse(400, ['error' => 'Rol inválido.']);
+            $this->jsonResponse(400, ['error' => 'Rol invÃ¡lido.']);
             return;
         }
 
         try {
-            $repo = new AuthRepository($organizationId);
+            $repo = new AuthRepository();
             $target = $repo->findById($userId);
             if ($target === null) {
-                $this->jsonResponse(404, ['error' => 'Usuario no encontrado o no pertenece a tu organización.']);
+                $this->jsonResponse(404, ['error' => 'Usuario no encontrado.']);
                 return;
             }
 
@@ -334,10 +327,10 @@ final class AuthController
     /**
      * PATCH /auth/users/{user_id}/password
      */
-    public function updateUserPassword(string $organizationId, string $actorRole, string $userId): void
+    public function updateUserPassword(string $actorRole, string $userId): void
     {
-        if (!$this->canManageUsers($organizationId, $actorRole)) {
-            $this->jsonResponse(403, ['error' => 'No tienes permisos para cambiar contraseñas de otros usuarios.']);
+        if (!$this->canManageUsers($actorRole)) {
+            $this->jsonResponse(403, ['error' => 'No tienes permisos para cambiar contraseÃ±as de otros usuarios.']);
             return;
         }
 
@@ -350,47 +343,42 @@ final class AuthController
 
         $password = isset($body['password']) ? (string)$body['password'] : '';
         if (mb_strlen($password) < 6) {
-            $this->jsonResponse(400, ['error' => 'La contraseña debe tener al menos 6 caracteres.']);
+            $this->jsonResponse(400, ['error' => 'La contraseÃ±a debe tener al menos 6 caracteres.']);
             return;
         }
 
         try {
-            $repo = new AuthRepository($organizationId);
+            $repo = new AuthRepository();
             $target = $repo->findById($userId);
             if ($target === null) {
-                $this->jsonResponse(404, ['error' => 'Usuario no encontrado o no pertenece a tu organización.']);
+                $this->jsonResponse(404, ['error' => 'Usuario no encontrado.']);
                 return;
             }
 
             $repo->updatePassword($userId, password_hash($password, PASSWORD_DEFAULT));
             $this->jsonResponse(200, [
                 'id' => $userId,
-                'message' => 'Contraseña actualizada correctamente.',
+                'message' => 'ContraseÃ±a actualizada correctamente.',
             ]);
         } catch (\PDOException $e) {
-            $this->jsonError(500, 'Error actualizando contraseña.', $e);
+            $this->jsonError(500, 'Error actualizando contraseÃ±a.', $e);
         }
     }
 
     /**
      * DELETE /auth/users/{user_id}
      */
-    public function destroyUser(
-        string $organizationId,
-        string $actorRole,
-        string $actorUserId,
-        string $userId
-    ): void {
-        if (!$this->canManageUsers($organizationId, $actorRole)) {
+    public function destroyUser(string $actorRole, string $actorUserId, string $userId): void {
+        if (!$this->canManageUsers($actorRole)) {
             $this->jsonResponse(403, ['error' => 'No tienes permisos para eliminar usuarios.']);
             return;
         }
 
         try {
-            $repo = new AuthRepository($organizationId);
+            $repo = new AuthRepository();
             $target = $repo->findById($userId);
             if ($target === null) {
-                $this->jsonResponse(404, ['error' => 'Usuario no encontrado o no pertenece a tu organización.']);
+                $this->jsonResponse(404, ['error' => 'Usuario no encontrado.']);
                 return;
             }
 
@@ -420,12 +408,12 @@ final class AuthController
     {
         $raw = file_get_contents('php://input') ?: '';
         if ($raw === '') {
-            throw new \InvalidArgumentException('El cuerpo de la petición no puede estar vacío.');
+            throw new \InvalidArgumentException('El cuerpo de la peticiÃ³n no puede estar vacÃ­o.');
         }
 
         $data = json_decode($raw, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new \InvalidArgumentException('JSON inválido en el cuerpo de la petición.');
+            throw new \InvalidArgumentException('JSON invÃ¡lido en el cuerpo de la peticiÃ³n.');
         }
 
         /** @var array<string, mixed> $data */
@@ -435,7 +423,7 @@ final class AuthController
     /**
      * Comprueba si el rol puede gestionar usuarios.
      */
-    private function canManageUsers(string $organizationId, string $role): bool
+    private function canManageUsers(string $role): bool
     {
         $roleNorm = $this->normalizeRole($role);
         if ($roleNorm === 'admin') {
@@ -443,7 +431,7 @@ final class AuthController
         }
 
         try {
-            $repo = new AuthRepository($organizationId);
+            $repo = new AuthRepository();
             return $repo->canManageUsersByRoleFeature($roleNorm);
         } catch (\Throwable) {
             return false;
@@ -472,18 +460,7 @@ final class AuthController
         }
 
         return self::DEFAULT_ROLE;
-    }
-
-    private function resolveOrganizationId(array $tokenPayload): string
-    {
-        if (isset($tokenPayload['organization_id']) && is_scalar($tokenPayload['organization_id'])) {
-            return (string)$tokenPayload['organization_id'];
-        }
-        if (isset($tokenPayload['org_id']) && is_scalar($tokenPayload['org_id'])) {
-            return (string)$tokenPayload['org_id'];
-        }
-        return '';
-    }
+    }
 
     private function resolveUserId(array $tokenPayload): string
     {
@@ -534,7 +511,7 @@ final class AuthController
     }
 
     /**
-     * Envía una respuesta JSON estándar.
+     * EnvÃ­a una respuesta JSON estÃ¡ndar.
      *
      * @param mixed $data
      */
@@ -551,7 +528,7 @@ final class AuthController
     }
 
     /**
-     * Envía una respuesta JSON de error incluyendo, opcionalmente, detalles internos.
+     * EnvÃ­a una respuesta JSON de error incluyendo, opcionalmente, detalles internos.
      */
     private function jsonError(int $statusCode, string $message, \Throwable $e): void
     {
@@ -563,4 +540,7 @@ final class AuthController
         $this->jsonResponse($statusCode, $payload);
     }
 }
+
+
+
 

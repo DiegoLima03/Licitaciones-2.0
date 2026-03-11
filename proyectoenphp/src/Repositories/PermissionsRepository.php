@@ -20,7 +20,7 @@ final class PermissionsRepository extends BaseRepository
     ];
 
     /**
-     * Devuelve la matriz de permisos para la organización actual.
+     * Devuelve la matriz de permisos.
      *
      * @return array<string, array<string, bool>> role => feature => allowed
      */
@@ -91,7 +91,7 @@ final class PermissionsRepository extends BaseRepository
     }
 
     /**
-     * Reemplaza la matriz de permisos de la organización por la enviada.
+     * Reemplaza la matriz de permisos por la enviada.
      *
      * @param array<string, array<string, mixed>> $matrix
      * @return array<string, array<string, bool>>
@@ -130,15 +130,14 @@ final class PermissionsRepository extends BaseRepository
 
             if ($rowsToInsert !== []) {
                 $insertSql = sprintf(
-                    'INSERT INTO %s (organization_id, role, feature, allowed)
-                     VALUES (:organization_id, :role, :feature, :allowed)',
+                    'INSERT INTO %s (role, feature, allowed)
+                     VALUES (:role, :feature, :allowed)',
                     self::TABLE_ROLE_PERMISSIONS
                 );
                 $insertStmt = $this->pdo->prepare($insertSql);
 
                 foreach ($rowsToInsert as $row) {
                     $insertStmt->execute([
-                        ':organization_id' => $this->organizationId,
                         ':role' => $row['role'],
                         ':feature' => $row['feature'],
                         ':allowed' => $row['allowed'] ? 1 : 0,

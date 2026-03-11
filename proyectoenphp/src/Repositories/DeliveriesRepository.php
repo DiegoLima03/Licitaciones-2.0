@@ -18,11 +18,6 @@ final class DeliveriesRepository extends BaseRepository
     private const ESTADOS_PERMITEN_ENTREGAS = [self::ESTADO_ADJUDICADA];
     private const QTY_EPSILON = 0.0001;
 
-    public function __construct(string $organizationId)
-    {
-        parent::__construct($organizationId);
-    }
-
     /**
      * Lista entregas. Si se pasa licitacionId, filtra por esa licitación e incluye líneas.
      *
@@ -58,13 +53,7 @@ final class DeliveriesRepository extends BaseRepository
                 continue;
             }
 
-            $rlsLines = str_replace(
-                'organization_id',
-                'lr.organization_id',
-                $this->getRlsClause()
-            );
-
-            $whereLines = $rlsLines . ' AND lr.id_entrega = :id_entrega';
+            $whereLines = $this->getRlsClause() . ' AND lr.id_entrega = :id_entrega';
             $paramsLines = $this->getRlsParams();
             $paramsLines[':id_entrega'] = (int)$idEntrega;
 
@@ -263,13 +252,7 @@ final class DeliveriesRepository extends BaseRepository
      */
     private function getLicitacionEstado(int $licitacionId): ?int
     {
-        $rls = str_replace(
-            'organization_id',
-            self::TABLE_LICITACIONES . '.organization_id',
-            $this->getRlsClause()
-        );
-
-        $where = $rls . ' AND ' . self::TABLE_LICITACIONES . '.id_licitacion = :id_licitacion';
+        $where = $this->getRlsClause() . ' AND ' . self::TABLE_LICITACIONES . '.id_licitacion = :id_licitacion';
         $params = $this->getRlsParams();
         $params[':id_licitacion'] = $licitacionId;
 
@@ -299,7 +282,6 @@ final class DeliveriesRepository extends BaseRepository
     {
         $insert = [
             'id_licitacion' => $licitacionId,
-            'organization_id' => $this->organizationId,
             'fecha_entrega' => (string)($cabecera['fecha'] ?? ''),
             'codigo_albaran' => (string)($cabecera['codigo_albaran'] ?? ''),
             'observaciones' => (string)($cabecera['observaciones'] ?? ''),
@@ -379,7 +361,6 @@ final class DeliveriesRepository extends BaseRepository
 
             $row = [
                 'id_licitacion' => $licitacionId,
-                'organization_id' => $this->organizationId,
                 'id_entrega' => $idEntrega,
                 'id_detalle' => $idDetalle,
                 'fecha_entrega' => $fecha,

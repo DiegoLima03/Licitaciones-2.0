@@ -8,9 +8,9 @@ final class DeliveriesController
 {
     private DeliveriesRepository $repository;
 
-    public function __construct(string $organizationId)
+    public function __construct()
     {
-        $this->repository = new DeliveriesRepository($organizationId);
+        $this->repository = new DeliveriesRepository();
     }
 
     /**

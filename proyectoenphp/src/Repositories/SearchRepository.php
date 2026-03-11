@@ -12,11 +12,6 @@ final class SearchRepository extends BaseRepository
     private const TABLE_REAL = 'tbl_licitaciones_real';
     private const TABLE_PRECIOS_REFERENCIA = 'tbl_precios_referencia';
 
-    public function __construct(string $organizationId)
-    {
-        parent::__construct($organizationId);
-    }
-
     /**
      * Búsqueda de productos con histórico en detalle o precios de referencia.
      *

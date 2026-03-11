@@ -11,11 +11,6 @@ final class ProductsRepository extends BaseRepository
     private const TABLE_LICITACIONES_DETALLE = 'tbl_licitaciones_detalle';
     private const TABLE_PROVEEDORES = 'tbl_proveedores';
 
-    public function __construct(string $organizationId)
-    {
-        parent::__construct($organizationId);
-    }
-
     /**
      * Búsqueda de productos por nombre, con opción de restringir a los que tengan precios de referencia.
      *
@@ -26,7 +21,7 @@ final class ProductsRepository extends BaseRepository
         $limit = max(5, min(120, $limit));
         $query = trim($query);
 
-        if ($query === '' || mb_strlen($query, 'UTF-8') < 4) {
+        if ($query === '' || mb_strlen($query, 'UTF-8') < 2) {
             return [];
         }
 
@@ -59,11 +54,11 @@ final class ProductsRepository extends BaseRepository
 
             $where .= sprintf(
                 ' AND (
-                    LOWER(COALESCE(nombre, \'\')) LIKE %1$s ESCAPE \'\\\'
-                    OR LOWER(COALESCE(referencia, \'\')) LIKE %2$s ESCAPE \'\\\'
-                    OR LOWER(COALESCE(codigo_barras, \'\')) LIKE %3$s ESCAPE \'\\\'
-                    OR CAST(id AS CHAR) LIKE %4$s ESCAPE \'\\\'
-                    OR CAST(id_erp AS CHAR) LIKE %5$s ESCAPE \'\\\'
+                    LOWER(COALESCE(nombre, \'\')) LIKE %1$s ESCAPE \'\\\\\'
+                    OR LOWER(COALESCE(referencia, \'\')) LIKE %2$s ESCAPE \'\\\\\'
+                    OR LOWER(COALESCE(codigo_barras, \'\')) LIKE %3$s ESCAPE \'\\\\\'
+                    OR CAST(id AS CHAR) LIKE %4$s ESCAPE \'\\\\\'
+                    OR CAST(id_erp AS CHAR) LIKE %5$s ESCAPE \'\\\\\'
                 )',
                 $phNombreContains,
                 $phReferenciaContains,
@@ -100,22 +95,22 @@ final class ProductsRepository extends BaseRepository
                 '(
                     CASE
                         WHEN LOWER(COALESCE(nombre, \'\')) = %1$s THEN 220
-                        WHEN LOWER(COALESCE(nombre, \'\')) LIKE %2$s ESCAPE \'\\\' THEN 190
-                        WHEN LOWER(COALESCE(nombre, \'\')) LIKE %3$s ESCAPE \'\\\' THEN 165
-                        WHEN LOWER(COALESCE(nombre, \'\')) LIKE %4$s ESCAPE \'\\\' THEN 130
+                        WHEN LOWER(COALESCE(nombre, \'\')) LIKE %2$s ESCAPE \'\\\\\' THEN 190
+                        WHEN LOWER(COALESCE(nombre, \'\')) LIKE %3$s ESCAPE \'\\\\\' THEN 165
+                        WHEN LOWER(COALESCE(nombre, \'\')) LIKE %4$s ESCAPE \'\\\\\' THEN 130
                         ELSE 0
                     END
                     + CASE
-                        WHEN LOWER(COALESCE(referencia, \'\')) LIKE %5$s ESCAPE \'\\\' THEN 55
+                        WHEN LOWER(COALESCE(referencia, \'\')) LIKE %5$s ESCAPE \'\\\\\' THEN 55
                         ELSE 0
                     END
                     + CASE
-                        WHEN LOWER(COALESCE(codigo_barras, \'\')) LIKE %6$s ESCAPE \'\\\' THEN 45
+                        WHEN LOWER(COALESCE(codigo_barras, \'\')) LIKE %6$s ESCAPE \'\\\\\' THEN 45
                         ELSE 0
                     END
                     + CASE
                         WHEN CAST(id_erp AS CHAR) = %7$s THEN 90
-                        WHEN CAST(id_erp AS CHAR) LIKE %8$s ESCAPE \'\\\' THEN 35
+                        WHEN CAST(id_erp AS CHAR) LIKE %8$s ESCAPE \'\\\\\' THEN 35
                         ELSE 0
                     END
                 )',

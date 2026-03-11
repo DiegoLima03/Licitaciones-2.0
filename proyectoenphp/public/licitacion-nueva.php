@@ -14,14 +14,13 @@ $user = $_SESSION['user'];
 $email = (string)($user['email'] ?? '');
 $fullName = (string)($user['full_name'] ?? '');
 $role = (string)($user['role'] ?? '');
-$organizationId = (string)($user['organization_id'] ?? '');
 
 ?>
 <!DOCTYPE html>
 <html lang="es">
 <head>
     <meta charset="UTF-8">
-    <title>Nueva licitaciÃ³n</title>
+    <title>Nueva licitaciÃƒÂ³n</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
         * { box-sizing: border-box; }
@@ -213,32 +212,31 @@ $organizationId = (string)($user['organization_id'] ?? '');
             <nav class="sidebar-nav">
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link active">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador histÃ³rico</a>
-                <a href="lineas-referencia.php" class="nav-link">AÃ±adir lÃ­neas</a>
-                <a href="analytics.php" class="nav-link">AnalÃ­tica</a>
+                <a href="buscador.php" class="nav-link">Buscador histÃƒÂ³rico</a>
+                <a href="lineas-referencia.php" class="nav-link">AÃƒÂ±adir lÃƒÂ­neas</a>
+                <a href="analytics.php" class="nav-link">AnalÃƒÂ­tica</a>
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
             <div class="sidebar-footer">
-                <?php echo htmlspecialchars($organizationId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
-            </div>
+                            </div>
         </aside>
         <div class="main">
             <header>
-                <h1>Nueva licitaciÃ³n</h1>
+                <h1>Nueva licitaciÃƒÂ³n</h1>
                 <div class="user-info">
                     <div><?php echo htmlspecialchars($fullName !== '' ? $fullName : $email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php if ($role !== ''): ?>
                         <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
                     <?php endif; ?>
                     <div>
-                        <a href="logout.php">Cerrar sesiÃ³n</a>
+                        <a href="logout.php">Cerrar sesiÃƒÂ³n</a>
                     </div>
                 </div>
             </header>
 
             <main>
                 <div class="card">
-                    <h2>Datos bÃ¡sicos de la licitaciÃ³n</h2>
+                    <h2>Datos bÃƒÂ¡sicos de la licitaciÃƒÂ³n</h2>
                     <p>
                         Pantalla inspirada en el formulario del proyecto anterior.
                         De momento es solo el frontal; en el siguiente paso lo
@@ -252,23 +250,23 @@ $organizationId = (string)($user['organization_id'] ?? '');
                                 <input id="nombre" name="nombre" type="text" placeholder="Ej: Suministro de material..." />
                             </div>
                             <div class="field">
-                                <label for="pais">PaÃ­s</label>
+                                <label for="pais">PaÃƒÂ­s</label>
                                 <select id="pais" name="pais">
-                                    <option value="">Selecciona paÃ­s...</option>
-                                    <option value="EspaÃ±a">EspaÃ±a</option>
+                                    <option value="">Selecciona paÃƒÂ­s...</option>
+                                    <option value="EspaÃƒÂ±a">EspaÃƒÂ±a</option>
                                     <option value="Portugal">Portugal</option>
                                 </select>
                             </div>
                             <div class="field">
-                                <label for="numero_expediente">NÂº expediente</label>
+                                <label for="numero_expediente">NÃ‚Âº expediente</label>
                                 <input id="numero_expediente" name="numero_expediente" type="text" />
                             </div>
                             <div class="field">
-                                <label for="pres_maximo">Presupuesto mÃ¡ximo (EUR)</label>
+                                <label for="pres_maximo">Presupuesto mÃƒÂ¡ximo (EUR)</label>
                                 <input id="pres_maximo" name="pres_maximo" type="number" step="0.01" min="0" />
                             </div>
                             <div class="field">
-                                <label for="fecha_presentacion">Fecha de presentaciÃ³n</label>
+                                <label for="fecha_presentacion">Fecha de presentaciÃƒÂ³n</label>
                                 <input id="fecha_presentacion" name="fecha_presentacion" type="date" />
                             </div>
                         </div>
@@ -278,14 +276,14 @@ $organizationId = (string)($user['organization_id'] ?? '');
                                 Cancelar
                             </button>
                             <button type="button" class="btn-primary" disabled>
-                                Guardar (prÃ³ximamente)
+                                Guardar (prÃƒÂ³ximamente)
                             </button>
                         </div>
                         <p class="hint">
                             Cuando terminemos de ajustar bien la estructura de la tabla
-                            <code>tbl_licitaciones</code>, harÃ© que este formulario use
-                            el repositorio <code>TendersRepository</code> para crear la licitaciÃ³n
-                            de verdad, igual que hacÃ­a el backend original.
+                            <code>tbl_licitaciones</code>, harÃƒÂ© que este formulario use
+                            el repositorio <code>TendersRepository</code> para crear la licitaciÃƒÂ³n
+                            de verdad, igual que hacÃƒÂ­a el backend original.
                         </p>
                     </form>
                 </div>
@@ -294,6 +292,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
     </div>
 </body>
 </html>
+
 
 
 

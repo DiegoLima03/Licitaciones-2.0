@@ -19,7 +19,6 @@ $user = $_SESSION['user'];
 $email = (string)($user['email'] ?? '');
 $fullName = (string)($user['full_name'] ?? '');
 $role = (string)($user['role'] ?? '');
-$organizationId = (string)($user['organization_id'] ?? '');
 
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 
@@ -30,8 +29,37 @@ $tiposGasto = [];
 $tiposLicitacion = [];
 $selfUrl = (string)($_SERVER['PHP_SELF'] ?? 'licitacion-detalle.php');
 $openMapProductsModal = false;
+$openLossStateModal = false;
 /** @var array<int, array<string,mixed>> $pendingPartidasSinProducto */
 $pendingPartidasSinProducto = [];
+$postedMotivoPerdida = trim((string)($_POST['motivo_perdida'] ?? ''));
+$postedCompetidorGanador = trim((string)($_POST['competidor_ganador'] ?? ''));
+$postedImportePerdida = trim((string)($_POST['importe_perdida'] ?? ''));
+$isCreateDerivedSubmit = isset($_POST['form_tipo']) && (string)$_POST['form_tipo'] === 'crear_contrato_derivado';
+/** @var array<int, string> $postedLotesPerdidos */
+$postedLotesPerdidos = isset($_POST['lotes_perdidos']) && is_array($_POST['lotes_perdidos'])
+    ? array_values(array_map(static fn ($v): string => trim((string)$v), $_POST['lotes_perdidos']))
+    : [];
+/** @var array<int, string> $postedGanadoresPorLote */
+$postedGanadoresPorLote = isset($_POST['competidor_ganador_lote']) && is_array($_POST['competidor_ganador_lote'])
+    ? array_values(array_map(static fn ($v): string => trim((string)$v), $_POST['competidor_ganador_lote']))
+    : [];
+/** @var array<int, string> $postedImportesPorLote */
+$postedImportesPorLote = isset($_POST['importe_perdida_lote']) && is_array($_POST['importe_perdida_lote'])
+    ? array_values(array_map(static fn ($v): string => trim((string)$v), $_POST['importe_perdida_lote']))
+    : [];
+/** @var array<string, array{ganador:string, importe_raw:string}> $postedLossByLoteMap */
+$postedLossByLoteMap = [];
+foreach ($postedLotesPerdidos as $idxPostedLote => $postedLoteNombre) {
+    if ($postedLoteNombre === '') {
+        continue;
+    }
+    $keyPostedLote = mb_strtolower($postedLoteNombre, 'UTF-8');
+    $postedLossByLoteMap[$keyPostedLote] = [
+        'ganador' => $postedGanadoresPorLote[$idxPostedLote] ?? '',
+        'importe_raw' => $postedImportesPorLote[$idxPostedLote] ?? '',
+    ];
+}
 /** @var array<int, string> $estadosLineaEntrega */
 $estadosLineaEntrega = ['EN ESPERA', 'ENTREGADO', 'FACTURADO'];
 $estadoBloqueoPresupuestoDesde = 4; // Desde "Presentada" el presupuesto queda bloqueado.
@@ -39,6 +67,9 @@ $requestedWith = mb_strtolower(trim((string)($_SERVER['HTTP_X_REQUESTED_WITH'] ?
 $acceptHeader = mb_strtolower((string)($_SERVER['HTTP_ACCEPT'] ?? ''));
 $isAjaxRequest = $requestedWith === 'xmlhttprequest'
     || strpos($acceptHeader, 'application/json') !== false;
+$scriptBasePath = str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/')));
+$scriptBasePath = $scriptBasePath === '/' ? '' : rtrim($scriptBasePath, '/');
+$productosSearchUrl = $scriptBasePath . '/productos-search.php';
 
 /**
  * @param array<string, mixed> $payload
@@ -91,10 +122,108 @@ function fetchExistingProductIds(\PDO $pdo, array $ids): array
     return $out;
 }
 
+function normalizeCountryDisplay(string $value): string
+{
+    $value = trim($value);
+    if ($value === '') {
+        return '';
+    }
+
+    $value = strtr($value, [
+        "\xC3\x83\xC2\xA1" => "\xC3\xA1",
+        "\xC3\x83\xC2\xA9" => "\xC3\xA9",
+        "\xC3\x83\xC2\xAD" => "\xC3\xAD",
+        "\xC3\x83\xC2\xB3" => "\xC3\xB3",
+        "\xC3\x83\xC2\xBA" => "\xC3\xBA",
+        "\xC3\x83\xC2\xB1" => "\xC3\xB1",
+    ]);
+
+    $lower = mb_strtolower($value, 'UTF-8');
+    if ($lower === 'espana' || $lower === ('espa' . "\xC3\xB1" . 'a')) {
+        return 'Espa' . "\xC3\xB1" . 'a';
+    }
+    if ($lower === 'portugal') {
+        return 'Portugal';
+    }
+
+    return $value;
+}
+
+function normalizeCountryKeyForCreate(string $value): string
+{
+    $value = trim(mb_strtolower($value, 'UTF-8'));
+    $value = strtr($value, [
+        'á' => 'a',
+        'à' => 'a',
+        'ä' => 'a',
+        'â' => 'a',
+        'ã' => 'a',
+        'é' => 'e',
+        'è' => 'e',
+        'ë' => 'e',
+        'ê' => 'e',
+        'í' => 'i',
+        'ì' => 'i',
+        'ï' => 'i',
+        'î' => 'i',
+        'ó' => 'o',
+        'ò' => 'o',
+        'ö' => 'o',
+        'ô' => 'o',
+        'õ' => 'o',
+        'ú' => 'u',
+        'ù' => 'u',
+        'ü' => 'u',
+        'û' => 'u',
+        'ñ' => 'n',
+    ]);
+
+    return preg_replace('/\s+/', ' ', trim((string)$value)) ?? '';
+}
+
+function canonicalCountryLabelForCreate(string $value): string
+{
+    $fixed = normalizeCountryDisplay($value);
+    $key = normalizeCountryKeyForCreate($fixed);
+    if ($key === 'espana') {
+        return 'Espa' . "\xC3\xB1" . 'a';
+    }
+    if ($key === 'portugal') {
+        return 'Portugal';
+    }
+
+    return trim($fixed);
+}
+
+function isValidDateYmdForCreate(string $value): bool
+{
+    if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
+        return false;
+    }
+
+    $dt = \DateTimeImmutable::createFromFormat('Y-m-d', $value);
+    return $dt !== false && $dt->format('Y-m-d') === $value;
+}
+
+function spainLabelForCreate(): string
+{
+    return 'Espa' . "\xC3\xB1" . 'a';
+}
+
+function isValidHttpUrlForCreate(string $value): bool
+{
+    if ($value === '' || filter_var($value, FILTER_VALIDATE_URL) === false) {
+        return false;
+    }
+
+    $scheme = strtolower((string)parse_url($value, PHP_URL_SCHEME));
+    return $scheme === 'http' || $scheme === 'https';
+}
+
 /**
  * Crea (si no existe) un producto de catalogo a partir de texto libre y devuelve su id.
  */
-function ensureCatalogProductIdForFreeText(\PDO $pdo, string $organizationId, string $freeText): int
+function ensureCatalogProductIdForFreeText(\PDO $pdo, string $freeText): int
 {
     $nombre = trim($freeText);
     if ($nombre === '') {
@@ -132,15 +261,14 @@ function ensureCatalogProductIdForFreeText(\PDO $pdo, string $organizationId, st
         $nextIdErp = (int)$pdo->query('SELECT COALESCE(MAX(id_erp), 0) + 1 AS next_id_erp FROM tbl_productos')->fetchColumn();
 
         $sqlInsert = 'INSERT INTO tbl_productos
-            (id, id_erp, id_grupo_articulo, id_proveedor, paquete, nombre, organization_id)
+            (id, id_erp, id_grupo_articulo, id_proveedor, paquete, nombre)
             VALUES
-            (:id, :id_erp, 0, 0, 0, :nombre, :org)';
+            (:id, :id_erp, 0, 0, 0, :nombre)';
         $stmtInsert = $pdo->prepare($sqlInsert);
         $stmtInsert->execute([
             ':id' => $nextId,
             ':id_erp' => $nextIdErp,
             ':nombre' => $nombre,
-            ':org' => $organizationId,
         ]);
 
         if ($pdo->inTransaction()) {
@@ -153,7 +281,7 @@ function ensureCatalogProductIdForFreeText(\PDO $pdo, string $organizationId, st
             $pdo->rollBack();
         }
 
-        // Fallback: si otro proceso lo insertÃƒÂ³ justo antes, recuperar el id y continuar.
+        // Fallback: si otro proceso lo insertÃƒÆ’Ã‚Â³ justo antes, recuperar el id y continuar.
         $stmtFind->execute([
             ':nombre' => $nombre,
         ]);
@@ -167,12 +295,12 @@ function ensureCatalogProductIdForFreeText(\PDO $pdo, string $organizationId, st
 }
 
 /**
- * Devuelve los nombres de lote configurados en lotes_config.
+ * Decodifica lotes_config a lista normalizada [{nombre, ganado}].
  *
  * @param mixed $raw
- * @return array<int, string>
+ * @return array<int, array{nombre:string, ganado:bool}>
  */
-function extractConfiguredLotes($raw): array
+function decodeLotesConfig($raw): array
 {
     $decoded = null;
     if (is_array($raw)) {
@@ -192,21 +320,348 @@ function extractConfiguredLotes($raw): array
         return [];
     }
 
-    $names = [];
+    /** @var array<string, array{nombre:string, ganado:bool}> $items */
+    $items = [];
     foreach ($decoded as $item) {
         $name = '';
+        $ganado = true;
         if (is_array($item)) {
             $name = trim((string)($item['nombre'] ?? ''));
+            $ganado = !array_key_exists('ganado', $item) || (bool)$item['ganado'];
         } elseif (is_string($item) || is_numeric($item)) {
             $name = trim((string)$item);
+            $ganado = true;
         }
         if ($name === '') {
             continue;
         }
-        $names[mb_strtolower($name)] = $name;
+        $key = mb_strtolower($name, 'UTF-8');
+        if (isset($items[$key])) {
+            // Si hay duplicados, preferimos "ganado=true" si alguno lo marca.
+            $items[$key]['ganado'] = $items[$key]['ganado'] || $ganado;
+            continue;
+        }
+        $items[$key] = [
+            'nombre' => $name,
+            'ganado' => $ganado,
+        ];
     }
 
-    return array_values($names);
+    return array_values($items);
+}
+
+/**
+ * Devuelve los nombres de lote configurados en lotes_config.
+ *
+ * @param mixed $raw
+ * @return array<int, string>
+ */
+function extractConfiguredLotes($raw): array
+{
+    $items = decodeLotesConfig($raw);
+    $names = [];
+    foreach ($items as $item) {
+        $names[] = $item['nombre'];
+    }
+    return $names;
+}
+
+/**
+ * Devuelve set de lotes ganados (clave lower-case => nombre original).
+ *
+ * @param mixed $raw
+ * @return array<string, string>
+ */
+function extractWonLotesSet($raw): array
+{
+    $items = decodeLotesConfig($raw);
+    $out = [];
+    foreach ($items as $item) {
+        if (!$item['ganado']) {
+            continue;
+        }
+        $out[mb_strtolower($item['nombre'], 'UTF-8')] = $item['nombre'];
+    }
+    return $out;
+}
+
+/**
+ * @param array<int, array{nombre:string, ganado:bool}> $items
+ * @return array<int, string>
+ */
+function extractLostLotesFromItems(array $items): array
+{
+    $out = [];
+    foreach ($items as $item) {
+        $nombre = trim((string)($item['nombre'] ?? ''));
+        if ($nombre === '' || !empty($item['ganado'])) {
+            continue;
+        }
+        $out[] = $nombre;
+    }
+    return $out;
+}
+
+/**
+ * @param array<int, array{nombre:string, ganado:bool}> $items
+ * @return array<int, array{nombre:string, ganado:bool}>
+ */
+function markAllDecodedLotesAsLost(array $items): array
+{
+    $out = [];
+    foreach ($items as $item) {
+        $nombre = trim((string)($item['nombre'] ?? ''));
+        if ($nombre === '') {
+            continue;
+        }
+        $out[] = [
+            'nombre' => $nombre,
+            'ganado' => false,
+        ];
+    }
+    return $out;
+}
+
+/**
+ * @param mixed $raw
+ */
+function parseNullableAmount($raw): ?float
+{
+    if ($raw === null) {
+        return null;
+    }
+    $txt = trim((string)$raw);
+    if ($txt === '') {
+        return null;
+    }
+    $normalized = str_replace(',', '.', $txt);
+    if (!is_numeric($normalized)) {
+        return null;
+    }
+    return (float)$normalized;
+}
+
+function formatEuroNote(float $amount): string
+{
+    return number_format($amount, 2, ',', '.') . ' EUR';
+}
+
+/**
+ * @param array<int, string> $expectedLotes
+ * @param array<string, array{ganador:string, importe_raw:string}> $postedByLoteMap
+ * @return array{
+ *   ok:bool,
+ *   details:array<int, array{lote:string, ganador:string, importe:float}>,
+ *   missing_lotes:array<int, string>
+ * }
+ */
+function collectPerLoteLossDetails(array $expectedLotes, array $postedByLoteMap): array
+{
+    $details = [];
+    $missingLotes = [];
+
+    foreach ($expectedLotes as $expectedLoteName) {
+        $expectedLoteName = trim((string)$expectedLoteName);
+        if ($expectedLoteName === '') {
+            continue;
+        }
+
+        $keyExpectedLote = mb_strtolower($expectedLoteName, 'UTF-8');
+        $postedLotData = $postedByLoteMap[$keyExpectedLote] ?? ['ganador' => '', 'importe_raw' => ''];
+        $ganador = trim((string)($postedLotData['ganador'] ?? ''));
+        $importe = parseNullableAmount($postedLotData['importe_raw'] ?? null);
+
+        if ($ganador === '' || $importe === null || $importe <= 0.0) {
+            $missingLotes[] = $expectedLoteName;
+            continue;
+        }
+
+        $details[] = [
+            'lote' => $expectedLoteName,
+            'ganador' => $ganador,
+            'importe' => $importe,
+        ];
+    }
+
+    return [
+        'ok' => $missingLotes === [],
+        'details' => $details,
+        'missing_lotes' => $missingLotes,
+    ];
+}
+
+/**
+ * @param array<int, array{lote:string, ganador:string, importe:float}> $lotDetails
+ */
+function appendLossDescription(
+    string $currentDescription,
+    string $tag,
+    string $motivo,
+    array $lotDetails
+): string {
+    $parts = [];
+    if ($motivo !== '') {
+        $parts[] = 'Motivo: ' . $motivo;
+    }
+    if ($lotDetails !== []) {
+        $lotNotes = array_map(
+            static fn (array $detail): string => $detail['lote'] . ' -> '
+                . $detail['ganador'] . ' (' . formatEuroNote((float)$detail['importe']) . ')',
+            $lotDetails
+        );
+        $parts[] = 'Detalle lotes: ' . implode(', ', $lotNotes);
+    }
+
+    $block = '[' . $tag . ']: ' . implode(' | ', $parts);
+    $currentDescription = trim($currentDescription);
+
+    return $currentDescription === ''
+        ? $block
+        : rtrim($currentDescription) . "\n" . $block;
+}
+
+/**
+ * @param array<string, mixed> $licitacionDetalle
+ * @param array<int, array<string, mixed>> $entregas
+ * @return array{ok:bool,error:string}
+ */
+function validateFinalizationRequirements(array $licitacionDetalle, array $entregas): array
+{
+    $partidas = is_array($licitacionDetalle['partidas'] ?? null)
+        ? $licitacionDetalle['partidas']
+        : [];
+    $lotesConfigItems = decodeLotesConfig($licitacionDetalle['lotes_config'] ?? null);
+    $filtrarPorLotesGanados = $lotesConfigItems !== [];
+    $lotesGanadosSet = $filtrarPorLotesGanados
+        ? extractWonLotesSet($lotesConfigItems)
+        : [];
+
+    /** @var array<int, float> $presupuestadoPorDetalle */
+    $presupuestadoPorDetalle = [];
+    foreach ($partidas as $p) {
+        if (!is_array($p)) {
+            continue;
+        }
+
+        $activo = array_key_exists('activo', $p) ? (bool)$p['activo'] : true;
+        if (!$activo) {
+            continue;
+        }
+
+        $idDetalle = isset($p['id_detalle']) ? (int)$p['id_detalle'] : 0;
+        if ($idDetalle <= 0) {
+            continue;
+        }
+
+        $lote = trim((string)($p['lote'] ?? ''));
+        if ($lote === '') {
+            $lote = 'General';
+        }
+        if ($filtrarPorLotesGanados) {
+            $loteKey = mb_strtolower($lote, 'UTF-8');
+            if (!isset($lotesGanadosSet[$loteKey])) {
+                continue;
+            }
+        }
+
+        $unidades = (float)($p['unidades'] ?? 0.0);
+        if ($unidades <= 0.0) {
+            continue;
+        }
+
+        if (!isset($presupuestadoPorDetalle[$idDetalle])) {
+            $presupuestadoPorDetalle[$idDetalle] = 0.0;
+        }
+        $presupuestadoPorDetalle[$idDetalle] += $unidades;
+    }
+
+    $allowedEstados = [
+        'ENTREGADO' => true,
+        'FACTURADO' => true,
+    ];
+    /** @var array<int, float> $entregadoPorDetalle */
+    $entregadoPorDetalle = [];
+    $lineasEvaluadas = 0;
+    $lineasConEstadoPendiente = 0;
+    $lineasSinCobro = 0;
+
+    foreach ($entregas as $entrega) {
+        if (!is_array($entrega)) {
+            continue;
+        }
+        $lineas = is_array($entrega['lineas'] ?? null) ? $entrega['lineas'] : [];
+        foreach ($lineas as $lin) {
+            if (!is_array($lin)) {
+                continue;
+            }
+
+            $idTipoGasto = $lin['id_tipo_gasto'] ?? null;
+            if ($idTipoGasto !== null) {
+                continue;
+            }
+
+            $idDetalle = isset($lin['id_detalle']) ? (int)$lin['id_detalle'] : 0;
+            if ($idDetalle <= 0) {
+                continue;
+            }
+            if ($presupuestadoPorDetalle !== [] && !isset($presupuestadoPorDetalle[$idDetalle])) {
+                continue;
+            }
+
+            $lineasEvaluadas++;
+
+            $cantidad = (float)($lin['cantidad'] ?? 0.0);
+            if ($cantidad > 0.0) {
+                if (!isset($entregadoPorDetalle[$idDetalle])) {
+                    $entregadoPorDetalle[$idDetalle] = 0.0;
+                }
+                $entregadoPorDetalle[$idDetalle] += $cantidad;
+            }
+
+            $estadoLinea = mb_strtoupper(trim((string)($lin['estado'] ?? '')), 'UTF-8');
+            if (!isset($allowedEstados[$estadoLinea])) {
+                $lineasConEstadoPendiente++;
+            }
+
+            $cobradoRaw = $lin['cobrado'] ?? 0;
+            $isCobrado = $cobradoRaw === true
+                || $cobradoRaw === 1
+                || $cobradoRaw === '1';
+            if (!$isCobrado) {
+                $lineasSinCobro++;
+            }
+        }
+    }
+
+    if ($lineasEvaluadas === 0) {
+        return [
+            'ok' => false,
+            'error' => 'No puedes finalizar la licitacion sin lineas de entrega registradas.',
+        ];
+    }
+
+    $qtyEpsilon = 0.0001;
+    foreach ($presupuestadoPorDetalle as $idDetalle => $presupuestado) {
+        $entregado = (float)($entregadoPorDetalle[$idDetalle] ?? 0.0);
+        if (($presupuestado - $entregado) > $qtyEpsilon) {
+            return [
+                'ok' => false,
+                'error' => 'No puedes finalizar la licitacion: quedan lineas pendientes de entrega.',
+            ];
+        }
+    }
+
+    if ($lineasConEstadoPendiente > 0 || $lineasSinCobro > 0) {
+        return [
+            'ok' => false,
+            'error' => 'No puedes finalizar la licitacion: todas las lineas deben estar entregadas/facturadas y cobradas.',
+        ];
+    }
+
+    return [
+        'ok' => true,
+        'error' => '',
+    ];
 }
 
 try {
@@ -214,9 +669,9 @@ try {
         throw new \InvalidArgumentException('Id de licitacion no valido.');
     }
 
-    $repo = new TendersRepository($organizationId);
-    $deliveriesRepo = new DeliveriesRepository($organizationId);
-    $catalogsRepo = new CatalogsRepository($organizationId);
+    $repo = new TendersRepository();
+    $deliveriesRepo = new DeliveriesRepository();
+    $catalogsRepo = new CatalogsRepository();
 
     try {
         $tiposLicitacion = $catalogsRepo->getTipos();
@@ -235,8 +690,124 @@ try {
 
     // Si viene un POST, puede ser cambio de estado o nueva partida de presupuesto.
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+        // 0) Crear contrato derivado desde AM/SDA (actua como carpeta).
+        if (isset($_POST['form_tipo']) && $_POST['form_tipo'] === 'crear_contrato_derivado') {
+            $licitacionActual = $repo->getById($id);
+            if ($licitacionActual === null) {
+                $loadError = 'Licitacion no encontrada.';
+            } else {
+                $tipoPadre = mb_strtoupper(trim((string)($licitacionActual['tipo_procedimiento'] ?? '')), 'UTF-8');
+                if ($tipoPadre !== 'ACUERDO_MARCO' && $tipoPadre !== 'SDA') {
+                    $loadError = 'Solo puedes crear contratos derivados dentro de un Acuerdo Marco o SDA.';
+                } else {
+                    $nombre = trim((string)($_POST['nuevo_nombre'] ?? ''));
+                    if ($nombre === '') {
+                        $loadError = 'El nombre del proyecto derivado es obligatorio.';
+                    }
+
+                    $pais = canonicalCountryLabelForCreate((string)($_POST['nuevo_pais'] ?? ''));
+                    $paisKey = normalizeCountryKeyForCreate($pais);
+                    if ($loadError === null && !in_array($paisKey, ['espana', 'portugal'], true)) {
+                        $loadError = 'Selecciona un pais valido (' . spainLabelForCreate() . ' o Portugal).';
+                    }
+
+                    $numeroExpediente = trim((string)($_POST['nuevo_numero_expediente'] ?? ''));
+                    if ($loadError === null && $numeroExpediente === '') {
+                        $loadError = 'El nro de expediente es obligatorio.';
+                    }
+
+                    $enlaceGober = trim((string)($_POST['nuevo_enlace_gober'] ?? ''));
+                    $enlaceSharepoint = trim((string)($_POST['nuevo_enlace_sharepoint'] ?? ''));
+                    if ($loadError === null && $enlaceGober !== '' && !isValidHttpUrlForCreate($enlaceGober)) {
+                        $loadError = 'El enlace Gober debe ser una URL valida (http/https).';
+                    }
+                    if ($loadError === null && $enlaceSharepoint !== '' && !isValidHttpUrlForCreate($enlaceSharepoint)) {
+                        $loadError = 'El enlace SharePoint debe ser una URL valida (http/https).';
+                    }
+
+                    $presMaximoRaw = trim((string)($_POST['nuevo_pres_maximo'] ?? ''));
+                    if ($loadError === null && $presMaximoRaw === '') {
+                        $loadError = 'El presupuesto maximo es obligatorio.';
+                    }
+                    $presMaximoNorm = str_replace(',', '.', $presMaximoRaw);
+                    if ($loadError === null && !is_numeric($presMaximoNorm)) {
+                        $loadError = 'El presupuesto maximo debe ser numerico.';
+                    }
+                    $presMaximo = (float)$presMaximoNorm;
+                    if ($loadError === null && $presMaximo < 0) {
+                        $loadError = 'El presupuesto maximo no puede ser negativo.';
+                    }
+
+                    $fechaPresentacion = trim((string)($_POST['nuevo_fecha_presentacion'] ?? ''));
+                    $fechaAdjudicacion = trim((string)($_POST['nuevo_fecha_adjudicacion'] ?? ''));
+                    $fechaFinalizacion = trim((string)($_POST['nuevo_fecha_finalizacion'] ?? ''));
+                    if ($loadError === null && !isValidDateYmdForCreate($fechaPresentacion)) {
+                        $loadError = 'La fecha de presentacion es obligatoria y debe tener formato YYYY-MM-DD.';
+                    }
+                    if ($loadError === null && !isValidDateYmdForCreate($fechaAdjudicacion)) {
+                        $loadError = 'La fecha de adjudicacion es obligatoria y debe tener formato YYYY-MM-DD.';
+                    }
+                    if ($loadError === null && !isValidDateYmdForCreate($fechaFinalizacion)) {
+                        $loadError = 'La fecha de finalizacion es obligatoria y debe tener formato YYYY-MM-DD.';
+                    }
+                    if ($loadError === null && $fechaPresentacion > $fechaAdjudicacion) {
+                        $loadError = 'La fecha de presentacion debe ser anterior o igual a la fecha de adjudicacion.';
+                    }
+                    if ($loadError === null) {
+                        $hoy = (new \DateTimeImmutable('today'))->format('Y-m-d');
+                        if ($fechaPresentacion > $hoy && $enlaceGober === '') {
+                            $loadError = 'El enlace Gober es obligatorio cuando la fecha de presentacion es futura.';
+                        }
+                    }
+
+                    $idTipoRaw = trim((string)($_POST['nuevo_id_tipolicitacion'] ?? ''));
+                    if ($loadError === null && ($idTipoRaw === '' || !ctype_digit($idTipoRaw) || (int)$idTipoRaw <= 0)) {
+                        $loadError = 'Debes seleccionar un tipo de licitacion.';
+                    }
+                    $idTipo = (int)$idTipoRaw;
+                    if ($loadError === null && $tiposLicitacion !== []) {
+                        $tipoExiste = false;
+                        foreach ($tiposLicitacion as $tipoItem) {
+                            if (!is_array($tipoItem)) {
+                                continue;
+                            }
+                            if ((int)($tipoItem['id_tipolicitacion'] ?? 0) === $idTipo) {
+                                $tipoExiste = true;
+                                break;
+                            }
+                        }
+                        if (!$tipoExiste) {
+                            $loadError = 'El tipo de licitacion seleccionado no existe.';
+                        }
+                    }
+
+                    if ($loadError === null) {
+                        $descripcion = trim((string)($_POST['nuevo_descripcion'] ?? ''));
+                        $tipoDerivado = $tipoPadre === 'SDA' ? 'ESPECIFICO_SDA' : 'CONTRATO_BASADO';
+                        $repo->create([
+                            'nombre' => $nombre,
+                            'pais' => $pais,
+                            'numero_expediente' => $numeroExpediente,
+                            'enlace_gober' => $enlaceGober !== '' ? $enlaceGober : null,
+                            'enlace_sharepoint' => $enlaceSharepoint !== '' ? $enlaceSharepoint : null,
+                            'pres_maximo' => $presMaximo,
+                            'fecha_presentacion' => $fechaPresentacion,
+                            'fecha_adjudicacion' => $fechaAdjudicacion,
+                            'fecha_finalizacion' => $fechaFinalizacion,
+                            'tipo_procedimiento' => $tipoDerivado,
+                            'id_tipolicitacion' => $idTipo,
+                            'id_licitacion_padre' => $id,
+                            'id_estado' => 3,
+                            'descripcion' => $descripcion !== '' ? $descripcion : null,
+                            'lotes_config' => null,
+                        ]);
+                        header('Location: ' . $selfUrl . '?id=' . $id . '&tab=contratos-derivados&derived_created=1');
+                        exit;
+                    }
+                }
+            }
         // 1) Nuevo albaran
-        if (isset($_POST['form_tipo']) && $_POST['form_tipo'] === 'nuevo_albaran') {
+        } elseif (isset($_POST['form_tipo']) && $_POST['form_tipo'] === 'nuevo_albaran') {
             $fecha = trim((string)($_POST['fecha'] ?? ''));
             $codigoAlbaran = trim((string)($_POST['codigo_albaran'] ?? ''));
             $cliente = trim((string)($_POST['cliente'] ?? ''));
@@ -511,7 +1082,115 @@ try {
                     }
                 }
             }
-        // 5) Acciones de la tabla interactiva de presupuesto (editar/anadir/eliminar en sitio)
+        // 5) Configurar lotes (crear estructura de lotes para la licitacion)
+        } elseif (isset($_POST['form_tipo']) && $_POST['form_tipo'] === 'guardar_lotes_config') {
+            $licitacionActual = $repo->getById($id);
+            if ($licitacionActual === null) {
+                $loadError = 'Licitacion no encontrada.';
+            } else {
+                $tipoProcCfg = mb_strtoupper(trim((string)($licitacionActual['tipo_procedimiento'] ?? '')), 'UTF-8');
+                $isContratoDerivadoCfg = !empty($licitacionActual['id_licitacion_padre'])
+                    || $tipoProcCfg === 'CONTRATO_BASADO'
+                    || $tipoProcCfg === 'ESPECIFICO_SDA';
+                if ($isContratoDerivadoCfg) {
+                    $loadError = 'En contratos basados/especificos no se usan lotes.';
+                }
+                $numLotes = isset($_POST['num_lotes']) ? (int)$_POST['num_lotes'] : 0;
+                if ($loadError !== null) {
+                    // Mensaje definido arriba.
+                } elseif ($numLotes < 1 || $numLotes > 20) {
+                    $loadError = 'Introduce un numero de lotes entre 1 y 20.';
+                } else {
+                    $cfgActual = decodeLotesConfig($licitacionActual['lotes_config'] ?? null);
+                    $teniaLotesAntes = $cfgActual !== [];
+
+                    $cfgNueva = [];
+                    for ($i = 1; $i <= $numLotes; $i++) {
+                        $cfgNueva[] = [
+                            'nombre' => 'Lote ' . $i,
+                            'ganado' => true,
+                        ];
+                    }
+
+                    $repo->update($id, [
+                        'lotes_config' => json_encode($cfgNueva, JSON_UNESCAPED_UNICODE),
+                    ]);
+
+                    // Primera configuracion: mover partidas sueltas al primer lote.
+                    if (!$teniaLotesAntes && $cfgNueva !== []) {
+                        $detalle = $repo->getTenderWithDetails($id);
+                        $partidasCfg = is_array($detalle['partidas'] ?? null) ? $detalle['partidas'] : [];
+                        $primerLote = $cfgNueva[0]['nombre'];
+                        foreach ($partidasCfg as $pCfg) {
+                            if (!is_array($pCfg)) {
+                                continue;
+                            }
+                            $idDetalleCfg = isset($pCfg['id_detalle']) ? (int)$pCfg['id_detalle'] : 0;
+                            if ($idDetalleCfg <= 0) {
+                                continue;
+                            }
+                            $loteRaw = mb_strtolower(trim((string)($pCfg['lote'] ?? '')), 'UTF-8');
+                            if ($loteRaw === '' || $loteRaw === 'general') {
+                                $repo->updatePartida($id, $idDetalleCfg, ['lote' => $primerLote]);
+                            }
+                        }
+                    }
+
+                    header('Location: ' . $selfUrl . '?id=' . $id . '&tab=presupuesto');
+                    exit;
+                }
+            }
+        // 6) Marcar lote como ganado/perdido (permitido desde Presentada)
+        } elseif (isset($_POST['form_tipo']) && $_POST['form_tipo'] === 'toggle_lote_ganado') {
+            $licitacionActual = $repo->getById($id);
+            if ($licitacionActual === null) {
+                $loadError = 'Licitacion no encontrada.';
+            } else {
+                $tipoProcCfg = mb_strtoupper(trim((string)($licitacionActual['tipo_procedimiento'] ?? '')), 'UTF-8');
+                $isContratoDerivadoCfg = !empty($licitacionActual['id_licitacion_padre'])
+                    || $tipoProcCfg === 'CONTRATO_BASADO'
+                    || $tipoProcCfg === 'ESPECIFICO_SDA';
+                if ($isContratoDerivadoCfg) {
+                    $loadError = 'En contratos basados/especificos no se usan lotes.';
+                }
+                $estadoActual = (int)($licitacionActual['id_estado'] ?? 0);
+                if ($loadError !== null) {
+                    // Mensaje definido arriba.
+                } elseif ($estadoActual !== 4) {
+                    $loadError = 'Solo puedes marcar lotes ganados/perdidos en estado Presentada.';
+                } else {
+                    $nombreLote = trim((string)($_POST['lote_nombre'] ?? ''));
+                    $ganadoNuevo = isset($_POST['ganado']) && (string)$_POST['ganado'] === '1';
+                    $cfgActual = decodeLotesConfig($licitacionActual['lotes_config'] ?? null);
+                    if ($cfgActual === []) {
+                        $loadError = 'Esta licitacion no tiene lotes configurados.';
+                    } elseif ($nombreLote === '') {
+                        $loadError = 'Lote invalido.';
+                    } else {
+                        $actualizado = false;
+                        foreach ($cfgActual as &$itemCfg) {
+                            if (mb_strtolower($itemCfg['nombre'], 'UTF-8') !== mb_strtolower($nombreLote, 'UTF-8')) {
+                                continue;
+                            }
+                            $itemCfg['ganado'] = $ganadoNuevo;
+                            $actualizado = true;
+                            break;
+                        }
+                        unset($itemCfg);
+
+                        if (!$actualizado) {
+                            $loadError = 'No se encontro el lote indicado.';
+                        } else {
+                            $repo->update($id, [
+                                'lotes_config' => json_encode($cfgActual, JSON_UNESCAPED_UNICODE),
+                            ]);
+                            header('Location: ' . $selfUrl . '?id=' . $id . '&tab=presupuesto');
+                            exit;
+                        }
+                    }
+                }
+            }
+        // 7) Acciones de la tabla interactiva de presupuesto (editar/anadir/eliminar en sitio)
         } elseif (isset($_POST['form_tipo']) && $_POST['form_tipo'] === 'budget_table_action') {
             $licitacionActual = $repo->getById($id);
             if ($licitacionActual === null) {
@@ -530,7 +1209,7 @@ try {
                 $showUnidadesActual = !in_array($idTipoLicitacionActual, [2, 4], true);
                 $isTipoDescuentoActual = in_array($idTipoLicitacionActual, [2, 5], true);
                 $lotesConfiguradosActual = extractConfiguredLotes($licitacionActual['lotes_config'] ?? null);
-                $usaLotesActual = count($lotesConfiguradosActual) > 1;
+                $usaLotesActual = count($lotesConfiguradosActual) > 0;
 
                 $parseDecimal = static function ($raw): float {
                     $txt = trim((string)$raw);
@@ -740,12 +1419,9 @@ try {
                                 $pvuNueva = $calcPvuFromPmaxu($pmaxuNueva, $descuentoGlobalActual);
                             }
 
-                            $hasNumericDataNueva = ($showUnidadesActual && $unidadesNueva > 0)
-                                || ($showPmaxuActual && $pmaxuNueva > 0)
-                                || $pvuNueva > 0
-                                || $pcuNueva > 0;
+                            $hasIdentityNueva = $nombrePartidaNueva !== '' || $idProductoNuevo > 0;
 
-                            if ($nombrePartidaNueva === '' || !$hasNumericDataNueva) {
+                            if (!$hasIdentityNueva) {
                                 continue;
                             }
 
@@ -794,6 +1470,15 @@ try {
                         $loadError = 'Licitacion no encontrada.';
                     } else {
                         $estadoActual = (int)($actual['id_estado'] ?? 0);
+                        $tipoProcEstado = mb_strtoupper(trim((string)($actual['tipo_procedimiento'] ?? '')), 'UTF-8');
+                        $isContratoDerivadoEstado = !empty($actual['id_licitacion_padre'])
+                            || $tipoProcEstado === 'CONTRATO_BASADO'
+                            || $tipoProcEstado === 'ESPECIFICO_SDA';
+                        $lotesEstadoItems = $isContratoDerivadoEstado
+                            ? []
+                            : decodeLotesConfig($actual['lotes_config'] ?? null);
+                        $lotesPerdidosEstado = extractLostLotesFromItems($lotesEstadoItems);
+                        $motivoPerdidaEstado = $postedMotivoPerdida;
 
                         // Mismo flujo de estados que en el proyecto React original.
                         $transiciones = [];
@@ -847,8 +1532,8 @@ try {
                                     ? $detalle['partidas']
                                     : [];
 
-                                // Conversion automatica de texto libre a producto de catalogo.
-                                $pdoProducts = Database::getConnection();
+                                /** @var array<int, array<string,mixed>> $partidasRelevantesAdjudicacion */
+                                $partidasRelevantesAdjudicacion = [];
                                 foreach ($partidasAdjudicacion as $p) {
                                     if (!is_array($p)) {
                                         continue;
@@ -857,63 +1542,158 @@ try {
                                     if (!$activo) {
                                         continue;
                                     }
-                                    $idDetallePartida = isset($p['id_detalle']) ? (int)$p['id_detalle'] : 0;
-                                    $idProdPartida = $p['id_producto'] ?? null;
-                                    if ($idDetallePartida <= 0 || ($idProdPartida !== null && (int)$idProdPartida > 0)) {
+                                    $partidasRelevantesAdjudicacion[] = $p;
+                                }
+
+                                /** @var array<int, int> $idsProductoAdjudicacion */
+                                $idsProductoAdjudicacion = [];
+                                foreach ($partidasRelevantesAdjudicacion as $p) {
+                                    if (!is_array($p)) {
                                         continue;
                                     }
-
-                                    $nombreLibre = trim((string)($p['nombre_producto_libre'] ?? ''));
-                                    if ($nombreLibre === '') {
-                                        continue;
-                                    }
-
-                                    try {
-                                        $productIdCreated = ensureCatalogProductIdForFreeText(
-                                            $pdoProducts,
-                                            $organizationId,
-                                            $nombreLibre
-                                        );
-                                        $repo->updatePartida($id, $idDetallePartida, [
-                                            'id_producto' => $productIdCreated,
-                                            'nombre_producto_libre' => null,
-                                        ]);
-                                    } catch (\Throwable $e) {
-                                        // Si falla la creacion automatica, luego se pedira mapeo manual.
+                                    $idProdPartida = isset($p['id_producto']) ? (int)$p['id_producto'] : 0;
+                                    if ($idProdPartida > 0) {
+                                        $idsProductoAdjudicacion[$idProdPartida] = $idProdPartida;
                                     }
                                 }
 
-                                // Recargar detalle tras intentar convertir texto libre.
-                                $detalle = $repo->getTenderWithDetails($id);
-                                $partidasAdjudicacion = is_array($detalle['partidas'] ?? null)
-                                    ? $detalle['partidas']
-                                    : [];
+                                /** @var array<int, int> $validProductIdsAdjudicacion */
+                                $validProductIdsAdjudicacion = [];
+                                if ($idsProductoAdjudicacion !== []) {
+                                    $pdoProducts = Database::getConnection();
+                                    $validProductIdsAdjudicacion = fetchExistingProductIds(
+                                        $pdoProducts,
+                                        array_values($idsProductoAdjudicacion)
+                                    );
+                                }
 
                                 /** @var array<int, array<string,mixed>> $sinProducto */
                                 $sinProducto = [];
-                                foreach ($partidasAdjudicacion as $p) {
+                                /** @var array<string, string> $nombresSinProducto */
+                                $nombresSinProducto = [];
+                                foreach ($partidasRelevantesAdjudicacion as $p) {
                                     if (!is_array($p)) {
                                         continue;
                                     }
-                                    $activo = array_key_exists('activo', $p) ? (bool)$p['activo'] : true;
-                                    if (!$activo) {
-                                        continue;
-                                    }
-                                    $idProdPartida = $p['id_producto'] ?? null;
-                                    if ($idProdPartida === null || (int)$idProdPartida <= 0) {
+                                    $idProdPartida = isset($p['id_producto']) ? (int)$p['id_producto'] : 0;
+                                    $hasValidProduct = $idProdPartida > 0
+                                        && isset($validProductIdsAdjudicacion[$idProdPartida]);
+                                    if (!$hasValidProduct) {
                                         $sinProducto[] = $p;
+                                        $nombrePendiente = trim((string)($p['nombre_producto_libre'] ?? ($p['product_nombre'] ?? '')));
+                                        if ($nombrePendiente !== '') {
+                                            $nombresSinProducto[mb_strtolower($nombrePendiente)] = $nombrePendiente;
+                                        }
                                     }
                                 }
 
-                                if ($sinProducto !== []) {
+                                if ($loadError !== null) {
+                                    // Error ya informado arriba.
+                                } elseif ($sinProducto !== []) {
                                     $pendingPartidasSinProducto = $sinProducto;
                                     $openMapProductsModal = true;
-                                    $loadError = 'Para adjudicar, todas las lineas activas deben tener un producto del catalogo (id_producto). '
-                                        . 'Vincula las partidas pendientes y vuelve a intentar.';
+                                    $ejemplos = array_slice(array_values($nombresSinProducto), 0, 3);
+                                    $detallePendientes = $ejemplos !== []
+                                        ? ' Pendientes: "' . implode('", "', $ejemplos) . '".'
+                                        : '';
+                                    $loadError = 'No se puede adjudicar: hay lineas activas sin producto de catalogo. '
+                                        . 'Vincula cada linea con un producto existente y vuelve a intentar.'
+                                        . $detallePendientes;
+                                } elseif (
+                                    $lotesEstadoItems !== []
+                                    && count($lotesPerdidosEstado) === count($lotesEstadoItems)
+                                ) {
+                                    $loadError = 'No puedes marcar Adjudicada si todos los lotes estan perdidos. Usa Marcar como Perdida.';
                                 } else {
-                                    $repo->update($id, ['id_estado' => $estadoId]);
+                                    $updateEstadoData = ['id_estado' => $estadoId];
+                                    if ($lotesPerdidosEstado !== []) {
+                                        $lossDetailsResult = collectPerLoteLossDetails(
+                                            $lotesPerdidosEstado,
+                                            $postedLossByLoteMap
+                                        );
+                                        if (!$lossDetailsResult['ok']) {
+                                            $missingLotesTxt = implode(', ', $lossDetailsResult['missing_lotes']);
+                                            $loadError = 'Para adjudicar con lotes perdidos debes indicar ganador e importe en cada lote. Faltan: ' . $missingLotesTxt . '.';
+                                            $openLossStateModal = true;
+                                        } else {
+                                            $updateEstadoData['descripcion'] = appendLossDescription(
+                                                (string)($actual['descripcion'] ?? ''),
+                                                'LOTES PERDIDOS EN ADJUDICACION',
+                                                $motivoPerdidaEstado,
+                                                $lossDetailsResult['details']
+                                            );
+                                        }
+                                    }
+
+                                    if ($loadError === null) {
+                                        $repo->update($id, $updateEstadoData);
+                                        header('Location: ' . $selfUrl . '?id=' . $id);
+                                        exit;
+                                    }
+                                }
+                            } elseif ($estadoId === 6) {
+                                /** @var array<int, string> $lotesPerdidaTotal */
+                                $lotesPerdidaTotal = [];
+                                foreach ($lotesEstadoItems as $loteEstadoItem) {
+                                    $nombreLoteEstado = trim((string)($loteEstadoItem['nombre'] ?? ''));
+                                    if ($nombreLoteEstado === '') {
+                                        continue;
+                                    }
+                                    $lotesPerdidaTotal[] = $nombreLoteEstado;
+                                }
+                                if ($lotesPerdidaTotal === []) {
+                                    $lotesPerdidaTotal[] = 'General';
+                                }
+
+                                $lossDetailsResult = collectPerLoteLossDetails(
+                                    $lotesPerdidaTotal,
+                                    $postedLossByLoteMap
+                                );
+
+                                if (!$lossDetailsResult['ok']) {
+                                    $missingLotesTxt = implode(', ', $lossDetailsResult['missing_lotes']);
+                                    $loadError = 'Para marcar la licitacion como perdida debes indicar ganador e importe en cada lote. Faltan: ' . $missingLotesTxt . '.';
+                                    $openLossStateModal = true;
+                                } else {
+                                    $updateEstadoData = [
+                                        'id_estado' => $estadoId,
+                                        'descripcion' => appendLossDescription(
+                                            (string)($actual['descripcion'] ?? ''),
+                                            'PERDIDA TOTAL',
+                                            $motivoPerdidaEstado,
+                                            $lossDetailsResult['details']
+                                        ),
+                                    ];
+
+                                    if ($lotesEstadoItems !== []) {
+                                        $updateEstadoData['lotes_config'] = json_encode(
+                                            markAllDecodedLotesAsLost($lotesEstadoItems),
+                                            JSON_UNESCAPED_UNICODE
+                                        );
+                                    }
+
+                                    $repo->update($id, $updateEstadoData);
                                     header('Location: ' . $selfUrl . '?id=' . $id);
                                     exit;
+                                }
+                            } elseif ($estadoId === 7) {
+                                $detalleFinalizacion = $repo->getTenderWithDetails($id);
+                                if ($detalleFinalizacion === null) {
+                                    $loadError = 'Licitacion no encontrada.';
+                                } else {
+                                    $entregasFinalizacion = $deliveriesRepo->listDeliveries($id);
+                                    $finalizationCheck = validateFinalizationRequirements(
+                                        $detalleFinalizacion,
+                                        $entregasFinalizacion
+                                    );
+
+                                    if (!$finalizationCheck['ok']) {
+                                        $loadError = $finalizationCheck['error'];
+                                    } else {
+                                        $repo->update($id, ['id_estado' => $estadoId]);
+                                        header('Location: ' . $selfUrl . '?id=' . $id);
+                                        exit;
+                                    }
                                 }
                             } else {
                                 $repo->update($id, ['id_estado' => $estadoId]);
@@ -947,7 +1727,7 @@ try {
             $showUnidadesActual = !in_array($idTipoLicitacionActual, [2, 4], true);
             $isTipoDescuentoActual = in_array($idTipoLicitacionActual, [2, 5], true);
             $lotesConfiguradosActual = extractConfiguredLotes($licitacionActual['lotes_config'] ?? null);
-            $usaLotesActual = count($lotesConfiguradosActual) > 1;
+            $usaLotesActual = count($lotesConfiguradosActual) > 0;
             if (!$usaLotesActual) {
                 $lote = 'General';
             } elseif ($lote === '') {
@@ -1040,6 +1820,19 @@ $mappedSuccess = isset($_GET['mapped']) && (string)$_GET['mapped'] === '1';
 $partidasSinProductoCatalogo = [];
 if ($licitacion !== null) {
     $partidasTmp = is_array($licitacion['partidas'] ?? null) ? $licitacion['partidas'] : [];
+    $cfgLotesTmp = decodeLotesConfig($licitacion['lotes_config'] ?? null);
+    $tieneLotesConfigTmp = $cfgLotesTmp !== [];
+    $lotesGanadosTmp = extractWonLotesSet($licitacion['lotes_config'] ?? null);
+    $tipoProcTmp = mb_strtoupper(trim((string)($licitacion['tipo_procedimiento'] ?? '')), 'UTF-8');
+    $isContratoDerivadoTmp = !empty($licitacion['id_licitacion_padre'])
+        || $tipoProcTmp === 'CONTRATO_BASADO'
+        || $tipoProcTmp === 'ESPECIFICO_SDA';
+    if ($isContratoDerivadoTmp) {
+        $tieneLotesConfigTmp = false;
+        $lotesGanadosTmp = [];
+    }
+    /** @var array<int, int> $idsProductoPartidasActivas */
+    $idsProductoPartidasActivas = [];
     foreach ($partidasTmp as $p) {
         if (!is_array($p)) {
             continue;
@@ -1048,8 +1841,52 @@ if ($licitacion !== null) {
         if (!$activo) {
             continue;
         }
-        $idProdPartida = $p['id_producto'] ?? null;
-        if ($idProdPartida === null || (int)$idProdPartida <= 0) {
+        if ($tieneLotesConfigTmp) {
+            $loteTmp = mb_strtolower(trim((string)($p['lote'] ?? '')), 'UTF-8');
+            if ($loteTmp === '') {
+                $loteTmp = 'general';
+            }
+            if (!isset($lotesGanadosTmp[$loteTmp])) {
+                continue;
+            }
+        }
+        $idProdPartida = isset($p['id_producto']) ? (int)$p['id_producto'] : 0;
+        if ($idProdPartida > 0) {
+            $idsProductoPartidasActivas[$idProdPartida] = $idProdPartida;
+        }
+    }
+
+    /** @var array<int, int> $validProductIdsPartidasActivas */
+    $validProductIdsPartidasActivas = [];
+    if ($idsProductoPartidasActivas !== []) {
+        $pdoProductsCheck = Database::getConnection();
+        $validProductIdsPartidasActivas = fetchExistingProductIds(
+            $pdoProductsCheck,
+            array_values($idsProductoPartidasActivas)
+        );
+    }
+
+    foreach ($partidasTmp as $p) {
+        if (!is_array($p)) {
+            continue;
+        }
+        $activo = array_key_exists('activo', $p) ? (bool)$p['activo'] : true;
+        if (!$activo) {
+            continue;
+        }
+        if ($tieneLotesConfigTmp) {
+            $loteTmp = mb_strtolower(trim((string)($p['lote'] ?? '')), 'UTF-8');
+            if ($loteTmp === '') {
+                $loteTmp = 'general';
+            }
+            if (!isset($lotesGanadosTmp[$loteTmp])) {
+                continue;
+            }
+        }
+        $idProdPartida = isset($p['id_producto']) ? (int)$p['id_producto'] : 0;
+        $hasValidProduct = $idProdPartida > 0
+            && isset($validProductIdsPartidasActivas[$idProdPartida]);
+        if (!$hasValidProduct) {
             $partidasSinProductoCatalogo[] = $p;
         }
     }
@@ -1057,9 +1894,6 @@ if ($licitacion !== null) {
 if ($pendingPartidasSinProducto === []) {
     $pendingPartidasSinProducto = $partidasSinProductoCatalogo;
 }
-
-// Mostrar aviso de vinculación ERP solo cuando realmente se requiere (al intentar adjudicar).
-$showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalogo !== [];
 
 ?>
 <!DOCTYPE html>
@@ -1347,6 +2181,192 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
         .tab-content.active {
             display: block;
         }
+        .lotes-config-panel {
+            margin: 10px 0 14px;
+            padding: 10px 12px;
+            border: 1px solid rgba(133, 114, 94, 0.35);
+            border-radius: 12px;
+            background: #f8f6ef;
+        }
+        .lotes-config-empty {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            font-size: 0.82rem;
+            color: #6b5d47;
+        }
+        .lotes-config-form {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .lotes-config-label {
+            font-size: 0.72rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #7c6f58;
+            font-weight: 700;
+        }
+        .lotes-config-form input {
+            width: 72px;
+            height: 32px;
+            border: 1px solid var(--vz-marron2);
+            border-radius: 8px;
+            background: #fff;
+            color: var(--vz-negro);
+            padding: 0 8px;
+            font-size: 0.82rem;
+        }
+        .lotes-config-form button {
+            height: 32px;
+            border: 1px solid var(--vz-verde);
+            border-radius: 9999px;
+            background: var(--vz-verde);
+            color: var(--vz-crema);
+            font-size: 0.78rem;
+            font-weight: 600;
+            padding: 0 12px;
+            cursor: pointer;
+        }
+        .derived-parent-hint {
+            margin-top: 10px;
+            padding: 10px 12px;
+            border: 1px solid rgba(133, 114, 94, 0.35);
+            border-radius: 12px;
+            background: #f8f6ef;
+            font-size: 0.82rem;
+            color: #5f513f;
+        }
+        .derived-parent-hint a {
+            color: #1f3b6f;
+            text-decoration: underline;
+            font-weight: 600;
+        }
+        .derived-tab-toolbar {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            margin-bottom: 12px;
+        }
+        .derived-tab-intro {
+            margin: 0;
+            font-size: 0.85rem;
+            color: #6b5d47;
+        }
+        .derived-create-panel {
+            border: 1px solid rgba(133, 114, 94, 0.35);
+            border-radius: 12px;
+            background: #f8f6ef;
+            padding: 12px;
+            margin-bottom: 14px;
+        }
+        .derived-create-title {
+            margin: 0 0 8px;
+            font-size: 0.9rem;
+            font-weight: 700;
+            color: var(--vz-negro);
+        }
+        .derived-form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 10px;
+        }
+        .derived-form-field {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .derived-form-field.full {
+            grid-column: 1 / -1;
+        }
+        .derived-form-field label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #7c6f58;
+        }
+        .derived-form-field input,
+        .derived-form-field select,
+        .derived-form-field textarea {
+            width: 100%;
+            min-height: 34px;
+            border: 1px solid #b9a891;
+            border-radius: 9px;
+            background: #fff;
+            color: var(--vz-negro);
+            padding: 6px 10px;
+            font-size: 0.82rem;
+            font-family: inherit;
+        }
+        .derived-form-field textarea {
+            min-height: 74px;
+            resize: vertical;
+        }
+        .derived-form-actions {
+            margin-top: 12px;
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+        }
+        .derived-submit-btn {
+            border: none;
+            border-radius: 9999px;
+            background: var(--vz-verde);
+            color: var(--vz-crema);
+            font-size: 0.8rem;
+            font-weight: 700;
+            padding: 8px 14px;
+            cursor: pointer;
+        }
+        .derived-created-banner {
+            margin-bottom: 10px;
+            border: 1px solid rgba(22, 163, 74, 0.45);
+            background: rgba(22, 163, 74, 0.14);
+            color: #14532d;
+            border-radius: 10px;
+            padding: 8px 10px;
+            font-size: 0.82rem;
+            font-weight: 600;
+        }
+        .derived-empty {
+            margin: 0;
+            font-size: 0.84rem;
+            color: #7a6c54;
+        }
+        .derived-table-wrap {
+            border: 1px solid rgba(133, 114, 94, 0.35);
+            border-radius: 12px;
+            overflow: hidden;
+            background: #fff;
+        }
+        .derived-table {
+            margin-top: 0;
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.82rem;
+        }
+        .derived-table thead th {
+            background: rgba(132, 124, 31, 0.9);
+            color: #fdfaf2;
+            border-bottom: 1px solid rgba(133, 114, 94, 0.35);
+        }
+        .derived-table td.is-right,
+        .derived-table th.is-right {
+            text-align: right;
+        }
+        .derived-table td a {
+            color: #1f3b6f;
+            text-decoration: none;
+            font-weight: 600;
+        }
+        .derived-table td a:hover {
+            text-decoration: underline;
+        }
         @media (max-width: 980px) {
             .detail-head {
                 flex-direction: column;
@@ -1394,8 +2414,7 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
             <div class="sidebar-footer">
-                <?php echo htmlspecialchars($organizationId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
-            </div>
+                            </div>
         </aside>
         <div class="main">
             <header>
@@ -1415,13 +2434,20 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                 <a href="licitaciones.php" class="back-link">&larr; Volver al listado</a>
 
                 <div class="card">
-                    <?php if ($loadError !== null): ?>
-                        <p style="color:#fecaca;font-size:0.9rem;">
-                            Error cargando la licitacion: <?php echo htmlspecialchars($loadError, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
-                        </p>
-                    <?php elseif ($licitacion === null): ?>
-                        <p style="color:#9ca3af;font-size:0.9rem;">No se encontro la licitacion solicitada.</p>
+                    <?php if ($licitacion === null): ?>
+                        <?php if ($loadError !== null): ?>
+                            <p style="color:#fecaca;font-size:0.9rem;">
+                                Error cargando la licitacion: <?php echo htmlspecialchars($loadError, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                            </p>
+                        <?php else: ?>
+                            <p style="color:#9ca3af;font-size:0.9rem;">No se encontro la licitacion solicitada.</p>
+                        <?php endif; ?>
                     <?php else: ?>
+                        <?php if ($loadError !== null): ?>
+                            <div class="detail-error-banner">
+                                <?php echo htmlspecialchars($loadError, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                            </div>
+                        <?php endif; ?>
                         <?php
                         $estadoIdActual = (int)($licitacion['id_estado'] ?? 0);
                         $estadoNombres = [
@@ -1494,6 +2520,48 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                         $tipoProcedimiento = trim((string)($licitacion['tipo_procedimiento'] ?? 'ORDINARIO'));
                         if ($tipoProcedimiento === '') {
                             $tipoProcedimiento = 'ORDINARIO';
+                        }
+                        $tipoProcedimientoUpper = mb_strtoupper($tipoProcedimiento, 'UTF-8');
+                        $isContratoDerivado = !empty($licitacion['id_licitacion_padre'])
+                            || $tipoProcedimientoUpper === 'CONTRATO_BASADO'
+                            || $tipoProcedimientoUpper === 'ESPECIFICO_SDA';
+                        $estadoModalLotesItems = $isContratoDerivado
+                            ? []
+                            : decodeLotesConfig($licitacion['lotes_config'] ?? null);
+                        $estadoModalLotesPerdidos = extractLostLotesFromItems($estadoModalLotesItems);
+                        $estadoModalTodosLotesPerdidos = $estadoModalLotesItems !== []
+                            && count($estadoModalLotesPerdidos) === count($estadoModalLotesItems);
+                        $lossModalPostedStateId = isset($_POST['estado']) ? (int)$_POST['estado'] : 0;
+                        $lossModalInitialTitle = 'Completar perdida';
+                        $lossModalInitialIntro = 'Indica ganador e importe por cada lote afectado. El motivo es opcional.';
+                        /** @var array<int, string> $lossModalInitialLotesList */
+                        $lossModalInitialLotesList = [];
+                        if ($lossModalPostedStateId === 6) {
+                            $lossModalInitialTitle = 'Marcar licitacion como perdida';
+                            $lossModalInitialIntro = 'Se marcaran todos los lotes como perdidos. Indica ganador e importe por lote. El motivo es opcional.';
+                            if ($estadoModalLotesItems !== []) {
+                                $lossModalInitialLotesList = array_values(array_map(
+                                    static fn (array $item): string => (string)$item['nombre'],
+                                    $estadoModalLotesItems
+                                ));
+                            }
+                            if ($lossModalInitialLotesList === []) {
+                                $lossModalInitialLotesList = ['General'];
+                            }
+                        } elseif ($lossModalPostedStateId === 5 && $estadoModalLotesPerdidos !== []) {
+                            $lossModalInitialTitle = 'Completar adjudicacion parcial';
+                            $lossModalInitialIntro = 'Hay lotes marcados como perdidos. Indica ganador e importe por lote. El motivo es opcional.';
+                            $lossModalInitialLotesList = array_values($estadoModalLotesPerdidos);
+                        }
+                        /** @var array<string, array{ganador:string, importe:string}> $lossModalInitialValuesMap */
+                        $lossModalInitialValuesMap = [];
+                        foreach ($lossModalInitialLotesList as $lossModalLoteName) {
+                            $keyLossModalLote = mb_strtolower($lossModalLoteName, 'UTF-8');
+                            $postedLossLot = $postedLossByLoteMap[$keyLossModalLote] ?? ['ganador' => '', 'importe_raw' => ''];
+                            $lossModalInitialValuesMap[$keyLossModalLote] = [
+                                'ganador' => (string)($postedLossLot['ganador'] ?? ''),
+                                'importe' => (string)($postedLossLot['importe_raw'] ?? ''),
+                            ];
                         }
 
                         $idTipoLicitacion = isset($licitacion['id_tipolicitacion'])
@@ -1587,19 +2655,77 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                     </p>
                                     <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:12px;">
                                     <?php foreach ($transicionesDisponibles as $nuevoId => $label): ?>
-                                            <form
-                                                action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
-                                                method="POST"
-                                                style="margin:0;"
-                                            >
-                                                <input type="hidden" name="estado" value="<?php echo (int)$nuevoId; ?>">
+                                            <?php
+                                                $nuevoEstadoId = (int)$nuevoId;
+                                                $requiresMapBeforeAdjudicar = $nuevoEstadoId === 5 && $partidasSinProductoCatalogo !== [];
+                                                $requiresLossModal = false;
+                                                $lossModalTitle = '';
+                                                $lossModalIntro = '';
+                                                /** @var array<int, string> $lossModalLotesList */
+                                                $lossModalLotesList = [];
+                                                if ($nuevoEstadoId === 6) {
+                                                    $requiresLossModal = true;
+                                                    $lossModalTitle = 'Marcar licitacion como perdida';
+                                                    $lossModalIntro = 'Se marcaran todos los lotes como perdidos. Indica ganador e importe por lote. El motivo es opcional.';
+                                                    if ($estadoModalLotesItems !== []) {
+                                                        $lossModalLotesList = array_values(array_map(
+                                                            static fn (array $item): string => (string)$item['nombre'],
+                                                            $estadoModalLotesItems
+                                                        ));
+                                                    }
+                                                    if ($lossModalLotesList === []) {
+                                                        $lossModalLotesList = ['General'];
+                                                    }
+                                                } elseif ($nuevoEstadoId === 5 && $estadoModalLotesPerdidos !== []) {
+                                                    $requiresLossModal = true;
+                                                    $lossModalTitle = 'Completar adjudicacion parcial';
+                                                    $lossModalIntro = 'Hay lotes marcados como perdidos. Indica ganador e importe por lote. El motivo es opcional.';
+                                                    $lossModalLotesList = array_values($estadoModalLotesPerdidos);
+                                                }
+                                            ?>
+                                            <?php if ($nuevoEstadoId === 5 && $estadoModalTodosLotesPerdidos): ?>
                                                 <button
-                                                    type="submit"
+                                                    type="button"
+                                                    disabled
+                                                    style="width:100%;text-align:left;border:1px solid #d8d2c4;border-radius:8px;background:#f8f6ef;color:#9ca3af;font-size:0.8rem;font-weight:600;padding:6px 10px;cursor:not-allowed;opacity:0.8;"
+                                                >
+                                                    <?php echo htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?> (marca algun lote como ganado)
+                                                </button>
+                                            <?php elseif ($requiresMapBeforeAdjudicar): ?>
+                                                <button
+                                                    type="button"
+                                                    class="js-open-map-products-from-status"
+                                                    style="width:100%;text-align:left;border:1px solid #7a2722;border-radius:8px;background:#fff6f5;color:#7a2722;font-size:0.8rem;font-weight:600;padding:6px 10px;cursor:pointer;"
+                                                >
+                                                    <?php echo htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?> (vincular productos antes)
+                                                </button>
+                                            <?php elseif ($requiresLossModal): ?>
+                                                <button
+                                                    type="button"
+                                                    class="js-open-loss-status-modal"
+                                                    data-estado="<?php echo $nuevoEstadoId; ?>"
+                                                    data-title="<?php echo htmlspecialchars($lossModalTitle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    data-intro="<?php echo htmlspecialchars($lossModalIntro, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    data-lotes-json="<?php echo htmlspecialchars(json_encode($lossModalLotesList, JSON_UNESCAPED_UNICODE), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                     style="width:100%;text-align:left;border:1px solid #1f2937;border-radius:8px;background:#020617;color:#e5e7eb;font-size:0.8rem;font-weight:500;padding:6px 10px;cursor:pointer;"
                                                 >
                                                     <?php echo htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                                                 </button>
-                                            </form>
+                                            <?php else: ?>
+                                                <form
+                                                    action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    method="POST"
+                                                    style="margin:0;"
+                                                >
+                                                    <input type="hidden" name="estado" value="<?php echo $nuevoEstadoId; ?>">
+                                                    <button
+                                                        type="submit"
+                                                        style="width:100%;text-align:left;border:1px solid #1f2937;border-radius:8px;background:#020617;color:#e5e7eb;font-size:0.8rem;font-weight:500;padding:6px 10px;cursor:pointer;"
+                                                    >
+                                                        <?php echo htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                                    </button>
+                                                </form>
+                                            <?php endif; ?>
                                         <?php endforeach; ?>
                                     </div>
                                     <button
@@ -1609,6 +2735,50 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                     >
                                         Cancelar
                                     </button>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                        <?php if ($transicionesDisponibles !== []): ?>
+                            <div
+                                id="modal-detalle-perdida-estado"
+                                data-open="<?php echo $openLossStateModal ? '1' : '0'; ?>"
+                                data-initial-state="<?php echo $lossModalPostedStateId; ?>"
+                                data-initial-title="<?php echo htmlspecialchars($lossModalInitialTitle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                data-initial-intro="<?php echo htmlspecialchars($lossModalInitialIntro, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                data-initial-lotes-json="<?php echo htmlspecialchars(json_encode($lossModalInitialLotesList, JSON_UNESCAPED_UNICODE), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                data-initial-values-json="<?php echo htmlspecialchars(json_encode($lossModalInitialValuesMap, JSON_UNESCAPED_UNICODE), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                class="status-loss-modal"
+                                style="display:none;"
+                            >
+                                <div class="status-loss-dialog">
+                                    <form
+                                        method="post"
+                                        action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                        class="status-loss-form"
+                                    >
+                                        <input type="hidden" name="estado" id="status-loss-estado" value="<?php echo $lossModalPostedStateId > 0 ? $lossModalPostedStateId : ''; ?>">
+                                        <div class="status-loss-head">
+                                            <h3 id="status-loss-title"><?php echo htmlspecialchars($lossModalInitialTitle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></h3>
+                                            <button type="button" id="modal-detalle-perdida-close" class="status-loss-close">&times;</button>
+                                        </div>
+                                        <p id="status-loss-intro" class="status-loss-intro">
+                                            <?php echo htmlspecialchars($lossModalInitialIntro, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                        </p>
+                                        <?php $hasInitialLossLotes = $lossModalInitialLotesList !== []; ?>
+                                        <div id="status-loss-lotes-wrap" class="status-loss-lotes <?php echo $hasInitialLossLotes ? '' : 'is-hidden'; ?>">
+                                            <strong>Lotes afectados:</strong>
+                                            <span id="status-loss-lotes-text"><?php echo htmlspecialchars(implode(', ', $lossModalInitialLotesList), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
+                                        </div>
+                                        <div id="status-loss-lotes-rows" class="status-loss-lotes-rows"></div>
+                                        <label class="status-loss-field">
+                                            <span>Motivo de la perdida (opcional)</span>
+                                            <textarea name="motivo_perdida" rows="3"><?php echo htmlspecialchars($postedMotivoPerdida, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></textarea>
+                                        </label>
+                                        <div class="status-loss-actions">
+                                            <button type="button" id="modal-detalle-perdida-cancel" class="status-loss-cancel">Cancelar</button>
+                                            <button type="submit" class="status-loss-submit">Confirmar cambio</button>
+                                        </div>
+                                    </form>
                                 </div>
                             </div>
                         <?php endif; ?>
@@ -1625,7 +2795,7 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                         <button type="button" id="modal-vincular-productos-close" class="map-products-close">&times;</button>
                                     </div>
                                     <p class="map-products-note">
-                                        Para adjudicar, cada partida activa debe tener un producto de catalogo.
+                                        Para adjudicar, cada partida activa debe vincularse con un producto existente del catalogo.
                                     </p>
                                     <form method="post" action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
                                         <input type="hidden" name="form_tipo" value="vincular_productos">
@@ -1714,14 +2884,44 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                             <div>
                                 <span class="meta-label">Pais</span>
                                 <span class="meta-value">
-                                    <?php echo htmlspecialchars((string)($licitacion['pais'] ?? '-'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                    <?php
+                                    $paisDisplay = normalizeCountryDisplay((string)($licitacion['pais'] ?? ''));
+                                    echo htmlspecialchars($paisDisplay !== '' ? $paisDisplay : '-', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+                                    ?>
                                 </span>
                             </div>
                         </div>
+                        <?php
+                        $licitacionPadreVista = is_array($licitacion['licitacion_padre'] ?? null)
+                            ? $licitacion['licitacion_padre']
+                            : null;
+                        ?>
+                        <?php if ($isContratoDerivado && $licitacionPadreVista !== null): ?>
+                            <div class="derived-parent-hint">
+                                Contrato derivado de:
+                                <a href="<?php echo htmlspecialchars('licitacion-detalle.php?id=' . (int)($licitacionPadreVista['id_licitacion'] ?? 0), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
+                                    <?php
+                                    $padreExp = trim((string)($licitacionPadreVista['numero_expediente'] ?? ''));
+                                    $padreNombre = trim((string)($licitacionPadreVista['nombre'] ?? ''));
+                                    echo htmlspecialchars(
+                                        ($padreExp !== '' ? $padreExp . ' - ' : '')
+                                        . ($padreNombre !== '' ? $padreNombre : ('#' . (int)($licitacionPadreVista['id_licitacion'] ?? 0))),
+                                        ENT_QUOTES | ENT_SUBSTITUTE,
+                                        'UTF-8'
+                                    );
+                                    ?>
+                                </a>
+                            </div>
+                        <?php endif; ?>
 
                         <?php
                         /** @var array<int, array<string,mixed>> $partidas */
                         $partidas = is_array($licitacion['partidas'] ?? null) ? $licitacion['partidas'] : [];
+                        /** @var array<int, array<string,mixed>> $contratosDerivados */
+                        $contratosDerivados = is_array($licitacion['contratos_derivados'] ?? null)
+                            ? $licitacion['contratos_derivados']
+                            : [];
+                        $isAmSda = $tipoProcedimientoUpper === 'ACUERDO_MARCO' || $tipoProcedimientoUpper === 'SDA';
                         $idEstado = (int)($licitacion['id_estado'] ?? 0);
                         $idTipoLicitacionVista = isset($licitacion['id_tipolicitacion'])
                             ? (int)$licitacion['id_tipolicitacion']
@@ -1757,8 +2957,37 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                 $descuentoGlobalPresupuesto = round((1.0 - $factorDesc) * 100.0, 2);
                             }
                         }
+                        $lotesConfigItems = decodeLotesConfig($licitacion['lotes_config'] ?? null);
                         $lotesConfigurados = extractConfiguredLotes($licitacion['lotes_config'] ?? null);
-                        $usaLotesPresupuesto = count($lotesConfigurados) > 1;
+                        if ($isContratoDerivado) {
+                            $lotesConfigItems = [];
+                            $lotesConfigurados = [];
+                        }
+                        $usaLotesPresupuesto = count($lotesConfigurados) > 0;
+                        $puedeMarcarLotesGanados = $idEstado === 4;
+                        /** @var array<string, bool> $lotesGanadosSet */
+                        $lotesGanadosSet = [];
+                        foreach ($lotesConfigItems as $loteCfgItem) {
+                            if (empty($loteCfgItem['ganado'])) {
+                                continue;
+                            }
+                            $lotesGanadosSet[mb_strtolower((string)$loteCfgItem['nombre'], 'UTF-8')] = true;
+                        }
+                        /** @var array<string, array{nombre:string, ganado:bool, form_id:string}> $lotesConfigUiMap */
+                        $lotesConfigUiMap = [];
+                        $loteToggleIndex = 0;
+                        foreach ($lotesConfigItems as $loteCfgItem) {
+                            $nombreLoteCfgItem = trim((string)($loteCfgItem['nombre'] ?? ''));
+                            if ($nombreLoteCfgItem === '') {
+                                continue;
+                            }
+                            $lotesConfigUiMap[mb_strtolower($nombreLoteCfgItem, 'UTF-8')] = [
+                                'nombre' => $nombreLoteCfgItem,
+                                'ganado' => !empty($loteCfgItem['ganado']),
+                                'form_id' => 'toggle-lote-ganado-' . $loteToggleIndex,
+                            ];
+                            $loteToggleIndex++;
+                        }
                         if (!$usaLotesPresupuesto) {
                             $lotesDetectados = [];
                             foreach ($partidas as $pLote) {
@@ -1777,8 +3006,34 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                             }
                             $usaLotesPresupuesto = count($lotesDetectados) > 1;
                         }
+                        $filtrarPorLotesGanados = $lotesConfigItems !== [] && $idEstado >= 5;
                         // A partir de ADJUDICADA (5) mostramos pestanas de ejecucion/remaining como en el frontend antiguo.
                         $showEjecucionRemaining = $idEstado >= 5;
+                        $derivedCreated = isset($_GET['derived_created']) && (string)$_GET['derived_created'] === '1';
+
+                        $spainLabelCreate = spainLabelForCreate();
+                        $nuevoDerivadoPaisDefault = canonicalCountryLabelForCreate((string)($licitacion['pais'] ?? $spainLabelCreate));
+                        if ($nuevoDerivadoPaisDefault !== $spainLabelCreate && $nuevoDerivadoPaisDefault !== 'Portugal') {
+                            $nuevoDerivadoPaisDefault = $spainLabelCreate;
+                        }
+                        $nuevoDerivadoFormValues = [
+                            'nombre' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_nombre'] ?? '')) : '',
+                            'pais' => $isCreateDerivedSubmit
+                                ? canonicalCountryLabelForCreate((string)($_POST['nuevo_pais'] ?? ''))
+                                : $nuevoDerivadoPaisDefault,
+                            'numero_expediente' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_numero_expediente'] ?? '')) : '',
+                            'pres_maximo' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_pres_maximo'] ?? '')) : '',
+                            'fecha_presentacion' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_fecha_presentacion'] ?? '')) : '',
+                            'fecha_adjudicacion' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_fecha_adjudicacion'] ?? '')) : '',
+                            'fecha_finalizacion' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_fecha_finalizacion'] ?? '')) : '',
+                            'id_tipolicitacion' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_id_tipolicitacion'] ?? '')) : '',
+                            'enlace_gober' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_enlace_gober'] ?? '')) : '',
+                            'enlace_sharepoint' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_enlace_sharepoint'] ?? '')) : '',
+                            'descripcion' => $isCreateDerivedSubmit ? trim((string)($_POST['nuevo_descripcion'] ?? '')) : '',
+                        ];
+                        if ($nuevoDerivadoFormValues['pais'] !== $spainLabelCreate && $nuevoDerivadoFormValues['pais'] !== 'Portugal') {
+                            $nuevoDerivadoFormValues['pais'] = $nuevoDerivadoPaisDefault;
+                        }
 
                         // -------------------------
                         // Calculos para Remaining
@@ -1801,6 +3056,12 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                             $lote = trim((string)($p['lote'] ?? ''));
                             if ($lote === '') {
                                 $lote = 'General';
+                            }
+                            if ($filtrarPorLotesGanados) {
+                                $loteKey = mb_strtolower($lote, 'UTF-8');
+                                if (!isset($lotesGanadosSet[$loteKey])) {
+                                    continue;
+                                }
                             }
                             $descripcion = (string)($p['nombre_producto_libre'] ?? ($p['product_nombre'] ?? ''));
                             $unidades = (float)($p['unidades'] ?? 0);
@@ -1844,6 +3105,12 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                 if ($lote === '') {
                                     $lote = 'General';
                                 }
+                                if ($filtrarPorLotesGanados) {
+                                    $loteKey = mb_strtolower($lote, 'UTF-8');
+                                    if (!isset($lotesGanadosSet[$loteKey])) {
+                                        continue;
+                                    }
+                                }
                                 $descripcion = (string)($partida['nombre_producto_libre'] ?? ($partida['product_nombre'] ?? ''));
                                 $key = $lote . '|' . $descripcion;
                                 if (!isset($ejecutadoPorPartida[$key])) {
@@ -1856,33 +3123,248 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
 
                         <div class="tabs">
                             <div class="tabs-list">
-                                <button type="button" class="tab-trigger active" data-tab="presupuesto">
-                                    Presupuesto (Oferta)
-                                </button>
-                                <?php if ($showEjecucionRemaining): ?>
-                                    <button type="button" class="tab-trigger" data-tab="ejecucion">
-                                        Entregas (Real / Albaranes)
+                                <?php if ($isAmSda): ?>
+                                    <button type="button" class="tab-trigger active" data-tab="contratos-derivados">
+                                        Contratos derivados
                                     </button>
-                                    <button type="button" class="tab-trigger" data-tab="remaining">
-                                        Remaining
+                                <?php else: ?>
+                                    <button type="button" class="tab-trigger active" data-tab="presupuesto">
+                                        Presupuesto (Oferta)
                                     </button>
+                                    <?php if ($showEjecucionRemaining): ?>
+                                        <button type="button" class="tab-trigger" data-tab="ejecucion">
+                                            Entregas (Real / Albaranes)
+                                        </button>
+                                        <button type="button" class="tab-trigger" data-tab="remaining">
+                                            Remaining
+                                        </button>
+                                    <?php endif; ?>
                                 <?php endif; ?>
                             </div>
 
+                            <?php if ($isAmSda): ?>
+                                <div id="tab-contratos-derivados" class="tab-content active">
+                                    <?php if ($derivedCreated): ?>
+                                        <div class="derived-created-banner">
+                                            Contrato derivado creado correctamente.
+                                        </div>
+                                    <?php endif; ?>
+                                    <div class="derived-tab-toolbar">
+                                        <p class="derived-tab-intro">
+                                            Esta licitacion actua como carpeta. Gestiona aqui sus contratos derivados.
+                                        </p>
+                                    </div>
+                                    <div class="derived-create-panel">
+                                        <h3 class="derived-create-title">
+                                            Nuevo <?php echo $tipoProcedimientoUpper === 'SDA' ? 'Especifico SDA' : 'Contrato Basado'; ?>
+                                        </h3>
+                                        <form method="post" action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id . '&tab=contratos-derivados', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
+                                            <input type="hidden" name="form_tipo" value="crear_contrato_derivado">
+                                            <div class="derived-form-grid">
+                                                <div class="derived-form-field">
+                                                    <label for="nuevo-nombre">Nombre del proyecto</label>
+                                                    <input
+                                                        id="nuevo-nombre"
+                                                        name="nuevo_nombre"
+                                                        type="text"
+                                                        required
+                                                        value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['nombre'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    />
+                                                </div>
+                                                <div class="derived-form-field">
+                                                    <label for="nuevo-pais">Pais</label>
+                                                    <select id="nuevo-pais" name="nuevo_pais" required>
+                                                        <option value="<?php echo htmlspecialchars($spainLabelCreate, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>" <?php echo (string)$nuevoDerivadoFormValues['pais'] === $spainLabelCreate ? 'selected' : ''; ?>><?php echo htmlspecialchars($spainLabelCreate, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></option>
+                                                        <option value="Portugal" <?php echo (string)$nuevoDerivadoFormValues['pais'] === 'Portugal' ? 'selected' : ''; ?>>Portugal</option>
+                                                    </select>
+                                                </div>
+                                                <div class="derived-form-field">
+                                                    <label for="nuevo-expediente">Nro expediente</label>
+                                                    <input
+                                                        id="nuevo-expediente"
+                                                        name="nuevo_numero_expediente"
+                                                        type="text"
+                                                        required
+                                                        value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['numero_expediente'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    />
+                                                </div>
+                                                <div class="derived-form-field">
+                                                    <label for="nuevo-presupuesto">Presupuesto max. (EUR)</label>
+                                                    <input
+                                                        id="nuevo-presupuesto"
+                                                        name="nuevo_pres_maximo"
+                                                        type="number"
+                                                        min="0"
+                                                        step="0.01"
+                                                        required
+                                                        value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['pres_maximo'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    />
+                                                </div>
+                                                <div class="derived-form-field">
+                                                    <label for="nuevo-fp">F. presentacion</label>
+                                                    <input
+                                                        id="nuevo-fp"
+                                                        name="nuevo_fecha_presentacion"
+                                                        type="date"
+                                                        required
+                                                        value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['fecha_presentacion'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    />
+                                                </div>
+                                                <div class="derived-form-field">
+                                                    <label for="nuevo-fa">F. adjudicacion</label>
+                                                    <input
+                                                        id="nuevo-fa"
+                                                        name="nuevo_fecha_adjudicacion"
+                                                        type="date"
+                                                        required
+                                                        value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['fecha_adjudicacion'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    />
+                                                </div>
+                                                <div class="derived-form-field">
+                                                    <label for="nuevo-ff">F. finalizacion</label>
+                                                    <input
+                                                        id="nuevo-ff"
+                                                        name="nuevo_fecha_finalizacion"
+                                                        type="date"
+                                                        required
+                                                        value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['fecha_finalizacion'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    />
+                                                </div>
+                                                <div class="derived-form-field">
+                                                    <label for="nuevo-tipo">Tipo de licitacion</label>
+                                                    <select id="nuevo-tipo" name="nuevo_id_tipolicitacion" required>
+                                                        <option value="" <?php echo (string)$nuevoDerivadoFormValues['id_tipolicitacion'] === '' ? 'selected' : ''; ?> disabled>
+                                                            <?php echo $tiposLicitacion === [] ? 'No hay tipos disponibles' : 'Selecciona un tipo'; ?>
+                                                        </option>
+                                                        <?php foreach ($tiposLicitacion as $tipoDerivadoItem): ?>
+                                                            <?php
+                                                            if (!is_array($tipoDerivadoItem)) {
+                                                                continue;
+                                                            }
+                                                            $idTipoDerivadoItem = (int)($tipoDerivadoItem['id_tipolicitacion'] ?? 0);
+                                                            if ($idTipoDerivadoItem <= 0) {
+                                                                continue;
+                                                            }
+                                                            ?>
+                                                            <option
+                                                                value="<?php echo $idTipoDerivadoItem; ?>"
+                                                                <?php echo (string)$nuevoDerivadoFormValues['id_tipolicitacion'] === (string)$idTipoDerivadoItem ? 'selected' : ''; ?>
+                                                            >
+                                                                <?php echo htmlspecialchars((string)($tipoDerivadoItem['tipo'] ?? ('Tipo #' . $idTipoDerivadoItem)), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                                            </option>
+                                                        <?php endforeach; ?>
+                                                    </select>
+                                                </div>
+                                                <div class="derived-form-field full">
+                                                    <label for="nuevo-gober">Enlace Gober (opcional)</label>
+                                                    <input
+                                                        id="nuevo-gober"
+                                                        name="nuevo_enlace_gober"
+                                                        type="url"
+                                                        value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['enlace_gober'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    />
+                                                </div>
+                                                <div class="derived-form-field full">
+                                                    <label for="nuevo-sharepoint">Enlace SharePoint (opcional)</label>
+                                                    <input
+                                                        id="nuevo-sharepoint"
+                                                        name="nuevo_enlace_sharepoint"
+                                                        type="url"
+                                                        value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['enlace_sharepoint'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    />
+                                                </div>
+                                                <div class="derived-form-field full">
+                                                    <label for="nuevo-descripcion">Notas / Descripcion</label>
+                                                    <textarea id="nuevo-descripcion" name="nuevo_descripcion" rows="3"><?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['descripcion'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></textarea>
+                                                </div>
+                                            </div>
+                                            <div class="derived-form-actions">
+                                                <button type="submit" class="derived-submit-btn">
+                                                    Crear <?php echo $tipoProcedimientoUpper === 'SDA' ? 'Especifico SDA' : 'Contrato Basado'; ?>
+                                                </button>
+                                            </div>
+                                        </form>
+                                    </div>
+                                    <?php if ($contratosDerivados === []): ?>
+                                        <p class="derived-empty">
+                                            Aun no hay contratos derivados para este expediente.
+                                        </p>
+                                    <?php else: ?>
+                                        <div class="derived-table-wrap">
+                                            <table class="derived-table">
+                                                <thead>
+                                                    <tr>
+                                                        <th>ID</th>
+                                                        <th>Expediente</th>
+                                                        <th>Nombre</th>
+                                                        <th>Procedimiento</th>
+                                                        <th>Estado</th>
+                                                        <th class="is-right">Presupuesto (EUR)</th>
+                                                    </tr>
+                                                </thead>
+                                                <tbody>
+                                                    <?php foreach ($contratosDerivados as $contratoDerivado): ?>
+                                                        <?php
+                                                        $idContratoDerivado = (int)($contratoDerivado['id_licitacion'] ?? 0);
+                                                        if ($idContratoDerivado <= 0) {
+                                                            continue;
+                                                        }
+                                                        $estadoDerivadoId = (int)($contratoDerivado['id_estado'] ?? 0);
+                                                        $estadoDerivadoNombre = $estadoNombres[$estadoDerivadoId] ?? ('Estado ' . $estadoDerivadoId);
+                                                        $procDerivado = trim((string)($contratoDerivado['tipo_procedimiento'] ?? 'CONTRATO_BASADO'));
+                                                        ?>
+                                                        <tr>
+                                                            <td>
+                                                                <a href="<?php echo htmlspecialchars('licitacion-detalle.php?id=' . $idContratoDerivado, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
+                                                                    #<?php echo $idContratoDerivado; ?>
+                                                                </a>
+                                                            </td>
+                                                            <td><?php echo htmlspecialchars((string)($contratoDerivado['numero_expediente'] ?? '-'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
+                                                            <td>
+                                                                <a href="<?php echo htmlspecialchars('licitacion-detalle.php?id=' . $idContratoDerivado, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
+                                                                    <?php echo htmlspecialchars((string)($contratoDerivado['nombre'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                                                </a>
+                                                            </td>
+                                                            <td><?php echo htmlspecialchars($procDerivado, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
+                                                            <td><?php echo htmlspecialchars($estadoDerivadoNombre, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
+                                                            <td class="is-right"><?php echo number_format((float)($contratoDerivado['pres_maximo'] ?? 0), 2, ',', '.'); ?></td>
+                                                        </tr>
+                                                    <?php endforeach; ?>
+                                                </tbody>
+                                            </table>
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                            <?php endif; ?>
+
+                            <?php if (!$isAmSda): ?>
                             <div id="tab-presupuesto" class="tab-content active">
                                 <?php if ($mappedSuccess): ?>
                                     <div class="mapped-success-banner">
                                         Productos vinculados correctamente.
                                     </div>
                                 <?php endif; ?>
-                                <?php if ($showMissingProductsBanner): ?>
-                                    <div class="missing-products-banner">
-                                        <span>
-                                            Hay <?php echo count($partidasSinProductoCatalogo); ?> partida(s) activa(s) sin producto ERP.
-                                        </span>
-                                        <button type="button" id="btn-vincular-productos" class="btn-vincular-productos">
-                                            Vincular productos ERP
-                                        </button>
+                                <?php if ($isContratoDerivado || $lotesConfigItems === []): ?>
+                                    <div class="lotes-config-panel">
+                                        <?php if ($isContratoDerivado): ?>
+                                            <div class="lotes-config-empty">
+                                                <span>En contratos basados o especificos no se usa configuracion de lotes.</span>
+                                            </div>
+                                        <?php else: ?>
+                                            <div class="lotes-config-empty">
+                                                <span>Esta licitacion no tiene lotes configurados.</span>
+                                                <form
+                                                    method="post"
+                                                    action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id . '&tab=presupuesto', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                    class="lotes-config-form"
+                                                >
+                                                    <input type="hidden" name="form_tipo" value="guardar_lotes_config">
+                                                    <label for="num-lotes-input" class="lotes-config-label">Cuantos lotes</label>
+                                                    <input id="num-lotes-input" type="number" name="num_lotes" min="1" max="20" value="2">
+                                                    <button type="submit">Generar lotes</button>
+                                                </form>
+                                            </div>
+                                        <?php endif; ?>
                                     </div>
                                 <?php endif; ?>
                                 <?php
@@ -1898,6 +3380,69 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                     }
                                     $partidasActivas[] = $pActiva;
                                 }
+                                $splitByLotesCards = !$isContratoDerivado && count($lotesConfigurados) > 0;
+                                $showLoteColumnPresupuesto = $usaLotesPresupuesto && !$splitByLotesCards;
+                                $budgetSaveLabel = $splitByLotesCards ? 'Guardar presupuesto' : 'Guardar toda la tabla';
+                                /** @var array<string, string> $lotesConfiguradosMap */
+                                $lotesConfiguradosMap = [];
+                                /** @var array<string, array<int, array<string,mixed>>> $partidasActivasPorLote */
+                                $partidasActivasPorLote = [];
+                                /** @var array<int, array<string,mixed>> $partidasActivasOtrosLote */
+                                $partidasActivasOtrosLote = [];
+                                if ($splitByLotesCards) {
+                                    foreach ($lotesConfigurados as $loteCfgNombre) {
+                                        $keyLoteCfg = mb_strtolower($loteCfgNombre, 'UTF-8');
+                                        $lotesConfiguradosMap[$keyLoteCfg] = $loteCfgNombre;
+                                        $partidasActivasPorLote[$loteCfgNombre] = [];
+                                    }
+                                    foreach ($partidasActivas as $pActiva) {
+                                        $lotePartidaTmp = trim((string)($pActiva['lote'] ?? ''));
+                                        if ($lotePartidaTmp === '') {
+                                            $lotePartidaTmp = 'General';
+                                        }
+                                        $keyLoteTmp = mb_strtolower($lotePartidaTmp, 'UTF-8');
+                                        if (isset($lotesConfiguradosMap[$keyLoteTmp])) {
+                                            $nombreCfg = $lotesConfiguradosMap[$keyLoteTmp];
+                                            $partidasActivasPorLote[$nombreCfg][] = $pActiva;
+                                        } else {
+                                            $partidasActivasOtrosLote[] = $pActiva;
+                                        }
+                                    }
+                                }
+                                /** @var array<int, array{title:string, subtitle:string, default_lote:string, rows:array<int, array<string,mixed>>, is_otros:bool, toggle_lote:string}> $budgetCardGroups */
+                                $budgetCardGroups = [];
+                                if ($splitByLotesCards) {
+                                    foreach ($lotesConfigurados as $loteCfgNombre) {
+                                        $budgetCardGroups[] = [
+                                            'title' => $loteCfgNombre,
+                                            'subtitle' => 'Partidas de este lote',
+                                            'default_lote' => $loteCfgNombre,
+                                            'rows' => $partidasActivasPorLote[$loteCfgNombre] ?? [],
+                                            'is_otros' => false,
+                                            'toggle_lote' => $loteCfgNombre,
+                                        ];
+                                    }
+                                    if ($partidasActivasOtrosLote !== []) {
+                                        $budgetCardGroups[] = [
+                                            'title' => 'Otros (sin lote configurado)',
+                                            'subtitle' => 'Partidas con lote no configurado',
+                                            'default_lote' => $lotesConfigurados[0] ?? 'General',
+                                            'rows' => $partidasActivasOtrosLote,
+                                            'is_otros' => true,
+                                            'toggle_lote' => '',
+                                        ];
+                                    }
+                                }
+                                if ($budgetCardGroups === []) {
+                                    $budgetCardGroups[] = [
+                                        'title' => '',
+                                        'subtitle' => '',
+                                        'default_lote' => $lotesConfigurados[0] ?? 'General',
+                                        'rows' => $partidasActivas,
+                                        'is_otros' => false,
+                                        'toggle_lote' => '',
+                                    ];
+                                }
                                 $colsSoloLectura = 1
                                     + ($usaLotesPresupuesto ? 1 : 0)
                                     + ($showUnidadesPresupuesto ? 1 : 0)
@@ -1905,6 +3450,20 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                     + 3;
                                 $colsEditable = $colsSoloLectura + 1;
                                 ?>
+                                <?php if ($puedeMarcarLotesGanados): ?>
+                                    <?php foreach ($lotesConfigUiMap as $loteCfgUi): ?>
+                                        <form
+                                            id="<?php echo htmlspecialchars((string)$loteCfgUi['form_id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                            method="post"
+                                            action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id . '&tab=presupuesto', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                            hidden
+                                        >
+                                            <input type="hidden" name="form_tipo" value="toggle_lote_ganado">
+                                            <input type="hidden" name="lote_nombre" value="<?php echo htmlspecialchars((string)$loteCfgUi['nombre'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
+                                            <input type="hidden" name="ganado" value="<?php echo !empty($loteCfgUi['ganado']) ? '0' : '1'; ?>">
+                                        </form>
+                                    <?php endforeach; ?>
+                                <?php endif; ?>
                                 <?php if (!$presupuestoBloqueado): ?>
                                     <form
                                         method="post"
@@ -1942,6 +3501,51 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                                 </div>
                                             </div>
                                         <?php endif; ?>
+                                        <div class="<?php echo $splitByLotesCards ? 'budget-lote-cards' : ''; ?>">
+                                            <?php $newRowIndex = 0; ?>
+                                            <?php foreach ($budgetCardGroups as $budgetCard): ?>
+                                                <?php
+                                                $partidasActivasRender = is_array($budgetCard['rows'] ?? null) ? $budgetCard['rows'] : [];
+                                                $defaultLoteCard = trim((string)($budgetCard['default_lote'] ?? 'General'));
+                                                $toggleLoteCard = trim((string)($budgetCard['toggle_lote'] ?? ''));
+                                                $loteToggleUi = null;
+                                                if ($toggleLoteCard !== '') {
+                                                    $toggleLoteKey = mb_strtolower($toggleLoteCard, 'UTF-8');
+                                                    $loteToggleUi = $lotesConfigUiMap[$toggleLoteKey] ?? null;
+                                                }
+                                                if ($defaultLoteCard === '') {
+                                                    $defaultLoteCard = $lotesConfigurados[0] ?? 'General';
+                                                }
+                                                ?>
+                                                <?php if ($splitByLotesCards): ?>
+                                                    <section class="budget-lote-card <?php echo !empty($budgetCard['is_otros']) ? 'is-otros' : ''; ?>">
+                                                        <div class="budget-lote-card-head">
+                                                            <h4 class="budget-lote-title"><?php echo htmlspecialchars((string)($budgetCard['title'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></h4>
+                                                            <div class="budget-lote-card-tools">
+                                                                <?php if ($puedeMarcarLotesGanados && is_array($loteToggleUi)): ?>
+                                                                    <?php $ganadoCard = !empty($loteToggleUi['ganado']); ?>
+                                                                    <button
+                                                                        type="submit"
+                                                                        form="<?php echo htmlspecialchars((string)$loteToggleUi['form_id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                                        formnovalidate
+                                                                        class="budget-lote-toggle <?php echo $ganadoCard ? 'is-ganado' : 'is-perdido'; ?>"
+                                                                        aria-pressed="<?php echo $ganadoCard ? 'true' : 'false'; ?>"
+                                                                        aria-label="<?php echo htmlspecialchars('Cambiar estado de ' . (string)$loteToggleUi['nombre'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                                        title="Cambiar estado de lote"
+                                                                    >
+                                                                        <span class="budget-lote-toggle-track" aria-hidden="true">
+                                                                            <span class="budget-lote-toggle-thumb"></span>
+                                                                        </span>
+                                                                        <span class="budget-lote-toggle-label"><?php echo $ganadoCard ? 'Ganado' : 'Perdido'; ?></span>
+                                                                    </button>
+                                                                <?php endif; ?>
+                                                                <span class="budget-lote-meta"><?php echo count($partidasActivasRender); ?> linea(s)</span>
+                                                            </div>
+                                                        </div>
+                                                        <?php if ($partidasActivasRender === []): ?>
+                                                            <p class="budget-lote-empty-note">No hay partidas activas en este bloque. Puedes anadir nuevas lineas aqui.</p>
+                                                        <?php endif; ?>
+                                                <?php endif; ?>
                                         <table
                                             class="budget-lines-table budget-lines-table-editable"
                                             data-show-unidades="<?php echo $showUnidadesPresupuesto ? '1' : '0'; ?>"
@@ -1951,7 +3555,7 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                             <thead>
                                                 <tr>
                                                     <th>Producto</th>
-                                                    <?php if ($usaLotesPresupuesto): ?>
+                                                    <?php if ($showLoteColumnPresupuesto): ?>
                                                         <th class="is-right">Lote</th>
                                                     <?php endif; ?>
                                                     <?php if ($showUnidadesPresupuesto): ?>
@@ -1967,7 +3571,7 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                                 </tr>
                                             </thead>
                                             <tbody>
-                                                <?php foreach ($partidasActivas as $p): ?>
+                                                <?php foreach ($partidasActivasRender as $p): ?>
                                                     <?php
                                                     $detalleId = (int)($p['id_detalle'] ?? 0);
                                                     if ($detalleId <= 0) {
@@ -1995,8 +3599,15 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                                                 class="budget-input"
                                                                 <?php echo $idProducto > 0 ? 'readonly' : ''; ?>
                                                             />
+                                                            <?php if ($usaLotesPresupuesto && !$showLoteColumnPresupuesto): ?>
+                                                                <input
+                                                                    type="hidden"
+                                                                    name="lineas[<?php echo $detalleId; ?>][lote]"
+                                                                    value="<?php echo htmlspecialchars($lotePartida, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                                />
+                                                            <?php endif; ?>
                                                         </td>
-                                                        <?php if ($usaLotesPresupuesto): ?>
+                                                        <?php if ($showLoteColumnPresupuesto): ?>
                                                             <td class="budget-cell-num">
                                                                 <?php if ($lotesConfigurados !== []): ?>
                                                                     <select name="lineas[<?php echo $detalleId; ?>][lote]" class="budget-input budget-input-right">
@@ -2061,13 +3672,21 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                                         </td>
                                                     </tr>
                                                 <?php endforeach; ?>
-                                                <tr class="budget-new-row js-budget-new-row" data-new-index="0">
+                                                <tr class="budget-new-row js-budget-new-row" data-new-index="<?php echo $newRowIndex; ?>">
                                                     <td class="budget-cell-concept">
-                                                        <input type="hidden" name="lineas_nuevas[0][id_producto]" class="js-budget-product-id" value="" />
+                                                        <input type="hidden" name="lineas_nuevas[<?php echo $newRowIndex; ?>][id_producto]" class="js-budget-product-id" value="" />
+                                                        <?php if ($usaLotesPresupuesto && !$showLoteColumnPresupuesto): ?>
+                                                            <input
+                                                                type="hidden"
+                                                                name="lineas_nuevas[<?php echo $newRowIndex; ?>][lote]"
+                                                                value="<?php echo htmlspecialchars($defaultLoteCard, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                                data-default-value="<?php echo htmlspecialchars($defaultLoteCard, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                            />
+                                                        <?php endif; ?>
                                                         <div class="budget-autocomplete-wrap">
                                                             <input
                                                                 type="text"
-                                                                name="lineas_nuevas[0][nombre_partida]"
+                                                                name="lineas_nuevas[<?php echo $newRowIndex; ?>][nombre_partida]"
                                                                 class="budget-input js-budget-concept-input"
                                                                 placeholder="Anadir nuevo concepto..."
                                                                 autocomplete="off"
@@ -2076,29 +3695,36 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                                             <div class="ac-status budget-ac-status js-budget-ac-status"></div>
                                                         </div>
                                                     </td>
-                                                    <?php if ($usaLotesPresupuesto): ?>
+                                                    <?php if ($showLoteColumnPresupuesto): ?>
                                                         <td class="budget-cell-num">
                                                             <?php if ($lotesConfigurados !== []): ?>
-                                                                <select name="lineas_nuevas[0][lote]" class="budget-input budget-input-right">
+                                                                <select
+                                                                    name="lineas_nuevas[<?php echo $newRowIndex; ?>][lote]"
+                                                                    class="budget-input budget-input-right"
+                                                                    data-default-value="<?php echo htmlspecialchars($defaultLoteCard, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                                >
                                                                     <?php foreach ($lotesConfigurados as $loteConfigNombre): ?>
-                                                                        <option value="<?php echo htmlspecialchars($loteConfigNombre, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
+                                                                        <option
+                                                                            value="<?php echo htmlspecialchars($loteConfigNombre, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                                            <?php echo $defaultLoteCard === $loteConfigNombre ? 'selected' : ''; ?>
+                                                                        >
                                                                             <?php echo htmlspecialchars($loteConfigNombre, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                                                                         </option>
                                                                     <?php endforeach; ?>
                                                                 </select>
                                                             <?php else: ?>
-                                                                <input type="text" name="lineas_nuevas[0][lote]" placeholder="Lote 1" class="budget-input budget-input-right" />
+                                                                <input type="text" name="lineas_nuevas[<?php echo $newRowIndex; ?>][lote]" placeholder="Lote 1" class="budget-input budget-input-right" />
                                                             <?php endif; ?>
                                                         </td>
                                                     <?php endif; ?>
                                                     <?php if ($showUnidadesPresupuesto): ?>
                                                         <td class="budget-cell-num">
-                                                            <input type="number" step="0.01" min="0" name="lineas_nuevas[0][unidades]" placeholder="0" class="budget-input budget-input-right" />
+                                                            <input type="number" step="0.01" min="0" name="lineas_nuevas[<?php echo $newRowIndex; ?>][unidades]" placeholder="0" class="budget-input budget-input-right" />
                                                         </td>
                                                     <?php endif; ?>
                                                     <?php if ($showPmaxuPresupuesto): ?>
                                                         <td class="budget-cell-num">
-                                                            <input type="number" step="0.01" min="0" name="lineas_nuevas[0][pmaxu]" placeholder="0" class="budget-input budget-input-right" />
+                                                            <input type="number" step="0.01" min="0" name="lineas_nuevas[<?php echo $newRowIndex; ?>][pmaxu]" placeholder="0" class="budget-input budget-input-right" />
                                                         </td>
                                                     <?php endif; ?>
                                                     <td class="budget-cell-num">
@@ -2106,24 +3732,38 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                                             type="number"
                                                             step="0.01"
                                                             min="0"
-                                                            name="lineas_nuevas[0][pvu]"
+                                                            name="lineas_nuevas[<?php echo $newRowIndex; ?>][pvu]"
                                                             placeholder="0"
                                                             class="budget-input budget-input-right"
                                                             <?php echo $isTipoDescuentoPresupuesto ? 'readonly tabindex="-1" data-auto-pvu="1"' : ''; ?>
                                                         />
                                                     </td>
                                                     <td class="budget-cell-num">
-                                                        <input type="number" step="0.01" min="0" name="lineas_nuevas[0][pcu]" placeholder="0" class="budget-input budget-input-right" />
+                                                        <input type="number" step="0.01" min="0" name="lineas_nuevas[<?php echo $newRowIndex; ?>][pcu]" placeholder="0" class="budget-input budget-input-right" />
                                                     </td>
                                                     <td class="is-right budget-new-importe">-</td>
                                                     <td class="budget-cell-actions">
                                                         <span class="budget-auto-add-hint">Se crea otra fila automaticamente</span>
                                                     </td>
                                                 </tr>
+                                                <?php $newRowIndex++; ?>
                                             </tbody>
                                         </table>
+                                                <?php if ($splitByLotesCards): ?>
+                                                    </section>
+                                                <?php endif; ?>
+                                            <?php endforeach; ?>
+                                        </div>
                                         <div class="budget-table-actions">
-                                            <button type="submit" name="guardar_todo" value="1" class="btn-save-budget-table">Guardar toda la tabla</button>
+                                            <button
+                                                type="submit"
+                                                name="guardar_todo"
+                                                value="1"
+                                                class="btn-save-budget-table"
+                                                aria-label="<?php echo htmlspecialchars($budgetSaveLabel, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                            >
+                                                <?php echo htmlspecialchars($budgetSaveLabel, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                            </button>
                                         </div>
                                     </form>
                                 <?php else: ?>
@@ -2132,56 +3772,104 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                             Esta licitacion aun no tiene partidas de presupuesto cargadas.
                                         </p>
                                     <?php else: ?>
-                                        <table class="budget-lines-table">
-                                            <thead>
-                                                <tr>
-                                                    <th>Producto</th>
-                                                    <?php if ($usaLotesPresupuesto): ?>
-                                                        <th class="is-right">Lote</th>
-                                                    <?php endif; ?>
-                                                    <?php if ($showUnidadesPresupuesto): ?>
-                                                        <th class="is-right">Uds.</th>
-                                                    <?php endif; ?>
-                                                    <?php if ($showPmaxuPresupuesto): ?>
-                                                        <th class="is-right">PMAXU (EUR)</th>
-                                                    <?php endif; ?>
-                                                    <th class="is-right">PVU (EUR)</th>
-                                                    <th class="is-right">PCU (EUR)</th>
-                                                    <th class="is-right">Importe (EUR)</th>
-                                                </tr>
-                                            </thead>
-                                            <tbody>
-                                                <?php foreach ($partidasActivas as $p): ?>
-                                                    <?php
-                                                    $nombreProd = (string)($p['product_nombre'] ?? ($p['nombre_producto_libre'] ?? ''));
-                                                    $lotePartida = trim((string)($p['lote'] ?? ''));
-                                                    if ($lotePartida === '') {
-                                                        $lotePartida = 'General';
-                                                    }
-                                                    $uds = (float)($p['unidades'] ?? 0);
-                                                    $pmaxu = (float)($p['pmaxu'] ?? 0);
-                                                    $pvu = (float)($p['pvu'] ?? 0);
-                                                    $pcu = (float)($p['pcu'] ?? 0);
-                                                    $importe = $showUnidadesPresupuesto ? ($uds > 0 ? $uds * $pvu : $pvu) : $pvu;
-                                                    ?>
-                                                    <tr>
-                                                        <td><?php echo htmlspecialchars($nombreProd, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
-                                                        <?php if ($usaLotesPresupuesto): ?>
-                                                            <td class="is-right"><?php echo htmlspecialchars($lotePartida, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
-                                                        <?php endif; ?>
-                                                        <?php if ($showUnidadesPresupuesto): ?>
-                                                            <td class="is-right"><?php echo $uds > 0 ? number_format($uds, 2, ',', '.') : '-'; ?></td>
-                                                        <?php endif; ?>
-                                                        <?php if ($showPmaxuPresupuesto): ?>
-                                                            <td class="is-right"><?php echo $pmaxu > 0 ? number_format($pmaxu, 2, ',', '.') : '-'; ?></td>
-                                                        <?php endif; ?>
-                                                        <td class="is-right"><?php echo number_format($pvu, 2, ',', '.'); ?></td>
-                                                        <td class="is-right"><?php echo number_format($pcu, 2, ',', '.'); ?></td>
-                                                        <td class="is-right"><?php echo number_format($importe, 2, ',', '.'); ?></td>
-                                                    </tr>
-                                                <?php endforeach; ?>
-                                            </tbody>
-                                        </table>
+                                        <div class="<?php echo $splitByLotesCards ? 'budget-lote-cards' : ''; ?>">
+                                            <?php foreach ($budgetCardGroups as $budgetCard): ?>
+                                                <?php
+                                                $partidasActivasRender = is_array($budgetCard['rows'] ?? null) ? $budgetCard['rows'] : [];
+                                                $toggleLoteCard = trim((string)($budgetCard['toggle_lote'] ?? ''));
+                                                $loteToggleUi = null;
+                                                if ($toggleLoteCard !== '') {
+                                                    $toggleLoteKey = mb_strtolower($toggleLoteCard, 'UTF-8');
+                                                    $loteToggleUi = $lotesConfigUiMap[$toggleLoteKey] ?? null;
+                                                }
+                                                ?>
+                                                <?php if ($splitByLotesCards): ?>
+                                                    <section class="budget-lote-card <?php echo !empty($budgetCard['is_otros']) ? 'is-otros' : ''; ?>">
+                                                        <div class="budget-lote-card-head">
+                                                            <h4 class="budget-lote-title"><?php echo htmlspecialchars((string)($budgetCard['title'] ?? ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></h4>
+                                                            <div class="budget-lote-card-tools">
+                                                                <?php if ($puedeMarcarLotesGanados && is_array($loteToggleUi)): ?>
+                                                                    <?php $ganadoCard = !empty($loteToggleUi['ganado']); ?>
+                                                                    <button
+                                                                        type="submit"
+                                                                        form="<?php echo htmlspecialchars((string)$loteToggleUi['form_id'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                                        formnovalidate
+                                                                        class="budget-lote-toggle <?php echo $ganadoCard ? 'is-ganado' : 'is-perdido'; ?>"
+                                                                        aria-pressed="<?php echo $ganadoCard ? 'true' : 'false'; ?>"
+                                                                        aria-label="<?php echo htmlspecialchars('Cambiar estado de ' . (string)$loteToggleUi['nombre'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                                        title="Cambiar estado de lote"
+                                                                    >
+                                                                        <span class="budget-lote-toggle-track" aria-hidden="true">
+                                                                            <span class="budget-lote-toggle-thumb"></span>
+                                                                        </span>
+                                                                        <span class="budget-lote-toggle-label"><?php echo $ganadoCard ? 'Ganado' : 'Perdido'; ?></span>
+                                                                    </button>
+                                                                <?php endif; ?>
+                                                                <span class="budget-lote-meta"><?php echo count($partidasActivasRender); ?> linea(s)</span>
+                                                            </div>
+                                                        </div>
+                                                <?php endif; ?>
+
+                                                <?php if ($partidasActivasRender === []): ?>
+                                                    <p class="budget-lote-empty-note">No hay partidas activas en este bloque.</p>
+                                                <?php else: ?>
+                                                    <table class="budget-lines-table">
+                                                        <thead>
+                                                            <tr>
+                                                                <th>Producto</th>
+                                                                <?php if ($showLoteColumnPresupuesto): ?>
+                                                                    <th class="is-right">Lote</th>
+                                                                <?php endif; ?>
+                                                                <?php if ($showUnidadesPresupuesto): ?>
+                                                                    <th class="is-right">Uds.</th>
+                                                                <?php endif; ?>
+                                                                <?php if ($showPmaxuPresupuesto): ?>
+                                                                    <th class="is-right">PMAXU (EUR)</th>
+                                                                <?php endif; ?>
+                                                                <th class="is-right">PVU (EUR)</th>
+                                                                <th class="is-right">PCU (EUR)</th>
+                                                                <th class="is-right">Importe (EUR)</th>
+                                                            </tr>
+                                                        </thead>
+                                                        <tbody>
+                                                            <?php foreach ($partidasActivasRender as $p): ?>
+                                                                <?php
+                                                                $nombreProd = (string)($p['product_nombre'] ?? ($p['nombre_producto_libre'] ?? ''));
+                                                                $lotePartida = trim((string)($p['lote'] ?? ''));
+                                                                if ($lotePartida === '') {
+                                                                    $lotePartida = 'General';
+                                                                }
+                                                                $uds = (float)($p['unidades'] ?? 0);
+                                                                $pmaxu = (float)($p['pmaxu'] ?? 0);
+                                                                $pvu = (float)($p['pvu'] ?? 0);
+                                                                $pcu = (float)($p['pcu'] ?? 0);
+                                                                $importe = $showUnidadesPresupuesto ? ($uds > 0 ? $uds * $pvu : $pvu) : $pvu;
+                                                                ?>
+                                                                <tr>
+                                                                    <td><?php echo htmlspecialchars($nombreProd, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
+                                                                    <?php if ($showLoteColumnPresupuesto): ?>
+                                                                        <td class="is-right"><?php echo htmlspecialchars($lotePartida, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
+                                                                    <?php endif; ?>
+                                                                    <?php if ($showUnidadesPresupuesto): ?>
+                                                                        <td class="is-right"><?php echo $uds > 0 ? number_format($uds, 2, ',', '.') : '-'; ?></td>
+                                                                    <?php endif; ?>
+                                                                    <?php if ($showPmaxuPresupuesto): ?>
+                                                                        <td class="is-right"><?php echo $pmaxu > 0 ? number_format($pmaxu, 2, ',', '.') : '-'; ?></td>
+                                                                    <?php endif; ?>
+                                                                    <td class="is-right"><?php echo number_format($pvu, 2, ',', '.'); ?></td>
+                                                                    <td class="is-right"><?php echo number_format($pcu, 2, ',', '.'); ?></td>
+                                                                    <td class="is-right"><?php echo number_format($importe, 2, ',', '.'); ?></td>
+                                                                </tr>
+                                                            <?php endforeach; ?>
+                                                        </tbody>
+                                                    </table>
+                                                <?php endif; ?>
+
+                                                <?php if ($splitByLotesCards): ?>
+                                                    </section>
+                                                <?php endif; ?>
+                                            <?php endforeach; ?>
+                                        </div>
                                     <?php endif; ?>
                                 <?php endif; ?>
                             </div>
@@ -2636,6 +4324,7 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
                                     </div>
                                 </div>
                             <?php endif; ?>
+                            <?php endif; ?>
                         </div>
                     <?php endif; ?>
                 </div>
@@ -2644,6 +4333,8 @@ $showMissingProductsBanner = $openMapProductsModal && $partidasSinProductoCatalo
     </div>
 </body>
 <script>
+const PRODUCTOS_SEARCH_URL = <?php echo json_encode($productosSearchUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+
 // Tabs simples en cliente para navegar entre Presupuesto / Ejecucion / Remaining
 document.addEventListener('DOMContentLoaded', function () {
     var triggers = Array.prototype.slice.call(document.querySelectorAll('.tab-trigger'));
@@ -2681,17 +4372,21 @@ document.addEventListener('DOMContentLoaded', function () {
 
 // Presupuesto: mantener siempre una fila nueva vacia al final (sin boton "Anadir")
 document.addEventListener('DOMContentLoaded', function () {
-    var table = document.querySelector('.budget-lines-table-editable');
-    if (!table) return;
+    var tables = Array.prototype.slice.call(document.querySelectorAll('.budget-lines-table-editable'));
+    if (tables.length === 0) return;
 
-    var tbody = table.querySelector('tbody');
-    if (!tbody) return;
-
-    var showUnidades = table.getAttribute('data-show-unidades') === '1';
-    var showPmaxu = table.getAttribute('data-show-pmaxu') === '1';
-    var isTipoDescuento = table.getAttribute('data-tipo-descuento') === '1';
+    var baseTable = tables[0];
+    var isTipoDescuento = baseTable.getAttribute('data-tipo-descuento') === '1';
     var descuentoInput = document.getElementById('descuento-global-input');
     var btnAplicarDescuento = document.getElementById('btn-aplicar-descuento-global');
+
+    function tableUsesUnidades(table) {
+        return !!table && table.getAttribute('data-show-unidades') === '1';
+    }
+
+    function tableUsesPmaxu(table) {
+        return !!table && table.getAttribute('data-show-pmaxu') === '1';
+    }
 
     function parseNumber(v) {
         var txt = String(v == null ? '' : v).trim().replace(',', '.');
@@ -2714,7 +4409,9 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function recalcRowDiscountPvu(row) {
-        if (!isTipoDescuento || !showPmaxu || !row) return;
+        if (!isTipoDescuento || !row) return;
+        var rowTable = row.closest('.budget-lines-table-editable');
+        if (!tableUsesPmaxu(rowTable)) return;
         var pmaxu = row.querySelector('input[name*=\"[pmaxu]\"]');
         var pvu = row.querySelector('input[name*=\"[pvu]\"]');
         if (!pmaxu || !pvu) return;
@@ -2725,15 +4422,27 @@ document.addEventListener('DOMContentLoaded', function () {
 
     function recalcAllDiscountRows() {
         if (!isTipoDescuento) return;
-        var rows = Array.prototype.slice.call(tbody.querySelectorAll('tr'));
-        rows.forEach(function (row) {
-            recalcRowDiscountPvu(row);
-            updateNewRowImporte(row);
+        tables.forEach(function (table) {
+            var rows = Array.prototype.slice.call(table.querySelectorAll('tbody tr'));
+            rows.forEach(function (row) {
+                recalcRowDiscountPvu(row);
+                updateNewRowImporte(row);
+            });
         });
     }
 
-    function getNewRows() {
+    function getNewRowsInTbody(tbody) {
+        if (!tbody) return [];
         return Array.prototype.slice.call(tbody.querySelectorAll('.js-budget-new-row'));
+    }
+
+    function getAllNewRows() {
+        var rows = [];
+        tables.forEach(function (table) {
+            var tbody = table.querySelector('tbody');
+            rows = rows.concat(getNewRowsInTbody(tbody));
+        });
+        return rows;
     }
 
     function rowHasData(row) {
@@ -2761,8 +4470,11 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 
     function updateNewRowImporte(row) {
+        if (!row) return;
         var importeCell = row.querySelector('.budget-new-importe');
         if (!importeCell) return;
+        var rowTable = row.closest('.budget-lines-table-editable');
+        var showUnidades = tableUsesUnidades(rowTable);
         var unidades = row.querySelector('input[name*=\"[unidades]\"]');
         var pvu = row.querySelector('input[name*=\"[pvu]\"]');
         var unidadesVal = unidades ? parseNumber(unidades.value) : 0;
@@ -2783,12 +4495,12 @@ document.addEventListener('DOMContentLoaded', function () {
             field.addEventListener('input', function () {
                 recalcRowDiscountPvu(row);
                 updateNewRowImporte(row);
-                ensureTrailingEmptyRow();
+                ensureTrailingEmptyRows();
             });
             field.addEventListener('change', function () {
                 recalcRowDiscountPvu(row);
                 updateNewRowImporte(row);
-                ensureTrailingEmptyRow();
+                ensureTrailingEmptyRows();
             });
         });
     }
@@ -2807,13 +4519,15 @@ document.addEventListener('DOMContentLoaded', function () {
     function cloneAsNewRow(fromRow, idx) {
         var clone = fromRow.cloneNode(true);
         clone.setAttribute('data-budget-bound', '0');
+        clone.setAttribute('data-budget-ac-bound', '0');
         clone.classList.add('js-budget-new-row');
         renumberRow(clone, idx);
 
         var textInputs = clone.querySelectorAll('input[type=\"text\"], input[type=\"number\"], input[type=\"hidden\"]');
         textInputs.forEach(function (el) {
             if (el.type === 'hidden') {
-                el.value = '';
+                var hiddenDefault = el.getAttribute('data-default-value');
+                el.value = hiddenDefault !== null ? hiddenDefault : '';
             } else {
                 el.value = '';
             }
@@ -2821,12 +4535,24 @@ document.addEventListener('DOMContentLoaded', function () {
 
         var selects = clone.querySelectorAll('select');
         selects.forEach(function (sel) {
-            sel.selectedIndex = 0;
+            var defaultValue = sel.getAttribute('data-default-value');
+            if (defaultValue !== null && defaultValue !== '') {
+                sel.value = defaultValue;
+                if (sel.value !== defaultValue) {
+                    sel.selectedIndex = 0;
+                }
+            } else {
+                sel.selectedIndex = 0;
+            }
         });
 
         var suggest = clone.querySelector('.js-budget-suggest-box');
         if (suggest) {
             suggest.innerHTML = '';
+        }
+        var acStatus = clone.querySelector('.js-budget-ac-status');
+        if (acStatus) {
+            acStatus.textContent = '';
         }
 
         var hint = clone.querySelector('.budget-auto-add-hint');
@@ -2838,30 +4564,92 @@ document.addEventListener('DOMContentLoaded', function () {
         return clone;
     }
 
-    function ensureTrailingEmptyRow() {
-        var rows = getNewRows();
+    function ensureTrailingEmptyRowForTable(table) {
+        if (!table) return;
+        var tbody = table.querySelector('tbody');
+        if (!tbody) return;
+
+        var rows = getNewRowsInTbody(tbody);
         if (rows.length === 0) return;
 
-        rows.forEach(function (row, idx) {
-            renumberRow(row, idx);
+        var activeEl = document.activeElement;
+        var activeRow = activeEl && activeEl.closest ? activeEl.closest('.js-budget-new-row') : null;
+
+        var dataRows = [];
+        var emptyRows = [];
+        rows.forEach(function (row) {
+            if (rowHasData(row)) {
+                dataRows.push(row);
+            } else {
+                emptyRows.push(row);
+            }
+        });
+
+        var trailingEmpty = null;
+        if (emptyRows.length > 0) {
+            trailingEmpty = emptyRows[emptyRows.length - 1];
+            if (activeRow && emptyRows.indexOf(activeRow) !== -1) {
+                trailingEmpty = activeRow;
+            }
+        } else {
+            var baseRow = dataRows.length > 0 ? dataRows[dataRows.length - 1] : rows[rows.length - 1];
+            trailingEmpty = cloneAsNewRow(baseRow, getAllNewRows().length);
+            tbody.appendChild(trailingEmpty);
+        }
+
+        rows.forEach(function (row) {
+            if (row === trailingEmpty) return;
+            if (!rowHasData(row) && row.parentNode === tbody) {
+                tbody.removeChild(row);
+            }
+        });
+
+        if (trailingEmpty && trailingEmpty.parentNode === tbody) {
+            tbody.appendChild(trailingEmpty);
+        }
+
+        var normalizedRows = getNewRowsInTbody(tbody);
+        normalizedRows.forEach(function (row, idx) {
             bindNewRow(row);
+            recalcRowDiscountPvu(row);
             updateNewRowImporte(row);
         });
 
-        var last = rows[rows.length - 1];
-        if (rowHasData(last)) {
-            var newRow = cloneAsNewRow(last, rows.length);
-            tbody.appendChild(newRow);
-            bindNewRow(newRow);
-            updateNewRowImporte(newRow);
+        if (normalizedRows.length === 0) {
+            var fallback = cloneAsNewRow(rows[0], getAllNewRows().length);
+            tbody.appendChild(fallback);
+            bindNewRow(fallback);
+            recalcRowDiscountPvu(fallback);
+            updateNewRowImporte(fallback);
         }
     }
 
-    getNewRows().forEach(function (row) {
-        bindNewRow(row);
-        updateNewRowImporte(row);
+    function renumberAllNewRows() {
+        var allRows = getAllNewRows();
+        allRows.forEach(function (row, idx) {
+            renumberRow(row, idx);
+            bindNewRow(row);
+            recalcRowDiscountPvu(row);
+            updateNewRowImporte(row);
+        });
+    }
+
+    function ensureTrailingEmptyRows() {
+        tables.forEach(function (table) {
+            ensureTrailingEmptyRowForTable(table);
+        });
+        renumberAllNewRows();
+    }
+
+    tables.forEach(function (table) {
+        var tbody = table.querySelector('tbody');
+        getNewRowsInTbody(tbody).forEach(function (row) {
+            bindNewRow(row);
+            recalcRowDiscountPvu(row);
+            updateNewRowImporte(row);
+        });
     });
-    ensureTrailingEmptyRow();
+    ensureTrailingEmptyRows();
 
     if (isTipoDescuento && descuentoInput) {
         descuentoInput.addEventListener('input', function () {
@@ -3027,11 +4815,179 @@ document.addEventListener('DOMContentLoaded', function () {
     if (btnClose) btnClose.addEventListener('click', closeModal);
     if (btnCancel) btnCancel.addEventListener('click', closeModal);
 
+    var closeByBackdropPress = false;
+    modal.addEventListener('mousedown', function (e) {
+        closeByBackdropPress = (e.target === modal);
+    });
     modal.addEventListener('click', function (e) {
-        if (e.target === modal) {
+        if (closeByBackdropPress && e.target === modal) {
             closeModal();
         }
+        closeByBackdropPress = false;
     });
+});
+
+// Modal "Detalle de perdida" para cambios de estado desde Presentada
+document.addEventListener('DOMContentLoaded', function () {
+    var modal = document.getElementById('modal-detalle-perdida-estado');
+    if (!modal) return;
+
+    var triggers = Array.prototype.slice.call(document.querySelectorAll('.js-open-loss-status-modal'));
+    var btnClose = document.getElementById('modal-detalle-perdida-close');
+    var btnCancel = document.getElementById('modal-detalle-perdida-cancel');
+    var hiddenEstado = document.getElementById('status-loss-estado');
+    var title = document.getElementById('status-loss-title');
+    var intro = document.getElementById('status-loss-intro');
+    var lotesWrap = document.getElementById('status-loss-lotes-wrap');
+    var lotesText = document.getElementById('status-loss-lotes-text');
+    var lotesRows = document.getElementById('status-loss-lotes-rows');
+
+    function parseJsonData(raw, fallback) {
+        if (!raw) return fallback;
+        try {
+            return JSON.parse(raw);
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function normalizeLotes(lotes) {
+        if (!Array.isArray(lotes)) return [];
+        var out = [];
+        lotes.forEach(function (item) {
+            var txt = String(item == null ? '' : item).trim();
+            if (txt !== '') {
+                out.push(txt);
+            }
+        });
+        return out;
+    }
+
+    function createLossField(labelText, inputEl) {
+        var label = document.createElement('label');
+        label.className = 'status-loss-field';
+        var span = document.createElement('span');
+        span.textContent = labelText;
+        label.appendChild(span);
+        label.appendChild(inputEl);
+        return label;
+    }
+
+    function renderLoteRows(lotes, valuesByKey) {
+        if (!lotesRows) return;
+        lotesRows.innerHTML = '';
+
+        var normalizedLotes = normalizeLotes(lotes);
+        if (normalizedLotes.length === 0) {
+            normalizedLotes = ['General'];
+        }
+
+        normalizedLotes.forEach(function (loteName) {
+            var row = document.createElement('div');
+            row.className = 'status-loss-lote-row';
+
+            var rowTitle = document.createElement('div');
+            rowTitle.className = 'status-loss-lote-name';
+            rowTitle.textContent = loteName;
+            row.appendChild(rowTitle);
+
+            var hiddenLote = document.createElement('input');
+            hiddenLote.type = 'hidden';
+            hiddenLote.name = 'lotes_perdidos[]';
+            hiddenLote.value = loteName;
+            row.appendChild(hiddenLote);
+
+            var fieldsWrap = document.createElement('div');
+            fieldsWrap.className = 'status-loss-lote-fields';
+            var keyLote = loteName.toLowerCase();
+            var lotValues = valuesByKey && valuesByKey[keyLote] ? valuesByKey[keyLote] : {};
+
+            var ganadorInput = document.createElement('input');
+            ganadorInput.type = 'text';
+            ganadorInput.name = 'competidor_ganador_lote[]';
+            ganadorInput.required = true;
+            ganadorInput.value = lotValues.ganador ? String(lotValues.ganador) : '';
+
+            var importeInput = document.createElement('input');
+            importeInput.type = 'number';
+            importeInput.name = 'importe_perdida_lote[]';
+            importeInput.required = true;
+            importeInput.min = '0.01';
+            importeInput.step = '0.01';
+            importeInput.value = lotValues.importe ? String(lotValues.importe) : '';
+
+            fieldsWrap.appendChild(createLossField('Competidor ganador', ganadorInput));
+            fieldsWrap.appendChild(createLossField('Importe ganador (EUR)', importeInput));
+            row.appendChild(fieldsWrap);
+            lotesRows.appendChild(row);
+        });
+    }
+
+    function applyConfig(config) {
+        if (!config) return;
+        if (hiddenEstado) hiddenEstado.value = config.estado || '';
+        if (title) title.textContent = config.title || 'Completar perdida';
+        if (intro) intro.textContent = config.intro || 'Indica ganador e importe por cada lote afectado. El motivo es opcional.';
+        var normalizedLotes = normalizeLotes(config.lotes || []);
+        if (lotesWrap && lotesText) {
+            lotesText.textContent = normalizedLotes.join(', ');
+            if (normalizedLotes.length > 0) {
+                lotesWrap.classList.remove('is-hidden');
+            } else {
+                lotesWrap.classList.add('is-hidden');
+            }
+        }
+        renderLoteRows(normalizedLotes, config.values || {});
+    }
+
+    function openModal(config) {
+        applyConfig(config);
+        modal.style.display = 'flex';
+    }
+
+    function closeModal() {
+        modal.style.display = 'none';
+    }
+
+    triggers.forEach(function (trigger) {
+        trigger.addEventListener('click', function () {
+            var statusModal = document.getElementById('modal-cambiar-estado');
+            if (statusModal) {
+                statusModal.style.display = 'none';
+            }
+            openModal({
+                estado: trigger.getAttribute('data-estado') || '',
+                title: trigger.getAttribute('data-title') || '',
+                intro: trigger.getAttribute('data-intro') || '',
+                lotes: parseJsonData(trigger.getAttribute('data-lotes-json'), []),
+                values: {}
+            });
+        });
+    });
+
+    if (btnClose) btnClose.addEventListener('click', closeModal);
+    if (btnCancel) btnCancel.addEventListener('click', closeModal);
+
+    var closeByBackdropPress = false;
+    modal.addEventListener('mousedown', function (e) {
+        closeByBackdropPress = (e.target === modal);
+    });
+    modal.addEventListener('click', function (e) {
+        if (closeByBackdropPress && e.target === modal) {
+            closeModal();
+        }
+        closeByBackdropPress = false;
+    });
+
+    if (modal.getAttribute('data-open') === '1') {
+        openModal({
+            estado: modal.getAttribute('data-initial-state') || '',
+            title: modal.getAttribute('data-initial-title') || '',
+            intro: modal.getAttribute('data-initial-intro') || '',
+            lotes: parseJsonData(modal.getAttribute('data-initial-lotes-json'), []),
+            values: parseJsonData(modal.getAttribute('data-initial-values-json'), {})
+        });
+    }
 });
 
 // Modal "Nuevo albaran"
@@ -3112,16 +5068,21 @@ document.addEventListener('DOMContentLoaded', function () {
     activarTipo('presu');
     limpiarEtiquetaGastosExtra();
 
+    var closeByBackdropPress = false;
+    modal.addEventListener('mousedown', function (e) {
+        closeByBackdropPress = (e.target === modal);
+    });
     modal.addEventListener('click', function (e) {
-        if (e.target === modal) {
+        if (closeByBackdropPress && e.target === modal) {
             closeModal();
         }
+        closeByBackdropPress = false;
     });
 });
 
 // Modal "Vincular productos ERP"
 document.addEventListener('DOMContentLoaded', function () {
-    var btnOpen = document.getElementById('btn-vincular-productos');
+    var statusTriggers = Array.prototype.slice.call(document.querySelectorAll('.js-open-map-products-from-status'));
     var modal = document.getElementById('modal-vincular-productos');
     var btnClose = document.getElementById('modal-vincular-productos-close');
     var btnCancel = document.getElementById('modal-vincular-productos-cancel');
@@ -3135,13 +5096,26 @@ document.addEventListener('DOMContentLoaded', function () {
         modal.style.display = 'none';
     }
 
-    if (btnOpen) btnOpen.addEventListener('click', openModal);
+    statusTriggers.forEach(function (trigger) {
+        trigger.addEventListener('click', function () {
+            var statusModal = document.getElementById('modal-cambiar-estado');
+            if (statusModal) {
+                statusModal.style.display = 'none';
+            }
+            openModal();
+        });
+    });
     if (btnClose) btnClose.addEventListener('click', closeModal);
     if (btnCancel) btnCancel.addEventListener('click', closeModal);
+    var closeByBackdropPress = false;
+    modal.addEventListener('mousedown', function (e) {
+        closeByBackdropPress = (e.target === modal);
+    });
     modal.addEventListener('click', function (e) {
-        if (e.target === modal) {
+        if (closeByBackdropPress && e.target === modal) {
             closeModal();
         }
+        closeByBackdropPress = false;
     });
 
     if (modal.getAttribute('data-open') === '1') {
@@ -3195,7 +5169,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             timer = window.setTimeout(function () {
                 var xhr = new XMLHttpRequest();
-                xhr.open('GET', 'productos-search.php?q=' + encodeURIComponent(q), true);
+                xhr.open('GET', PRODUCTOS_SEARCH_URL + '?q=' + encodeURIComponent(q), true);
                 xhr.onreadystatechange = function () {
                     if (xhr.readyState !== 4) return;
                     if (xhr.status === 200) {
@@ -3223,10 +5197,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
 // Autocompletado de productos en "Nuevo concepto" (Presupuesto)
 document.addEventListener('DOMContentLoaded', function () {
-    var table = document.querySelector('.budget-lines-table-editable');
-    if (!table) return;
-    var tbody = table.querySelector('tbody');
-    if (!tbody) return;
+    var tables = Array.prototype.slice.call(document.querySelectorAll('.budget-lines-table-editable'));
+    if (tables.length === 0) return;
 
     function bindRowAutocomplete(row) {
         if (!row || row.getAttribute('data-budget-ac-bound') === '1') {
@@ -3328,7 +5300,7 @@ document.addEventListener('DOMContentLoaded', function () {
             var q = input.value.trim();
             hiddenId.value = '';
             if (timer) window.clearTimeout(timer);
-            if (q.length < 1) {
+            if (q.length < 2) {
                 clearBox();
                 return;
             }
@@ -3337,7 +5309,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 var currentRequestId = ++requestId;
                 renderInfoRow('Buscando...');
                 var xhr = new XMLHttpRequest();
-                xhr.open('GET', 'productos-search.php?q=' + encodeURIComponent(q) + '&limit=12', true);
+                xhr.open('GET', PRODUCTOS_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=12', true);
                 xhr.onreadystatechange = function () {
                     if (xhr.readyState !== 4) return;
                     if (currentRequestId !== requestId) return;
@@ -3349,7 +5321,7 @@ document.addEventListener('DOMContentLoaded', function () {
                             renderInfoRow('No se pudo procesar la busqueda');
                         }
                     } else {
-                        renderInfoRow('No se pudo cargar sugerencias');
+                        renderInfoRow('No se pudo cargar sugerencias (HTTP ' + xhr.status + ')');
                     }
                 };
                 xhr.send();
@@ -3404,22 +5376,28 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
 
-    Array.prototype.slice.call(tbody.querySelectorAll('.js-budget-new-row')).forEach(bindRowAutocomplete);
+    tables.forEach(function (table) {
+        var tbody = table.querySelector('tbody');
+        if (!tbody) return;
 
-    var observer = new MutationObserver(function (mutations) {
-        mutations.forEach(function (mutation) {
-            Array.prototype.slice.call(mutation.addedNodes).forEach(function (node) {
-                if (!node || node.nodeType !== 1) return;
-                if (node.classList && node.classList.contains('js-budget-new-row')) {
-                    bindRowAutocomplete(node);
-                }
+        Array.prototype.slice.call(tbody.querySelectorAll('.js-budget-new-row')).forEach(bindRowAutocomplete);
+
+        var observer = new MutationObserver(function (mutations) {
+            mutations.forEach(function (mutation) {
+                Array.prototype.slice.call(mutation.addedNodes).forEach(function (node) {
+                    if (!node || node.nodeType !== 1) return;
+                    if (node.classList && node.classList.contains('js-budget-new-row')) {
+                        bindRowAutocomplete(node);
+                    }
+                });
             });
         });
+        observer.observe(tbody, { childList: true });
     });
-    observer.observe(tbody, { childList: true });
 });
 </script>
 </html>
+
 
 
 

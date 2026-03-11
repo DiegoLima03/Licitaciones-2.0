@@ -10,14 +10,14 @@ final class AuthRepository extends BaseRepository
     private const TABLE_ROLE_PERMISSIONS = 'role_permissions';
 
     /**
-     * Obtiene un usuario por email (sin filtro de organization_id).
+     * Obtiene un usuario por email.
      *
      * @return array<string, mixed>|null
      */
     public function findByEmail(string $email): ?array
     {
         $sql = sprintf(
-            'SELECT id, email, password_hash, organization_id, role, full_name
+            'SELECT id, email, password_hash, role, full_name
              FROM %s
              WHERE email = :email
              LIMIT 1',
@@ -36,14 +36,14 @@ final class AuthRepository extends BaseRepository
     }
 
     /**
-     * Obtiene un usuario por ID dentro de la organización actual.
+     * Obtiene un usuario por ID.
      *
      * @return array<string, mixed>|null
      */
     public function findById(string $userId): ?array
     {
         $sql = sprintf(
-            'SELECT id, email, organization_id, role, full_name, password_hash
+            'SELECT id, email, role, full_name, password_hash
              FROM %s
              WHERE %s AND id = :id
              LIMIT 1',
@@ -85,7 +85,7 @@ final class AuthRepository extends BaseRepository
     }
 
     /**
-     * Crea un usuario dentro de la organización actual.
+     * Crea un usuario.
      */
     public function createUser(
         string $id,
@@ -95,8 +95,8 @@ final class AuthRepository extends BaseRepository
         ?string $fullName
     ): void {
         $sql = sprintf(
-            'INSERT INTO %s (id, email, password_hash, organization_id, role, full_name)
-             VALUES (:id, :email, :password_hash, :organization_id, :role, :full_name)',
+            'INSERT INTO %s (id, email, password_hash, role, full_name)
+             VALUES (:id, :email, :password_hash, :role, :full_name)',
             self::TABLE_PROFILES
         );
 
@@ -105,14 +105,13 @@ final class AuthRepository extends BaseRepository
             ':id' => $id,
             ':email' => $email,
             ':password_hash' => $passwordHash,
-            ':organization_id' => $this->organizationId,
             ':role' => $role,
             ':full_name' => $fullName !== null && trim($fullName) !== '' ? trim($fullName) : null,
         ]);
     }
 
     /**
-     * Lista usuarios de la organización actual.
+     * Lista usuarios.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -137,7 +136,7 @@ final class AuthRepository extends BaseRepository
     }
 
     /**
-     * Actualiza rol de un usuario de la organización actual.
+     * Actualiza rol de un usuario.
      */
     public function updateRole(string $userId, string $role): bool
     {
@@ -160,7 +159,7 @@ final class AuthRepository extends BaseRepository
     }
 
     /**
-     * Actualiza contraseña de un usuario de la organización actual.
+     * Actualiza contraseña de un usuario.
      */
     public function updatePassword(string $userId, string $passwordHash): bool
     {
@@ -183,7 +182,7 @@ final class AuthRepository extends BaseRepository
     }
 
     /**
-     * Elimina usuario de la organización actual.
+     * Elimina usuario.
      */
     public function deleteUser(string $userId): bool
     {

@@ -12,11 +12,6 @@ final class ExpensesRepository extends BaseRepository
     private const ESTADO_ADJUDICADA = 5;
     private const ESTADOS_PERMITEN_GASTOS = [self::ESTADO_ADJUDICADA];
 
-    public function __construct(string $organizationId)
-    {
-        parent::__construct($organizationId);
-    }
-
     /**
      * Crea un gasto extraordinario asociado a una licitación.
      *
@@ -49,7 +44,6 @@ final class ExpensesRepository extends BaseRepository
             'id' => $id,
             'id_licitacion' => $licitacionId,
             'id_usuario' => $userId,
-            'organization_id' => $this->organizationId,
             'tipo_gasto' => $tipoGasto,
             'importe' => $importe,
             'fecha' => $fecha,
@@ -256,13 +250,7 @@ final class ExpensesRepository extends BaseRepository
      */
     private function getLicitacionEstado(int $licitacionId): ?int
     {
-        $rls = str_replace(
-            'organization_id',
-            self::TABLE_LICITACIONES . '.organization_id',
-            $this->getRlsClause()
-        );
-
-        $where = $rls . ' AND ' . self::TABLE_LICITACIONES . '.id_licitacion = :id_licitacion';
+        $where = $this->getRlsClause() . ' AND ' . self::TABLE_LICITACIONES . '.id_licitacion = :id_licitacion';
         $params = $this->getRlsParams();
         $params[':id_licitacion'] = $licitacionId;
 
@@ -284,17 +272,11 @@ final class ExpensesRepository extends BaseRepository
     }
 
     /**
-     * Comprueba si existe una licitación para esta organización.
+     * Comprueba si existe una licitación.
      */
     private function licitacionExiste(int $licitacionId): bool
     {
-        $rls = str_replace(
-            'organization_id',
-            self::TABLE_LICITACIONES . '.organization_id',
-            $this->getRlsClause()
-        );
-
-        $where = $rls . ' AND ' . self::TABLE_LICITACIONES . '.id_licitacion = :id_licitacion';
+        $where = $this->getRlsClause() . ' AND ' . self::TABLE_LICITACIONES . '.id_licitacion = :id_licitacion';
         $params = $this->getRlsParams();
         $params[':id_licitacion'] = $licitacionId;
 
@@ -323,7 +305,6 @@ final class ExpensesRepository extends BaseRepository
             'id' => (string)($row['id'] ?? ''),
             'id_licitacion' => isset($row['id_licitacion']) ? (int)$row['id_licitacion'] : 0,
             'id_usuario' => (string)($row['id_usuario'] ?? ''),
-            'organization_id' => (string)($row['organization_id'] ?? $this->organizationId),
             'tipo_gasto' => (string)($row['tipo_gasto'] ?? ''),
             'importe' => isset($row['importe']) ? (float)$row['importe'] : 0.0,
             'fecha' => (string)($row['fecha'] ?? ''),

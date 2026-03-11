@@ -2,7 +2,7 @@
 
 declare(strict_types=1);
 
-// Front Controller básico para la API PHP.
+// Front Controller bÃ¡sico para la API PHP.
 // Todas las peticiones entran por este archivo.
 
 // Autoload/controladores simples (sin Composer, usamos require_once directos).
@@ -20,7 +20,7 @@ require_once __DIR__ . '/../src/Controllers/ReferencePricesController.php';
 require_once __DIR__ . '/../src/Middleware/AuthMiddleware.php';
 
 /**
- * Envía respuesta JSON estándar.
+ * EnvÃ­a respuesta JSON estÃ¡ndar.
  *
  * @param mixed $data
  */
@@ -80,7 +80,7 @@ try {
     $apiPath = substr($path, $apiPos + 4) ?: '/';
 
     // ---------------------------
-    // AUTH (público: solo /auth/login)
+    // AUTH (pÃºblico: solo /auth/login)
     // ---------------------------
     if ($apiPath === '/auth/login' && $method === 'POST') {
         $controller = new AuthController();
@@ -88,9 +88,8 @@ try {
         exit;
     }
 
-    // Para el resto de rutas, requerimos autenticación.
+    // Para el resto de rutas, requerimos autenticaciÃ³n.
     $tokenPayload = AuthMiddleware::authenticate();
-    $orgId = (string)($tokenPayload['organization_id'] ?? $tokenPayload['org_id'] ?? '');
     $userId = (string)($tokenPayload['user_id'] ?? $tokenPayload['sub'] ?? '');
     $userRole = (string)($tokenPayload['role'] ?? 'member_licitaciones');
 
@@ -111,20 +110,20 @@ try {
 
     if ($apiPath === '/auth/users' && $method === 'GET') {
         $controller = new AuthController();
-        $controller->listUsers($orgId, $userRole);
+        $controller->listUsers($userRole);
         exit;
     }
 
     if ($apiPath === '/auth/users' && $method === 'POST') {
         $controller = new AuthController();
-        $controller->createUser($orgId, $userRole);
+        $controller->createUser($userRole);
         exit;
     }
 
     if (preg_match('#^/auth/users/([^/]+)/password$#', $apiPath, $m) && $method === 'PATCH') {
         $targetUserId = urldecode($m[1]);
         $controller = new AuthController();
-        $controller->updateUserPassword($orgId, $userRole, $targetUserId);
+        $controller->updateUserPassword($userRole, $targetUserId);
         exit;
     }
 
@@ -132,9 +131,9 @@ try {
         $targetUserId = urldecode($m[1]);
         $controller = new AuthController();
         if ($method === 'PATCH') {
-            $controller->updateUserRole($orgId, $userRole, $targetUserId);
+            $controller->updateUserRole($userRole, $targetUserId);
         } elseif ($method === 'DELETE') {
-            $controller->destroyUser($orgId, $userRole, $userId, $targetUserId);
+            $controller->destroyUser($userRole, $userId, $targetUserId);
         } else {
             throw new RuntimeException('Ruta no encontrada.', 404);
         }
@@ -145,39 +144,39 @@ try {
     // ANALYTICS
     // ---------------------------
     if ($apiPath === '/analytics/kpis' && $method === 'GET') {
-        $controller = new AnalyticsController($orgId);
+        $controller = new AnalyticsController();
         $controller->getKpis();
         exit;
     }
 
     if (preg_match('#^/analytics/material-trends/(.+)$#', $apiPath, $m) && $method === 'GET') {
         $materialName = urldecode($m[1]);
-        $controller = new AnalyticsController($orgId);
+        $controller = new AnalyticsController();
         $controller->getMaterialTrends($materialName);
         exit;
     }
 
     if ($apiPath === '/analytics/risk-adjusted-pipeline' && $method === 'GET') {
-        $controller = new AnalyticsController($orgId);
+        $controller = new AnalyticsController();
         $controller->getRiskAdjustedPipeline();
         exit;
     }
 
     if ($apiPath === '/analytics/sweet-spots' && $method === 'GET') {
-        $controller = new AnalyticsController($orgId);
+        $controller = new AnalyticsController();
         $controller->getSweetSpots();
         exit;
     }
 
     if ($apiPath === '/analytics/price-deviation-check' && $method === 'GET') {
-        $controller = new AnalyticsController($orgId);
+        $controller = new AnalyticsController();
         $controller->getPriceDeviationCheck();
         exit;
     }
 
     if (preg_match('#^/analytics/product/(\d+)$#', $apiPath, $m) && $method === 'GET') {
         $productId = (int)$m[1];
-        $controller = new AnalyticsController($orgId);
+        $controller = new AnalyticsController();
         $controller->getProductAnalytics($productId);
         exit;
     }
@@ -254,7 +253,7 @@ try {
     // PRODUCTS (productos)
     // ---------------------------
     if ($apiPath === '/productos/search' && $method === 'GET') {
-        $controller = new ProductsController($orgId);
+        $controller = new ProductsController();
         $controller->index();
         exit;
     }
@@ -263,13 +262,13 @@ try {
     // PRECIOS REFERENCIA
     // ---------------------------
     if ($apiPath === '/precios-referencia' && $method === 'GET') {
-        $controller = new ReferencePricesController($orgId);
+        $controller = new ReferencePricesController();
         $controller->index();
         exit;
     }
 
     if ($apiPath === '/precios-referencia' && $method === 'POST') {
-        $controller = new ReferencePricesController($orgId);
+        $controller = new ReferencePricesController();
         $controller->store();
         exit;
     }
@@ -278,48 +277,48 @@ try {
     // DELIVERIES (entregas)
     // ---------------------------
     if ($apiPath === '/deliveries' && $method === 'GET') {
-        $controller = new DeliveriesController($orgId);
+        $controller = new DeliveriesController();
         $controller->index();
         exit;
     }
 
     if ($apiPath === '/deliveries' && $method === 'POST') {
-        $controller = new DeliveriesController($orgId);
+        $controller = new DeliveriesController();
         $controller->store();
         exit;
     }
 
     if (preg_match('#^/deliveries/lines/(\d+)$#', $apiPath, $m) && $method === 'PATCH') {
         $idReal = (int)$m[1];
-        $controller = new DeliveriesController($orgId);
+        $controller = new DeliveriesController();
         $controller->updateLine($idReal);
         exit;
     }
 
     if (preg_match('#^/deliveries/(\d+)$#', $apiPath, $m) && $method === 'DELETE') {
         $deliveryId = (int)$m[1];
-        $controller = new DeliveriesController($orgId);
+        $controller = new DeliveriesController();
         $controller->destroy($deliveryId);
         exit;
     }
 
     // ---------------------------
-    // CATÁLOGOS (estados, tipos, tipos-gasto)
+    // CATÃLOGOS (estados, tipos, tipos-gasto)
     // ---------------------------
     if ($apiPath === '/estados' && $method === 'GET') {
-        $controller = new CatalogsController($orgId);
+        $controller = new CatalogsController();
         $controller->getEstados();
         exit;
     }
 
     if ($apiPath === '/tipos' && $method === 'GET') {
-        $controller = new CatalogsController($orgId);
+        $controller = new CatalogsController();
         $controller->getTipos();
         exit;
     }
 
     if ($apiPath === '/tipos-gasto' && $method === 'GET') {
-        $controller = new CatalogsController($orgId);
+        $controller = new CatalogsController();
         $controller->getTiposGasto();
         exit;
     }
@@ -328,50 +327,50 @@ try {
     // EXPENSES (gastos extraordinarios)
     // ---------------------------
     if ($apiPath === '/expenses/tipos' && $method === 'GET') {
-        $controller = new ExpensesController($orgId, $userId, $userRole);
+        $controller = new ExpensesController($userId, $userRole);
         $controller->listExpenseTypes();
         exit;
     }
 
     if ($apiPath === '/expenses' && $method === 'POST') {
-        $controller = new ExpensesController($orgId, $userId, $userRole);
+        $controller = new ExpensesController($userId, $userRole);
         $controller->store();
         exit;
     }
 
     if (preg_match('#^/expenses/licitacion/(\d+)$#', $apiPath, $m) && $method === 'GET') {
         $licitacionId = (int)$m[1];
-        $controller = new ExpensesController($orgId, $userId, $userRole);
+        $controller = new ExpensesController($userId, $userRole);
         $controller->listByLicitacion($licitacionId);
         exit;
     }
 
     if (preg_match('#^/expenses/([0-9a-fA-F-]+)/status$#', $apiPath, $m) && $method === 'PATCH') {
         $expenseId = $m[1];
-        $controller = new ExpensesController($orgId, $userId, $userRole);
+        $controller = new ExpensesController($userId, $userRole);
         $controller->updateStatus($expenseId);
         exit;
     }
 
     if (preg_match('#^/expenses/([0-9a-fA-F-]+)$#', $apiPath, $m) && $method === 'DELETE') {
         $expenseId = $m[1];
-        $controller = new ExpensesController($orgId, $userId, $userRole);
+        $controller = new ExpensesController($userId, $userRole);
         $controller->destroy($expenseId);
         exit;
     }
 
     // ---------------------------
-    // SEARCH (histórico y precios de referencia)
+    // SEARCH (histÃ³rico y precios de referencia)
     // ---------------------------
     if (($apiPath === '/search' || $apiPath === '/search/products') && $method === 'GET') {
-        $controller = new SearchController($orgId);
+        $controller = new SearchController();
         $controller->searchProducts();
         exit;
     }
 
     if (preg_match('#^/reference-prices/(\d+)$#', $apiPath, $m) && $method === 'GET') {
         $productId = (int)$m[1];
-        $controller = new SearchController($orgId);
+        $controller = new SearchController();
         $controller->getReferencePrice($productId);
         exit;
     }
@@ -380,20 +379,20 @@ try {
     // IMPORT
     // ---------------------------
     if ($apiPath === '/import/precios-referencia' && $method === 'POST') {
-        $controller = new ImportController($orgId);
+        $controller = new ImportController();
         $controller->importPreciosReferencia();
         exit;
     }
 
     if (preg_match('#^/import/excel/(\d+)$#', $apiPath, $m) && $method === 'POST') {
         $licitacionId = (int)$m[1];
-        $controller = new ImportController($orgId);
+        $controller = new ImportController();
         $controller->importExcel($licitacionId);
         exit;
     }
 
     if ($apiPath === '/import/upload' && $method === 'POST') {
-        $controller = new ImportController($orgId);
+        $controller = new ImportController();
         $controller->upload();
         exit;
     }
@@ -402,25 +401,25 @@ try {
     // PERMISSIONS
     // ---------------------------
     if ($apiPath === '/permissions/role-matrix' && $method === 'GET') {
-        $controller = new PermissionsController($orgId);
+        $controller = new PermissionsController();
         $controller->getRoleMatrix();
         exit;
     }
 
     if ($apiPath === '/permissions/role-matrix' && $method === 'PUT') {
-        $controller = new PermissionsController($orgId);
-        $controller->updateRoleMatrix();
+        $controller = new PermissionsController();
+        $controller->updateRoleMatrix($userRole);
         exit;
     }
 
     if (preg_match('#^/permissions/role/(.+)$#', $apiPath, $m) && $method === 'GET') {
         $role = urldecode($m[1]);
-        $controller = new PermissionsController($orgId);
+        $controller = new PermissionsController();
         $controller->getPermissionsForRole($role);
         exit;
     }
 
-    // Si hemos llegado aquí, la ruta no coincide con nada conocido.
+    // Si hemos llegado aquÃ­, la ruta no coincide con nada conocido.
     throw new RuntimeException('Ruta no encontrada.', 404);
 } catch (Throwable $e) {
     $code = $e->getCode();
@@ -432,4 +431,6 @@ try {
         'details' => $e->getMessage(),
     ]);
 }
+
+
 

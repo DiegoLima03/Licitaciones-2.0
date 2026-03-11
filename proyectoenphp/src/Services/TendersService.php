@@ -76,7 +76,7 @@ final class TendersService
     }
 
     /**
-     * Licitaciones AM/SDA adjudicadas para usar como padre al crear CONTRATO_BASADO.
+     * Licitaciones AM/SDA adjudicadas para usar como padre al crear licitaciones derivadas.
      *
      * @return array<int, array<string, mixed>>
      */
@@ -105,13 +105,62 @@ final class TendersService
             );
         }
 
+        $tipoProcedimiento = isset($payload['tipo_procedimiento']) && $payload['tipo_procedimiento'] !== ''
+            ? mb_strtoupper(trim((string)$payload['tipo_procedimiento']), 'UTF-8')
+            : 'ORDINARIO';
+
+        $tiposPermitidos = ['ORDINARIO', 'ACUERDO_MARCO', 'SDA', 'CONTRATO_BASADO', 'ESPECIFICO_SDA'];
+        if (!in_array($tipoProcedimiento, $tiposPermitidos, true)) {
+            throw new \InvalidArgumentException('Tipo de procedimiento no valido.');
+        }
+
         $idLicitacionPadre = $payload['id_licitacion_padre'] ?? null;
-        if ($idLicitacionPadre !== null && $idLicitacionPadre !== '') {
-            $tipoProcedimiento = 'CONTRATO_BASADO';
+        $hasParent = $idLicitacionPadre !== null && (string)$idLicitacionPadre !== '';
+        $tiposDerivados = ['CONTRATO_BASADO', 'ESPECIFICO_SDA'];
+        $requierePadre = in_array($tipoProcedimiento, $tiposDerivados, true);
+
+        if ($requierePadre && !$hasParent) {
+            $msg = $tipoProcedimiento === 'ESPECIFICO_SDA'
+                ? 'Debes indicar una licitacion padre SDA para especifico SDA.'
+                : 'Debes indicar una licitacion padre AM para contrato basado.';
+            throw new \InvalidArgumentException($msg);
+        }
+
+        if (!$requierePadre && $hasParent) {
+            throw new \InvalidArgumentException(
+                'Solo los procedimientos derivados (contrato basado/especifico SDA) admiten licitacion padre.'
+            );
+        }
+
+        if ($hasParent) {
+            if (!is_numeric((string)$idLicitacionPadre) || (int)$idLicitacionPadre <= 0) {
+                throw new \InvalidArgumentException('El id_licitacion_padre es invalido.');
+            }
+
+            $idLicitacionPadre = (int)$idLicitacionPadre;
+            $padre = $this->tendersRepository->getById($idLicitacionPadre);
+            if ($padre === null) {
+                throw new \InvalidArgumentException('La licitacion padre indicada no existe.');
+            }
+
+            $tipoPadre = mb_strtoupper(trim((string)($padre['tipo_procedimiento'] ?? '')), 'UTF-8');
+            $estadoPadre = (int)($padre['id_estado'] ?? 0);
+            if ($estadoPadre !== self::ESTADO_ADJUDICADA) {
+                throw new \InvalidArgumentException('La licitacion padre debe estar en estado Adjudicada.');
+            }
+
+            if ($tipoProcedimiento === 'CONTRATO_BASADO' && $tipoPadre !== 'ACUERDO_MARCO') {
+                throw new \InvalidArgumentException(
+                    'Contrato basado solo puede colgar de un Acuerdo Marco adjudicado.'
+                );
+            }
+            if ($tipoProcedimiento === 'ESPECIFICO_SDA' && $tipoPadre !== 'SDA') {
+                throw new \InvalidArgumentException(
+                    'Especifico SDA solo puede colgar de un SDA adjudicado.'
+                );
+            }
         } else {
-            $tipoProcedimiento = isset($payload['tipo_procedimiento']) && $payload['tipo_procedimiento'] !== ''
-                ? (string)$payload['tipo_procedimiento']
-                : 'ORDINARIO';
+            $idLicitacionPadre = null;
         }
 
         $row = [
@@ -138,7 +187,7 @@ final class TendersService
             'fecha_adjudicacion' => $fechaAdjudicacion ?: null,
             'fecha_finalizacion' => $payload['fecha_finalizacion'] ?? null,
             'tipo_procedimiento' => $tipoProcedimiento,
-            'id_licitacion_padre' => $idLicitacionPadre !== null ? (int)$idLicitacionPadre : null,
+            'id_licitacion_padre' => $idLicitacionPadre,
         ];
 
         return $this->tendersRepository->create($row);
@@ -262,7 +311,34 @@ final class TendersService
             throw new \InvalidArgumentException(sprintf('Estado %d no válido.', $nuevoId));
         }
 
+        $transicionesPermitidas = [];
+        if ($idEstadoActual === 1 || $idEstadoActual === self::ESTADO_EN_ANALISIS) {
+            $transicionesPermitidas = [
+                self::ESTADO_PRESENTADA => 'Presentada',
+                self::ESTADO_DESCARTADA => 'Descartada',
+            ];
+        } elseif ($idEstadoActual === self::ESTADO_PRESENTADA) {
+            $transicionesPermitidas = [
+                self::ESTADO_ADJUDICADA => 'Adjudicada',
+                self::ESTADO_NO_ADJUDICADA => 'No adjudicada',
+            ];
+        } elseif ($idEstadoActual === self::ESTADO_ADJUDICADA) {
+            $transicionesPermitidas = [
+                self::ESTADO_TERMINADA => 'Terminada',
+            ];
+        }
+
+        if (!array_key_exists($nuevoId, $transicionesPermitidas)) {
+            throw new \InvalidArgumentException('TransiciÃ³n de estado no permitida desde el estado actual.');
+        }
+
         $updateData = ['id_estado' => $nuevoId];
+        $lotesConfig = $this->normalizeLotesConfig($licitacion['lotes_config'] ?? null);
+        $lostLotes = $this->extractLostLotes($lotesConfig);
+        $allLotesLost = $lotesConfig !== [] && count($lostLotes) === count($lotesConfig);
+        $motivoPerdida = isset($payload['motivo_perdida']) ? trim((string)$payload['motivo_perdida']) : '';
+        $competidorGanador = isset($payload['competidor_ganador']) ? trim((string)$payload['competidor_ganador']) : '';
+        $importePerdida = $this->parsePositiveAmount($payload['importe_perdida'] ?? null);
 
         if ($nuevoId === self::ESTADO_ADJUDICADA && isset($payload['importe_adjudicacion'])) {
             $importeAdjudicacion = (float)$payload['importe_adjudicacion'];
@@ -273,8 +349,33 @@ final class TendersService
             $updateData['fecha_adjudicacion'] = (string)$payload['fecha_adjudicacion'];
         }
 
-        if ($nuevoId === self::ESTADO_PRESENTADA && empty($licitacion['fecha_presentacion'])) {
-            $updateData['fecha_presentacion'] = (new \DateTimeImmutable('today'))->format('Y-m-d');
+        if ($nuevoId === self::ESTADO_PRESENTADA) {
+            $detallePresentacion = $this->tendersRepository->getTenderWithDetails($tenderId);
+            $partidasPresentacion = is_array($detallePresentacion['partidas'] ?? null)
+                ? $detallePresentacion['partidas']
+                : [];
+
+            $tienePartidasActivas = false;
+            foreach ($partidasPresentacion as $p) {
+                if (!is_array($p)) {
+                    continue;
+                }
+                $activo = array_key_exists('activo', $p) ? (bool)$p['activo'] : true;
+                if ($activo) {
+                    $tienePartidasActivas = true;
+                    break;
+                }
+            }
+
+            if (!$tienePartidasActivas) {
+                throw new \InvalidArgumentException(
+                    'No puedes pasar a Presentada sin al menos una linea presupuestada.'
+                );
+            }
+
+            if (empty($licitacion['fecha_presentacion'])) {
+                $updateData['fecha_presentacion'] = (new \DateTimeImmutable('today'))->format('Y-m-d');
+            }
         }
 
         if ($nuevoId === self::ESTADO_DESCARTADA && !empty($payload['motivo_descarte'])) {
@@ -284,45 +385,48 @@ final class TendersService
             );
         }
 
-        if (
-            $nuevoId === self::ESTADO_NO_ADJUDICADA
-            && (!empty($payload['motivo_perdida']) || !empty($payload['competidor_ganador']))
-        ) {
-            $desc = (string)($licitacion['descripcion'] ?? '');
-            $partes = [];
-            if (!empty($payload['motivo_perdida'])) {
-                $partes[] = 'Motivo: ' . (string)$payload['motivo_perdida'];
+        if ($nuevoId === self::ESTADO_NO_ADJUDICADA) {
+            if ($competidorGanador === '' || $importePerdida === null) {
+                throw new \InvalidArgumentException(
+                    'Para marcar la licitacion como perdida debes indicar ganador e importe.'
+                );
             }
-            if (!empty($payload['competidor_ganador'])) {
-                $partes[] = 'Ganador: ' . (string)$payload['competidor_ganador'];
+
+            if ($lotesConfig !== []) {
+                $updateData['lotes_config'] = $this->markAllLotesAsLost($lotesConfig);
             }
-            $updateData['descripcion'] = trim(
-                $desc . "\n[PERDIDA]: " . implode(' | ', $partes)
+
+            $updateData['descripcion'] = $this->appendLossDescription(
+                (string)($licitacion['descripcion'] ?? ''),
+                'PERDIDA TOTAL',
+                $motivoPerdida,
+                $competidorGanador,
+                $importePerdida,
+                array_map(
+                    static fn (array $item): string => (string)$item['nombre'],
+                    $lotesConfig
+                )
             );
         }
 
         // Validación diferida ERP: solo al pasar a ADJUDICADA.
         if ($nuevoId === self::ESTADO_ADJUDICADA) {
+            if ($allLotesLost) {
+                throw new \InvalidArgumentException(
+                    'No puedes marcar Adjudicada si todos los lotes estan perdidos. Usa Marcar como Perdida.'
+                );
+            }
+
             $detalle = $this->tendersRepository->getTenderWithDetails($tenderId);
             $partidas = $detalle['partidas'] ?? [];
-
-            $lotesConfig = $licitacion['lotes_config'] ?? [];
-            $lotesGanados = [];
-            if (is_array($lotesConfig)) {
-                foreach ($lotesConfig as $l) {
-                    if (is_array($l) && !empty($l['ganado']) && isset($l['nombre'])) {
-                        $lotesGanados[] = $l['nombre'];
-                    }
-                }
-            }
-            $tieneLotes = !empty($lotesConfig);
 
             $partidasActivas = [];
             foreach ($partidas as $p) {
                 if (!is_array($p)) {
                     continue;
                 }
-                if (!empty($p['activo']) && (!$tieneLotes || in_array($p['lote'] ?? null, $lotesGanados, true))) {
+                $activo = array_key_exists('activo', $p) ? (bool)$p['activo'] : true;
+                if ($activo) {
                     $partidasActivas[] = $p;
                 }
             }
@@ -340,15 +444,36 @@ final class TendersService
                     }
                 }
                 error_log(
-                    '[TenderService] Adjudicación rechazada: partidas sin id_producto (ERP Belneo) en lotes ganados. id_detalle='
+                    '[TenderService] Adjudicacion rechazada: partidas sin id_producto (ERP Belneo) en lineas activas. id_detalle='
                     . json_encode($idsDetalle)
                 );
 
                 throw new \InvalidArgumentException(
-                    'Para adjudicar, todas las líneas de presupuesto de los lotes ganados deben tener un producto de Belneo (id_producto). '
-                    . 'Partidas con solo nombre libre no son válidas. Corrija las partidas de los lotes ganados y vuelva a intentar.'
+                    'Para adjudicar, todas las lineas de presupuesto activas deben tener un producto de Belneo (id_producto). '
+                    . 'Partidas con solo nombre libre no son validas. Corrija las partidas activas y vuelva a intentar.'
                 );
             }
+
+            if ($lostLotes !== []) {
+                if ($competidorGanador === '' || $importePerdida === null) {
+                    throw new \InvalidArgumentException(
+                        'Para adjudicar con lotes perdidos debes indicar ganador e importe.'
+                    );
+                }
+
+                $updateData['descripcion'] = $this->appendLossDescription(
+                    (string)($licitacion['descripcion'] ?? ''),
+                    'LOTES PERDIDOS EN ADJUDICACION',
+                    $motivoPerdida,
+                    $competidorGanador,
+                    $importePerdida,
+                    $lostLotes
+                );
+            }
+        }
+
+        if ($nuevoId === self::ESTADO_TERMINADA) {
+            $this->assertCanFinalizeTender($licitacion, $tenderId);
         }
 
         $result = $this->tendersRepository->updateTenderWithStateCheck(
@@ -369,9 +494,175 @@ final class TendersService
     /**
      * Añade una partida a la licitación con validaciones de estado.
      *
-     * @param array<string, mixed> $payload
-     * @return array<string, mixed>
+     * @param array<string, mixed> $licitacion
      */
+    private function assertCanFinalizeTender(array $licitacion, int $tenderId): void
+    {
+        $detalle = $this->tendersRepository->getTenderWithDetails($tenderId);
+        $partidas = is_array($detalle['partidas'] ?? null)
+            ? $detalle['partidas']
+            : [];
+        $lotesConfig = $this->normalizeLotesConfig(
+            $licitacion['lotes_config'] ?? ($detalle['lotes_config'] ?? null)
+        );
+        $filtrarPorLotesGanados = $lotesConfig !== [];
+
+        /** @var array<string, bool> $lotesGanadosSet */
+        $lotesGanadosSet = [];
+        if ($filtrarPorLotesGanados) {
+            foreach ($lotesConfig as $item) {
+                $nombre = isset($item['nombre']) ? trim((string)$item['nombre']) : '';
+                if ($nombre === '' || empty($item['ganado'])) {
+                    continue;
+                }
+                $lotesGanadosSet[mb_strtolower($nombre, 'UTF-8')] = true;
+            }
+        }
+
+        /** @var array<int, float> $presupuestadoPorDetalle */
+        $presupuestadoPorDetalle = [];
+        foreach ($partidas as $p) {
+            if (!is_array($p)) {
+                continue;
+            }
+
+            $activo = array_key_exists('activo', $p) ? (bool)$p['activo'] : true;
+            if (!$activo) {
+                continue;
+            }
+
+            $idDetalle = isset($p['id_detalle']) ? (int)$p['id_detalle'] : 0;
+            if ($idDetalle <= 0) {
+                continue;
+            }
+
+            $lote = isset($p['lote']) ? trim((string)$p['lote']) : '';
+            if ($lote === '') {
+                $lote = 'General';
+            }
+            if ($filtrarPorLotesGanados) {
+                $loteKey = mb_strtolower($lote, 'UTF-8');
+                if (!isset($lotesGanadosSet[$loteKey])) {
+                    continue;
+                }
+            }
+
+            $unidades = isset($p['unidades']) ? (float)$p['unidades'] : 0.0;
+            if ($unidades <= 0.0) {
+                continue;
+            }
+
+            if (!isset($presupuestadoPorDetalle[$idDetalle])) {
+                $presupuestadoPorDetalle[$idDetalle] = 0.0;
+            }
+            $presupuestadoPorDetalle[$idDetalle] += $unidades;
+        }
+
+        $lineas = $this->listExecutionLinesForFinalization(
+            $tenderId,
+            array_keys($presupuestadoPorDetalle)
+        );
+        if ($lineas === []) {
+            throw new \InvalidArgumentException(
+                'No puedes finalizar la licitacion sin lineas de entrega registradas.'
+            );
+        }
+
+        /** @var array<int, float> $entregadoPorDetalle */
+        $entregadoPorDetalle = [];
+        $lineasConEstadoPendiente = 0;
+        $lineasSinCobro = 0;
+        $allowedEstados = [
+            'ENTREGADO' => true,
+            'FACTURADO' => true,
+        ];
+
+        foreach ($lineas as $lin) {
+            if (!is_array($lin)) {
+                continue;
+            }
+
+            $idDetalle = isset($lin['id_detalle']) ? (int)$lin['id_detalle'] : 0;
+            if ($idDetalle <= 0) {
+                continue;
+            }
+
+            $cantidad = isset($lin['cantidad']) ? (float)$lin['cantidad'] : 0.0;
+            if ($cantidad > 0.0) {
+                if (!isset($entregadoPorDetalle[$idDetalle])) {
+                    $entregadoPorDetalle[$idDetalle] = 0.0;
+                }
+                $entregadoPorDetalle[$idDetalle] += $cantidad;
+            }
+
+            $estadoLinea = mb_strtoupper(trim((string)($lin['estado'] ?? '')), 'UTF-8');
+            if (!isset($allowedEstados[$estadoLinea])) {
+                $lineasConEstadoPendiente++;
+            }
+
+            $cobradoRaw = $lin['cobrado'] ?? 0;
+            $isCobrado = $cobradoRaw === true
+                || $cobradoRaw === 1
+                || $cobradoRaw === '1';
+            if (!$isCobrado) {
+                $lineasSinCobro++;
+            }
+        }
+
+        $qtyEpsilon = 0.0001;
+        foreach ($presupuestadoPorDetalle as $idDetalle => $presupuestado) {
+            $entregado = (float)($entregadoPorDetalle[$idDetalle] ?? 0.0);
+            if (($presupuestado - $entregado) > $qtyEpsilon) {
+                throw new \InvalidArgumentException(
+                    'No puedes finalizar la licitacion: quedan lineas pendientes de entrega.'
+                );
+            }
+        }
+
+        if ($lineasConEstadoPendiente > 0 || $lineasSinCobro > 0) {
+            throw new \InvalidArgumentException(
+                'No puedes finalizar la licitacion: todas las lineas deben estar entregadas/facturadas y cobradas.'
+            );
+        }
+    }
+
+    /**
+     * @param array<int, int> $idDetalles
+     * @return array<int, array<string, mixed>>
+     */
+    private function listExecutionLinesForFinalization(int $tenderId, array $idDetalles): array
+    {
+        $sql = 'SELECT id_detalle, cantidad, estado, cobrado
+                FROM tbl_licitaciones_real
+                WHERE id_licitacion = :id_licitacion
+                  AND id_tipo_gasto IS NULL
+                  AND id_detalle IS NOT NULL';
+        $params = [
+            ':id_licitacion' => $tenderId,
+        ];
+
+        $idDetalles = array_values(array_unique(array_filter(
+            $idDetalles,
+            static fn (int $id): bool => $id > 0
+        )));
+        if ($idDetalles !== []) {
+            $placeholders = [];
+            foreach ($idDetalles as $idx => $idDetalle) {
+                $ph = ':id_det_' . $idx;
+                $placeholders[] = $ph;
+                $params[$ph] = $idDetalle;
+            }
+            $sql .= ' AND id_detalle IN (' . implode(', ', $placeholders) . ')';
+        }
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+
+        /** @var array<int, array<string, mixed>> $rows */
+        $rows = $stmt->fetchAll() ?: [];
+        return $rows;
+    }
+
     public function addPartida(int $tenderId, array $payload): array
     {
         if ($this->tendersRepository->getById($tenderId) === null) {
@@ -501,6 +792,17 @@ final class TendersService
      */
     private function normalizeLotesConfig($lotes): array
     {
+        if (is_string($lotes) && trim($lotes) !== '') {
+            try {
+                $decoded = json_decode($lotes, true, 512, JSON_THROW_ON_ERROR);
+                if (is_array($decoded)) {
+                    $lotes = $decoded;
+                }
+            } catch (\Throwable) {
+                return [];
+            }
+        }
+
         if (!is_array($lotes) || $lotes === []) {
             return [];
         }
@@ -519,6 +821,97 @@ final class TendersService
         }
 
         return $out;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, string>
+     */
+    private function extractLostLotes(array $items): array
+    {
+        $out = [];
+        foreach ($items as $item) {
+            $nombre = isset($item['nombre']) ? trim((string)$item['nombre']) : '';
+            if ($nombre === '' || !empty($item['ganado'])) {
+                continue;
+            }
+            $out[] = $nombre;
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<int, array<string, mixed>> $items
+     * @return array<int, array<string, mixed>>
+     */
+    private function markAllLotesAsLost(array $items): array
+    {
+        $out = [];
+        foreach ($items as $item) {
+            $nombre = isset($item['nombre']) ? trim((string)$item['nombre']) : '';
+            if ($nombre === '') {
+                continue;
+            }
+            $out[] = [
+                'nombre' => $nombre,
+                'ganado' => false,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param mixed $raw
+     */
+    private function parsePositiveAmount($raw): ?float
+    {
+        if ($raw === null) {
+            return null;
+        }
+
+        $txt = trim((string)$raw);
+        if ($txt === '') {
+            return null;
+        }
+
+        $normalized = str_replace(',', '.', $txt);
+        if (!is_numeric($normalized)) {
+            return null;
+        }
+
+        $amount = (float)$normalized;
+        return $amount > 0.0 ? $amount : null;
+    }
+
+    /**
+     * @param array<int, string> $lostLotes
+     */
+    private function appendLossDescription(
+        string $currentDescription,
+        string $tag,
+        string $motivo,
+        string $competidorGanador,
+        float $importeGanador,
+        array $lostLotes = []
+    ): string {
+        $parts = [];
+        if ($lostLotes !== []) {
+            $parts[] = 'Lotes: ' . implode(', ', $lostLotes);
+        }
+        if ($motivo !== '') {
+            $parts[] = 'Motivo: ' . $motivo;
+        }
+        $parts[] = 'Ganador: ' . $competidorGanador;
+        $parts[] = 'Importe ganador: ' . number_format($importeGanador, 2, ',', '.') . ' EUR';
+
+        $block = '[' . $tag . ']: ' . implode(' | ', $parts);
+        $currentDescription = trim($currentDescription);
+
+        return $currentDescription === ''
+            ? $block
+            : rtrim($currentDescription) . "\n" . $block;
     }
 }
 

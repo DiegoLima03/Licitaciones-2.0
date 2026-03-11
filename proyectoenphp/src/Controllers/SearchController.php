@@ -8,9 +8,9 @@ final class SearchController
 {
     private SearchRepository $repository;
 
-    public function __construct(string $organizationId)
+    public function __construct()
     {
-        $this->repository = new SearchRepository($organizationId);
+        $this->repository = new SearchRepository();
     }
 
     /**

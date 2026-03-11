@@ -8,11 +8,9 @@ final class CatalogsController
 {
     private CatalogsRepository $repository;
 
-    public function __construct(string $organizationId)
+    public function __construct()
     {
-        // Aunque los catálogos actuales son globales, mantenemos organizationId
-        // por si en el futuro alguna tabla de catálogo pasa a ser multi-tenant.
-        $this->repository = new CatalogsRepository($organizationId);
+        $this->repository = new CatalogsRepository();
     }
 
     /**
@@ -33,7 +31,7 @@ final class CatalogsController
 
     /**
      * GET /tipos
-     * Lista todos los tipos de licitación.
+     * Lista todos los tipos de licitaciÃ³n.
      */
     public function getTipos(): void
     {
@@ -64,7 +62,7 @@ final class CatalogsController
     }
 
     /**
-     * Envía una respuesta JSON estándar.
+     * EnvÃ­a una respuesta JSON estÃ¡ndar.
      *
      * @param mixed $data
      */
@@ -81,7 +79,7 @@ final class CatalogsController
     }
 
     /**
-     * Envía una respuesta JSON de error incluyendo, opcionalmente, detalles internos.
+     * EnvÃ­a una respuesta JSON de error incluyendo, opcionalmente, detalles internos.
      */
     private function jsonError(int $statusCode, string $message, \Throwable $e): void
     {
@@ -93,4 +91,5 @@ final class CatalogsController
         $this->jsonResponse($statusCode, $payload);
     }
 }
+
 

@@ -8,9 +8,9 @@ final class PermissionsController
 {
     private PermissionsRepository $repository;
 
-    public function __construct(string $organizationId)
+    public function __construct()
     {
-        $this->repository = new PermissionsRepository($organizationId);
+        $this->repository = new PermissionsRepository();
     }
 
     /**
@@ -37,7 +37,7 @@ final class PermissionsController
     {
         $role = trim($role);
         if ($role === '') {
-            $this->jsonResponse(400, ['error' => 'El parámetro role es obligatorio.']);
+            $this->jsonResponse(400, ['error' => 'El parÃ¡metro role es obligatorio.']);
             return;
         }
 
@@ -56,10 +56,16 @@ final class PermissionsController
 
     /**
      * PUT /permissions/role-matrix
-     * Actualiza la matriz completa de permisos por rol para la organización actual.
+     * Actualiza la matriz completa de permisos por rol.
      */
-    public function updateRoleMatrix(): void
+    public function updateRoleMatrix(string $actorRole): void
     {
+        $role = strtolower(trim($actorRole));
+        if ($role !== 'admin') {
+            $this->jsonResponse(403, ['error' => 'Solo el rol admin puede actualizar la matriz de permisos.']);
+            return;
+        }
+
         try {
             $body = $this->readJsonBody();
         } catch (\InvalidArgumentException $e) {
@@ -94,19 +100,19 @@ final class PermissionsController
     {
         $raw = file_get_contents('php://input') ?: '';
         if ($raw === '') {
-            throw new \InvalidArgumentException('El cuerpo de la petición no puede estar vacío.');
+            throw new \InvalidArgumentException('El cuerpo de la peticiÃ³n no puede estar vacÃ­o.');
         }
 
         $data = json_decode($raw, true);
         if (json_last_error() !== JSON_ERROR_NONE || !is_array($data)) {
-            throw new \InvalidArgumentException('JSON inválido en el cuerpo de la petición.');
+            throw new \InvalidArgumentException('JSON invÃ¡lido en el cuerpo de la peticiÃ³n.');
         }
 
         return $data;
     }
 
     /**
-     * Envía una respuesta JSON estándar.
+     * EnvÃ­a una respuesta JSON estÃ¡ndar.
      *
      * @param mixed $data
      */
@@ -123,7 +129,7 @@ final class PermissionsController
     }
 
     /**
-     * Envía una respuesta JSON de error incluyendo detalles.
+     * EnvÃ­a una respuesta JSON de error incluyendo detalles.
      */
     private function jsonError(int $statusCode, string $message, \Throwable $e): void
     {
@@ -135,4 +141,5 @@ final class PermissionsController
         $this->jsonResponse($statusCode, $payload);
     }
 }
+
 

@@ -6,11 +6,8 @@ require_once __DIR__ . '/../Services/ImportService.php';
 
 final class ImportController
 {
-    private string $organizationId;
-
-    public function __construct(string $organizationId)
+    public function __construct()
     {
-        $this->organizationId = $organizationId;
     }
 
     /**
@@ -66,7 +63,7 @@ final class ImportController
             ? (int)$_GET['tipo_id']
             : 1;
 
-        $service = new ImportService($this->organizationId);
+        $service = new ImportService();
         try {
             $result = $service->importTenderCsv($licitacionId, $tmpPath, $tipoId);
             $this->jsonResponse(201, [
@@ -96,7 +93,7 @@ final class ImportController
             return;
         }
 
-        $service = new ImportService($this->organizationId);
+        $service = new ImportService();
         try {
             $result = $service->importReferencePricesCsv($tmpPath);
             $rowsImported = (int)($result['rows_imported'] ?? 0);

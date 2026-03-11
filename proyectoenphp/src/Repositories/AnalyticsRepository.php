@@ -28,7 +28,7 @@ final class AnalyticsRepository extends BaseRepository
         // Mapa de estados id -> nombre
         $estadosIdMap = $this->getEstadosIdMap();
 
-        // Licitaciones de la organización
+        // Licitaciones
         $where = $this->getRlsClause();
         $params = $this->getRlsParams();
 
@@ -84,7 +84,7 @@ final class AnalyticsRepository extends BaseRepository
         foreach ($facturables as $r) {
             $timeline[] = [
                 'id_licitacion' => (int)$r['id_licitacion'],
-                'nombre' => (string)($r['nombre'] ?? ('Licitación ' . $r['id_licitacion'])),
+                'nombre' => (string)($r['nombre'] ?? ('LicitaciÃ³n ' . $r['id_licitacion'])),
                 'fecha_adjudicacion' => $this->normalizeDateString($r['fecha_adjudicacion'] ?? null),
                 'fecha_finalizacion' => $this->normalizeDateString($r['fecha_finalizacion'] ?? null),
                 'estado_nombre' => $r['estado_nombre'],
@@ -92,11 +92,11 @@ final class AnalyticsRepository extends BaseRepository
             ];
         }
 
-        // Estados según lógica Python
+        // Estados segÃºn lÃ³gica Python
         $estadosOfertado = ['adjudicada', 'no adjudicada', 'presentada', 'terminada'];
         $estadosAdjTerminadas = ['adjudicada', 'terminada'];
         $estadosDescartada = ['descartada'];
-        $estadosEnAnalisis = ['en análisis', 'en analisis'];
+        $estadosEnAnalisis = ['en anÃ¡lisis', 'en analisis'];
 
         $totalOportunidadesUds = count($facturables);
         $totalOportunidadesEuros = array_sum(array_column($facturables, 'pres_maximo'));
@@ -161,7 +161,7 @@ final class AnalyticsRepository extends BaseRepository
             ? ($eurosDes / $eurosTotalMenosEnAnalisis) * 100.0
             : null;
 
-        // Ratio adjudicación = (Adjudicadas+Terminadas) / ofertado
+        // Ratio adjudicaciÃ³n = (Adjudicadas+Terminadas) / ofertado
         $ratioAdjudicacion = $totalOfertadoUds > 0
             ? ($ratioAdjTerOfertado / 100.0)
             : 0.0;
@@ -252,7 +252,7 @@ final class AnalyticsRepository extends BaseRepository
             }
         }
 
-        // PVU desde licitaciones_detalle con fecha de licitación
+        // PVU desde licitaciones_detalle con fecha de licitaciÃ³n
         $placeholdersProd = [];
         $paramsDet = $this->getRlsParams();
         foreach ($productIds as $idx => $pid) {
@@ -422,7 +422,7 @@ final class AnalyticsRepository extends BaseRepository
             }
         }
 
-        // Deduplicar por fecha, quedándonos con último valor por día
+        // Deduplicar por fecha, quedÃ¡ndonos con Ãºltimo valor por dÃ­a
         $pvuPoints = $this->dedupAndSortPoints($pvuPoints);
         $pcuPoints = $this->dedupAndSortPoints($pcuPoints);
 
@@ -439,7 +439,7 @@ final class AnalyticsRepository extends BaseRepository
      */
     public function getRiskAdjustedPipeline(int $idEstadoEnAnalisis): array
     {
-        // Licitaciones en estado EN ANÁLISIS
+        // Licitaciones en estado EN ANÃLISIS
         $whereLic = $this->getRlsClause() . ' AND id_estado = :id_estado';
         $paramsLic = $this->getRlsParams();
         $paramsLic[':id_estado'] = $idEstadoEnAnalisis;
@@ -616,7 +616,7 @@ final class AnalyticsRepository extends BaseRepository
     }
 
     /**
-     * Devuelve el id_estado para un nombre de estado (comparación case-insensitive).
+     * Devuelve el id_estado para un nombre de estado (comparaciÃ³n case-insensitive).
      */
     public function getEstadoIdByName(string $estadoNombre): ?int
     {
@@ -693,7 +693,7 @@ final class AnalyticsRepository extends BaseRepository
     }
 
     /**
-     * Analíticas avanzadas por producto.
+     * AnalÃ­ticas avanzadas por producto.
      *
      * @return array<string, mixed>|null
      */
@@ -1080,14 +1080,14 @@ final class AnalyticsRepository extends BaseRepository
                 'is_deviated' => true,
                 'deviation_percentage' => 0.0,
                 'historical_avg' => 0.0,
-                'recommendation' => 'No hay histórico para este material. Revisar precio manualmente.',
+                'recommendation' => 'No hay histÃ³rico para este material. Revisar precio manualmente.',
             ];
         }
 
         $oneYearAgo = (new \DateTimeImmutable('now'))->sub(new \DateInterval('P365D'))->format('Y-m-d');
         $values = [];
 
-        // PVU desde precios_referencia del último año
+        // PVU desde precios_referencia del Ãºltimo aÃ±o
         $placeholders = [];
         $paramsRef = $this->getRlsParams();
         foreach ($productIds as $idx => $pid) {
@@ -1148,7 +1148,7 @@ final class AnalyticsRepository extends BaseRepository
                 'is_deviated' => true,
                 'deviation_percentage' => 0.0,
                 'historical_avg' => 0.0,
-                'recommendation' => 'Sin histórico reciente. Verificar precio con el mercado.',
+                'recommendation' => 'Sin histÃ³rico reciente. Verificar precio con el mercado.',
             ];
         }
 
@@ -1158,19 +1158,19 @@ final class AnalyticsRepository extends BaseRepository
 
         if ($isDeviated && $deviationPct > 0) {
             $recommendation = sprintf(
-                'Precio %.1f%% por encima de la media del último año (€%.2f). Revisar si el coste actual está justificado.',
+                'Precio %.1f%% por encima de la media del Ãºltimo aÃ±o (â‚¬%.2f). Revisar si el coste actual estÃ¡ justificado.',
                 $deviationPct,
                 $historicalAvg
             );
         } elseif ($isDeviated && $deviationPct < 0) {
             $recommendation = sprintf(
-                'Precio %.1f%% por debajo de la media del último año (€%.2f). Confirmar que el proveedor y la calidad son correctos.',
+                'Precio %.1f%% por debajo de la media del Ãºltimo aÃ±o (â‚¬%.2f). Confirmar que el proveedor y la calidad son correctos.',
                 abs($deviationPct),
                 $historicalAvg
             );
         } else {
             $recommendation = sprintf(
-                'Precio alineado con la media histórica (€%.2f).',
+                'Precio alineado con la media histÃ³rica (â‚¬%.2f).',
                 $historicalAvg
             );
         }
@@ -1207,7 +1207,7 @@ final class AnalyticsRepository extends BaseRepository
     }
 
     /**
-     * KPIs vacíos (valores neutrales).
+     * KPIs vacÃ­os (valores neutrales).
      *
      * @return array<string, mixed>
      */
@@ -1398,7 +1398,7 @@ final class AnalyticsRepository extends BaseRepository
     }
 
     /**
-     * Deduplica puntos temporales por fecha, quedándose con el último valor por día.
+     * Deduplica puntos temporales por fecha, quedÃ¡ndose con el Ãºltimo valor por dÃ­a.
      *
      * @param array<int, array<string, float|string>> $points
      * @return array<int, array<string, float|string>>
@@ -1440,4 +1440,5 @@ final class AnalyticsRepository extends BaseRepository
         return false;
     }
 }
+
 

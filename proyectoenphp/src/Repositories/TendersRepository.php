@@ -14,11 +14,6 @@ final class TendersRepository extends BaseRepository
     private const ESTADO_EN_ANALISIS = 3;
     private const ESTADO_ADJUDICADA = 5;
 
-    public function __construct(string $organizationId)
-    {
-        parent::__construct($organizationId);
-    }
-
     /**
      * Obtiene una licitación por ID.
      *
@@ -38,7 +33,6 @@ final class TendersRepository extends BaseRepository
     public function create(array $row): array
     {
         $payload = $row;
-        $payload['organization_id'] = $this->organizationId;
 
         $columns = array_keys($payload);
         $placeholders = array_map(
@@ -79,7 +73,6 @@ final class TendersRepository extends BaseRepository
     public function update(int $tenderId, array $data): array
     {
         $payload = $data;
-        unset($payload['organization_id']);
 
         if ($payload === []) {
             $existing = $this->getTenderById($tenderId);
@@ -551,7 +544,7 @@ final class TendersRepository extends BaseRepository
     }
 
     /**
-     * Inserta una partida en tbl_licitaciones_detalle; organization_id se inyecta.
+     * Inserta una partida en tbl_licitaciones_detalle.
      *
      * @param array<string, mixed> $row
      * @return array<string, mixed>
@@ -559,7 +552,6 @@ final class TendersRepository extends BaseRepository
     public function addPartida(int $tenderId, array $row): array
     {
         $payload = $row;
-        $payload['organization_id'] = $this->organizationId;
         $payload[self::PK_LICITACION] = $tenderId;
 
         $columns = array_keys($payload);
@@ -593,16 +585,14 @@ final class TendersRepository extends BaseRepository
     }
 
     /**
-     * Actualiza una partida; solo si pertenece a la organización.
+     * Actualiza una partida.
      *
      * @param array<string, mixed> $data
      * @return array<string, mixed>
      */
     public function updatePartida(int $tenderId, int $detalleId, array $data): array
     {
-        // No permitir modificar organization_id desde el payload
         $payload = $data;
-        unset($payload['organization_id']);
 
         if ($payload === []) {
             $existing = $this->getPartida($tenderId, $detalleId);
@@ -638,7 +628,13 @@ final class TendersRepository extends BaseRepository
         $stmt->execute($params);
 
         if ($stmt->rowCount() === 0) {
-            throw new \InvalidArgumentException('Partida no encontrada.');
+            // MySQL returns 0 affected rows when values are unchanged.
+            // Treat that case as success if the partida still exists.
+            $existing = $this->getPartida($tenderId, $detalleId);
+            if ($existing === null) {
+                throw new \InvalidArgumentException('Partida no encontrada.');
+            }
+            return $existing;
         }
 
         $updated = $this->getPartida($tenderId, $detalleId);
@@ -650,7 +646,7 @@ final class TendersRepository extends BaseRepository
     }
 
     /**
-     * Elimina una partida; solo si pertenece a la organización.
+     * Elimina una partida.
      */
     public function deletePartida(int $tenderId, int $detalleId): void
     {
@@ -716,9 +712,7 @@ final class TendersRepository extends BaseRepository
         array $data,
         int $expectedIdEstado
     ): ?array {
-        // No permitir modificar organization_id desde el payload
         $payload = $data;
-        unset($payload['organization_id']);
 
         if ($payload === []) {
             return $this->getTenderById($tenderId);

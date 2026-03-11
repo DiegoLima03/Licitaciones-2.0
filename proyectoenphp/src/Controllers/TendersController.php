@@ -12,9 +12,8 @@ final class TendersController
 
     public function __construct()
     {
-        $organizationId = $this->resolveOrganizationId();
-        $this->repository = new TendersRepository($organizationId);
-        $this->catalogs = new CatalogsRepository($organizationId);
+        $this->repository = new TendersRepository();
+        $this->catalogs = new CatalogsRepository();
     }
 
     /**
@@ -39,7 +38,7 @@ final class TendersController
 
     /**
      * GET /tenders/parents
-     * Lista licitaciones que pueden ser padre (AM/SDA) y están adjudicadas.
+     * Lista licitaciones que pueden ser padre (AM/SDA) y estÃ¡n adjudicadas.
      */
     public function parents(): void
     {
@@ -55,7 +54,7 @@ final class TendersController
 
     /**
      * GET /tenders/{tender_id}
-     * Detalle de licitación con partidas.
+     * Detalle de licitaciÃ³n con partidas.
      */
     public function show(int $tenderId): void
     {
@@ -65,7 +64,7 @@ final class TendersController
             if ($licitacion === null) {
                 http_response_code(404);
                 $licitacion = null;
-                $error = 'Licitación no encontrada.';
+                $error = 'LicitaciÃ³n no encontrada.';
             } else {
                 $error = null;
             }
@@ -99,7 +98,7 @@ final class TendersController
     {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
             http_response_code(405);
-            echo 'Método no permitido';
+            echo 'MÃ©todo no permitido';
             return;
         }
 
@@ -113,9 +112,7 @@ final class TendersController
         try {
             $pdo->beginTransaction();
 
-            $organizationId = $this->resolveOrganizationId();
-
-            // Eliminar todas las partidas existentes de esta licitación para la organización actual.
+            // Eliminar todas las partidas existentes de esta licitaciÃ³n.
             $sqlDelete = 'DELETE FROM tbl_licitaciones_detalle WHERE id_licitacion = :tender_id';
             $stmtDelete = $pdo->prepare($sqlDelete);
             $stmtDelete->execute([
@@ -151,7 +148,7 @@ final class TendersController
 
                 $concepto = isset($row['concepto']) ? trim((string)$row['concepto']) : '';
                 if ($concepto === '') {
-                    // Saltar filas vacías.
+                    // Saltar filas vacÃ­as.
                     continue;
                 }
 
@@ -164,7 +161,7 @@ final class TendersController
                     'activo' => 1,
                 ];
 
-                // Insertar la partida usando la lógica del repositorio (que inyecta organization_id e id_licitacion).
+                // Insertar la partida usando la lÃ³gica del repositorio.
                 $this->repository->addPartida($tenderId, $payload);
             }
 
@@ -185,13 +182,13 @@ final class TendersController
 
     /**
      * POST /licitaciones/{tender_id}/ejecucion
-     * Procesa el formulario de ejecución (entregas / líneas reales) enviado desde la vista SSR.
+     * Procesa el formulario de ejecuciÃ³n (entregas / lÃ­neas reales) enviado desde la vista SSR.
      */
     public function updateExecution(int $tenderId): void
     {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
             http_response_code(405);
-            echo 'Método no permitido';
+            echo 'MÃ©todo no permitido';
             return;
         }
 
@@ -201,8 +198,6 @@ final class TendersController
         }
 
         $pdo = Database::getConnection();
-        $organizationId = $this->resolveOrganizationId();
-
         $parseDecimal = static function ($value): ?float {
             if ($value === null) {
                 return null;
@@ -314,13 +309,13 @@ final class TendersController
         try {
             $pdo->beginTransaction();
 
-            // Actualizar / eliminar entregas existentes y sus líneas.
+            // Actualizar / eliminar entregas existentes y sus lÃ­neas.
             foreach ($ejecucion as $key => $entrada) {
                 if (!is_array($entrada)) {
                     continue;
                 }
 
-                // Filas "rápidas" nuevas creadas desde JS (sin campo lineas):
+                // Filas "rÃ¡pidas" nuevas creadas desde JS (sin campo lineas):
                 if (!array_key_exists('lineas', $entrada)) {
                     $concepto = isset($entrada['concepto']) ? trim((string)$entrada['concepto']) : '';
                     $cantidad = $parseDecimal($entrada['cantidad'] ?? null);
@@ -334,16 +329,15 @@ final class TendersController
                         continue;
                     }
 
-                    // Crear una nueva cabecera de entrega mínima para esta fila.
+                    // Crear una nueva cabecera de entrega mÃ­nima para esta fila.
                     $codigo = 'WEB-' . date('Ymd-His');
                     $fechaHoy = date('Y-m-d');
 
-                    $sqlInsertEntrega = 'INSERT INTO tbl_entregas (id_licitacion, organization_id, fecha_entrega, codigo_albaran, observaciones)
-                                         VALUES (:id_licitacion, :organization_id, :fecha_entrega, :codigo_albaran, :observaciones)';
+                    $sqlInsertEntrega = 'INSERT INTO tbl_entregas (id_licitacion, fecha_entrega, codigo_albaran, observaciones)
+                                         VALUES (:id_licitacion, :fecha_entrega, :codigo_albaran, :observaciones)';
                     $stmtCab = $pdo->prepare($sqlInsertEntrega);
                     $stmtCab->execute([
                         ':id_licitacion' => $tenderId,
-                        ':organization_id' => $organizationId,
                         ':fecha_entrega' => $fechaHoy,
                         ':codigo_albaran' => $codigo,
                         ':observaciones' => '',
@@ -353,7 +347,6 @@ final class TendersController
 
                     $sqlInsertLinea = 'INSERT INTO tbl_licitaciones_real (
                             id_licitacion,
-                            organization_id,
                             id_entrega,
                             id_detalle,
                             fecha_entrega,
@@ -364,7 +357,6 @@ final class TendersController
                             cobrado
                         ) VALUES (
                             :id_licitacion,
-                            :organization_id,
                             :id_entrega,
                             :id_detalle,
                             :fecha_entrega,
@@ -378,7 +370,6 @@ final class TendersController
                     $stmtLinea = $pdo->prepare($sqlInsertLinea);
                     $stmtLinea->execute([
                         ':id_licitacion' => $tenderId,
-                        ':organization_id' => $organizationId,
                         ':id_entrega' => $idEntregaNueva,
                         ':id_detalle' => null,
                         ':fecha_entrega' => $fechaHoy,
@@ -392,7 +383,7 @@ final class TendersController
                     continue;
                 }
 
-                // Entradas que representan una entrega existente (con posibles líneas).
+                // Entradas que representan una entrega existente (con posibles lÃ­neas).
                 $idEntrega = isset($entrada['id_entrega']) ? (int)$entrada['id_entrega'] : 0;
                 if ($idEntrega <= 0) {
                     continue;
@@ -400,7 +391,7 @@ final class TendersController
 
                 $deletedEntrega = isset($entrada['deleted']) && (string)$entrada['deleted'] === '1';
 
-                // Validar RLS: la entrega debe pertenecer a la organización y licitación actual.
+                // Validar que la entrega pertenece a la licitacion actual.
                 $sqlCheck = 'SELECT 1
                              FROM tbl_entregas
                              WHERE id_entrega = :id_entrega
@@ -413,12 +404,12 @@ final class TendersController
                 ]);
 
                 if ($stmtCheck->fetchColumn() === false) {
-                    // No pertenece a esta organización/lici; ignoramos por seguridad.
+                    // No pertenece a esta licitacion; ignoramos por seguridad.
                     continue;
                 }
 
                 if ($deletedEntrega) {
-                    // Borrado completo de entrega + líneas
+                    // Borrado completo de entrega + lÃ­neas
                     $sqlDelReal = 'DELETE FROM tbl_licitaciones_real
                                    WHERE id_entrega = :id_entrega';
                     $stmtDelReal = $pdo->prepare($sqlDelReal);
@@ -453,7 +444,7 @@ final class TendersController
                     ':id_licitacion' => $tenderId,
                 ]);
 
-                // Procesar líneas de la entrega
+                // Procesar lÃ­neas de la entrega
                 $lineas = isset($entrada['lineas']) && is_array($entrada['lineas'])
                     ? $entrada['lineas']
                     : [];
@@ -479,7 +470,7 @@ final class TendersController
                             continue;
                         }
 
-                        // UPDATE de línea existente
+                        // UPDATE de lÃ­nea existente
                         $cantidad = $parseDecimal($lin['cantidad'] ?? null);
                         $pcu = $parseDecimal($lin['pcu'] ?? null);
                         $estado = isset($lin['estado']) ? trim((string)$lin['estado']) : '';
@@ -508,21 +499,20 @@ final class TendersController
                             ':id_real' => $idReal,
                         ]);
                     } else {
-                        // Nueva línea para una entrega existente
+                        // Nueva lÃ­nea para una entrega existente
                         $cantidad = $parseDecimal($lin['cantidad'] ?? null);
                         $pcu = $parseDecimal($lin['pcu'] ?? null);
                         $estado = isset($lin['estado']) ? trim((string)$lin['estado']) : '';
                         $cobrado = isset($lin['cobrado']) && (string)$lin['cobrado'] === '1';
                         $proveedor = isset($lin['proveedor']) ? trim((string)$lin['proveedor']) : '';
 
-                        // Si no hay datos relevantes en la nueva línea, la ignoramos
+                        // Si no hay datos relevantes en la nueva lÃ­nea, la ignoramos
                         if ($cantidad === null && $pcu === null && $proveedor === '') {
                             continue;
                         }
 
                         $sqlInsLinea = 'INSERT INTO tbl_licitaciones_real (
                                 id_licitacion,
-                                organization_id,
                                 id_entrega,
                                 id_detalle,
                                 fecha_entrega,
@@ -533,7 +523,6 @@ final class TendersController
                                 cobrado
                             ) VALUES (
                                 :id_licitacion,
-                                :organization_id,
                                 :id_entrega,
                                 :id_detalle,
                                 :fecha_entrega,
@@ -547,7 +536,6 @@ final class TendersController
                         $stmtInsLinea = $pdo->prepare($sqlInsLinea);
                         $stmtInsLinea->execute([
                             ':id_licitacion' => $tenderId,
-                            ':organization_id' => $organizationId,
                             ':id_entrega' => $idEntrega,
                             ':id_detalle' => null,
                             ':fecha_entrega' => $fechaEntrega,
@@ -579,40 +567,40 @@ final class TendersController
             }
 
             http_response_code(500);
-            echo 'Error actualizando ejecución: '
+            echo 'Error actualizando ejecuciÃ³n: '
                 . htmlspecialchars($e->getMessage(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
         }
     }
 
     /**
      * POST /licitaciones/{tender_id}/estado
-     * Actualiza el estado (id_estado) de una licitación desde la vista SSR.
+     * Actualiza el estado (id_estado) de una licitaciÃ³n desde la vista SSR.
      */
     public function updateStatus(int $tenderId): void
     {
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
             http_response_code(405);
-            echo 'Método no permitido';
+            echo 'MÃ©todo no permitido';
             return;
         }
 
         if (!isset($_POST['estado'])) {
             http_response_code(400);
-            echo 'Falta el parámetro estado.';
+            echo 'Falta el parÃ¡metro estado.';
             return;
         }
 
         $estadoRaw = $_POST['estado'];
         if (!is_string($estadoRaw) && !is_numeric($estadoRaw)) {
             http_response_code(400);
-            echo 'Parámetro estado inválido.';
+            echo 'ParÃ¡metro estado invÃ¡lido.';
             return;
         }
 
         $estadoId = (int)$estadoRaw;
         if ($estadoId <= 0) {
             http_response_code(400);
-            echo 'Parámetro estado inválido.';
+            echo 'ParÃ¡metro estado invÃ¡lido.';
             return;
         }
 
@@ -621,7 +609,7 @@ final class TendersController
             $actual = $this->repository->getById($tenderId);
             if ($actual === null) {
                 http_response_code(404);
-                echo 'Licitación no encontrada.';
+                echo 'LicitaciÃ³n no encontrada.';
                 return;
             }
 
@@ -647,11 +635,241 @@ final class TendersController
 
             if (!array_key_exists($estadoId, $transiciones)) {
                 http_response_code(400);
-                echo 'Transición de estado no permitida desde el estado actual.';
+                echo 'TransiciÃ³n de estado no permitida desde el estado actual.';
                 return;
             }
 
-            // Usamos el repositorio para aplicar RLS automáticamente (organization_id).
+            if ($estadoId === 4) {
+                $detallePresentacion = $this->repository->getTenderWithDetails($tenderId);
+                $partidasPresentacion = is_array($detallePresentacion['partidas'] ?? null)
+                    ? $detallePresentacion['partidas']
+                    : [];
+
+                $tienePartidasActivas = false;
+                foreach ($partidasPresentacion as $p) {
+                    if (!is_array($p)) {
+                        continue;
+                    }
+                    $activo = array_key_exists('activo', $p) ? (bool)$p['activo'] : true;
+                    if ($activo) {
+                        $tienePartidasActivas = true;
+                        break;
+                    }
+                }
+
+                if (!$tienePartidasActivas) {
+                    http_response_code(400);
+                    echo 'No puedes pasar a Presentada sin al menos una linea presupuestada.';
+                    return;
+                }
+            }
+
+            if ($estadoId === 5) {
+                $detalle = $this->repository->getTenderWithDetails($tenderId);
+                $partidas = is_array($detalle['partidas'] ?? null)
+                    ? $detalle['partidas']
+                    : [];
+
+                /** @var array<int, int> $idsProducto */
+                $idsProducto = [];
+                foreach ($partidas as $p) {
+                    if (!is_array($p)) {
+                        continue;
+                    }
+                    $activo = array_key_exists('activo', $p) ? (bool)$p['activo'] : true;
+                    if (!$activo) {
+                        continue;
+                    }
+                    $idProd = isset($p['id_producto']) ? (int)$p['id_producto'] : 0;
+                    if ($idProd > 0) {
+                        $idsProducto[$idProd] = $idProd;
+                    }
+                }
+
+                $validProductIds = $this->fetchExistingProductIds(array_values($idsProducto));
+
+                foreach ($partidas as $p) {
+                    if (!is_array($p)) {
+                        continue;
+                    }
+                    $activo = array_key_exists('activo', $p) ? (bool)$p['activo'] : true;
+                    if (!$activo) {
+                        continue;
+                    }
+                    $idProd = isset($p['id_producto']) ? (int)$p['id_producto'] : 0;
+                    $hasValidProduct = $idProd > 0 && isset($validProductIds[$idProd]);
+                    if (!$hasValidProduct) {
+                        http_response_code(400);
+                        echo 'No se puede adjudicar: hay partidas activas sin producto de catalogo valido.';
+                        return;
+                    }
+                }
+            }
+
+            if ($estadoId === 7) {
+                $detalleFinalizacion = $this->repository->getTenderWithDetails($tenderId);
+                $partidasFinalizacion = is_array($detalleFinalizacion['partidas'] ?? null)
+                    ? $detalleFinalizacion['partidas']
+                    : [];
+
+                $lotesConfigRaw = $detalleFinalizacion['lotes_config'] ?? null;
+                $lotesConfig = [];
+                if (is_array($lotesConfigRaw)) {
+                    $lotesConfig = $lotesConfigRaw;
+                } elseif (is_string($lotesConfigRaw) && trim($lotesConfigRaw) !== '') {
+                    try {
+                        $decodedLotes = json_decode($lotesConfigRaw, true, 512, JSON_THROW_ON_ERROR);
+                        if (is_array($decodedLotes)) {
+                            $lotesConfig = $decodedLotes;
+                        }
+                    } catch (\Throwable) {
+                        $lotesConfig = [];
+                    }
+                }
+
+                $filtrarPorLotesGanados = $lotesConfig !== [];
+                /** @var array<string, bool> $lotesGanadosSet */
+                $lotesGanadosSet = [];
+                if ($filtrarPorLotesGanados) {
+                    foreach ($lotesConfig as $loteCfg) {
+                        if (!is_array($loteCfg)) {
+                            continue;
+                        }
+                        $nombreLoteCfg = trim((string)($loteCfg['nombre'] ?? ''));
+                        if ($nombreLoteCfg === '' || empty($loteCfg['ganado'])) {
+                            continue;
+                        }
+                        $lotesGanadosSet[mb_strtolower($nombreLoteCfg, 'UTF-8')] = true;
+                    }
+                }
+
+                /** @var array<int, float> $presupuestadoPorDetalle */
+                $presupuestadoPorDetalle = [];
+                foreach ($partidasFinalizacion as $pFinal) {
+                    if (!is_array($pFinal)) {
+                        continue;
+                    }
+                    $activo = array_key_exists('activo', $pFinal) ? (bool)$pFinal['activo'] : true;
+                    if (!$activo) {
+                        continue;
+                    }
+
+                    $idDetalle = isset($pFinal['id_detalle']) ? (int)$pFinal['id_detalle'] : 0;
+                    if ($idDetalle <= 0) {
+                        continue;
+                    }
+
+                    $lote = trim((string)($pFinal['lote'] ?? ''));
+                    if ($lote === '') {
+                        $lote = 'General';
+                    }
+                    if ($filtrarPorLotesGanados) {
+                        $loteKey = mb_strtolower($lote, 'UTF-8');
+                        if (!isset($lotesGanadosSet[$loteKey])) {
+                            continue;
+                        }
+                    }
+
+                    $unidades = isset($pFinal['unidades']) ? (float)$pFinal['unidades'] : 0.0;
+                    if ($unidades <= 0.0) {
+                        continue;
+                    }
+
+                    if (!isset($presupuestadoPorDetalle[$idDetalle])) {
+                        $presupuestadoPorDetalle[$idDetalle] = 0.0;
+                    }
+                    $presupuestadoPorDetalle[$idDetalle] += $unidades;
+                }
+
+                $pdoFinalizacion = Database::getConnection();
+                $sqlLineasFinalizacion = 'SELECT id_detalle, cantidad, estado, cobrado
+                                          FROM tbl_licitaciones_real
+                                          WHERE id_licitacion = :id_licitacion
+                                            AND id_tipo_gasto IS NULL
+                                            AND id_detalle IS NOT NULL';
+                $paramsLineasFinalizacion = [
+                    ':id_licitacion' => $tenderId,
+                ];
+
+                $detallesFiltrados = array_values(array_unique(array_filter(
+                    array_map(static fn ($v): int => (int)$v, array_keys($presupuestadoPorDetalle)),
+                    static fn (int $v): bool => $v > 0
+                )));
+                if ($detallesFiltrados !== []) {
+                    $placeholders = [];
+                    foreach ($detallesFiltrados as $idxDetalle => $idDetalleFinal) {
+                        $ph = ':id_det_' . $idxDetalle;
+                        $placeholders[] = $ph;
+                        $paramsLineasFinalizacion[$ph] = $idDetalleFinal;
+                    }
+                    $sqlLineasFinalizacion .= ' AND id_detalle IN (' . implode(', ', $placeholders) . ')';
+                }
+
+                $stmtLineasFinalizacion = $pdoFinalizacion->prepare($sqlLineasFinalizacion);
+                $stmtLineasFinalizacion->execute($paramsLineasFinalizacion);
+                $lineasFinalizacion = $stmtLineasFinalizacion->fetchAll() ?: [];
+
+                if ($lineasFinalizacion === []) {
+                    http_response_code(400);
+                    echo 'No puedes finalizar la licitacion sin lineas de entrega registradas.';
+                    return;
+                }
+
+                /** @var array<int, float> $entregadoPorDetalle */
+                $entregadoPorDetalle = [];
+                $lineasConEstadoPendiente = 0;
+                $lineasSinCobro = 0;
+                $allowedEstados = ['ENTREGADO' => true, 'FACTURADO' => true];
+
+                foreach ($lineasFinalizacion as $linFinal) {
+                    if (!is_array($linFinal)) {
+                        continue;
+                    }
+                    $idDetalle = isset($linFinal['id_detalle']) ? (int)$linFinal['id_detalle'] : 0;
+                    if ($idDetalle <= 0) {
+                        continue;
+                    }
+
+                    $cantidad = isset($linFinal['cantidad']) ? (float)$linFinal['cantidad'] : 0.0;
+                    if ($cantidad > 0.0) {
+                        if (!isset($entregadoPorDetalle[$idDetalle])) {
+                            $entregadoPorDetalle[$idDetalle] = 0.0;
+                        }
+                        $entregadoPorDetalle[$idDetalle] += $cantidad;
+                    }
+
+                    $estadoLinea = mb_strtoupper(trim((string)($linFinal['estado'] ?? '')), 'UTF-8');
+                    if (!isset($allowedEstados[$estadoLinea])) {
+                        $lineasConEstadoPendiente++;
+                    }
+
+                    $cobradoRaw = $linFinal['cobrado'] ?? 0;
+                    $isCobrado = $cobradoRaw === true
+                        || $cobradoRaw === 1
+                        || $cobradoRaw === '1';
+                    if (!$isCobrado) {
+                        $lineasSinCobro++;
+                    }
+                }
+
+                $qtyEpsilon = 0.0001;
+                foreach ($presupuestadoPorDetalle as $idDetalle => $presupuestado) {
+                    $entregado = (float)($entregadoPorDetalle[$idDetalle] ?? 0.0);
+                    if (($presupuestado - $entregado) > $qtyEpsilon) {
+                        http_response_code(400);
+                        echo 'No puedes finalizar la licitacion: quedan lineas pendientes de entrega.';
+                        return;
+                    }
+                }
+
+                if ($lineasConEstadoPendiente > 0 || $lineasSinCobro > 0) {
+                    http_response_code(400);
+                    echo 'No puedes finalizar la licitacion: todas las lineas deben estar entregadas/facturadas y cobradas.';
+                    return;
+                }
+            }
+
+            // Usamos el repositorio para actualizar con las validaciones comunes.
             $this->repository->update($tenderId, [
                 'id_estado' => $estadoId,
             ]);
@@ -667,29 +885,29 @@ final class TendersController
 
     /**
      * POST /tenders
-     * Placeholder para creación de licitación (lógica de negocio pendiente de portar).
+     * Placeholder para creaciÃ³n de licitaciÃ³n (lÃ³gica de negocio pendiente de portar).
      */
     public function store(): void
     {
-        $this->jsonResponse(501, ['error' => 'Not implemented: crear licitación aún no está portado a PHP.']);
+        $this->jsonResponse(501, ['error' => 'Not implemented: crear licitaciÃ³n aÃºn no estÃ¡ portado a PHP.']);
     }
 
     /**
      * PUT /tenders/{tender_id}
-     * Placeholder para actualización de licitación.
+     * Placeholder para actualizaciÃ³n de licitaciÃ³n.
      */
     public function update(int $tenderId): void
     {
-        $this->jsonResponse(501, ['error' => 'Not implemented: actualizar licitación aún no está portado a PHP.']);
+        $this->jsonResponse(501, ['error' => 'Not implemented: actualizar licitaciÃ³n aÃºn no estÃ¡ portado a PHP.']);
     }
 
     /**
      * DELETE /tenders/{tender_id}
-     * Placeholder para borrado de licitación.
+     * Placeholder para borrado de licitaciÃ³n.
      */
     public function destroy(int $tenderId): void
     {
-        $this->jsonResponse(501, ['error' => 'Not implemented: borrar licitación aún no está portado a PHP.']);
+        $this->jsonResponse(501, ['error' => 'Not implemented: borrar licitaciÃ³n aÃºn no estÃ¡ portado a PHP.']);
     }
 
     /**
@@ -698,12 +916,12 @@ final class TendersController
      */
     public function changeStatus(int $tenderId): void
     {
-        $this->jsonResponse(501, ['error' => 'Not implemented: cambio de estado aún no está portado a PHP.']);
+        $this->jsonResponse(501, ['error' => 'Not implemented: cambio de estado aÃºn no estÃ¡ portado a PHP.']);
     }
 
     /**
      * POST /tenders/{tender_id}/partidas
-     * Añade una partida a la licitación.
+     * AÃ±ade una partida a la licitaciÃ³n.
      */
     public function addPartida(int $tenderId): void
     {
@@ -758,24 +976,46 @@ final class TendersController
     }
 
     /**
-     * Simula resolución de organization_id desde cabecera/JWT.
-     */
-    private function resolveOrganizationId(): string
-    {
-        // Ejemplo: intentar leer de una cabecera HTTP personalizada.
-        if (isset($_SERVER['HTTP_X_ORGANIZATION_ID']) && $_SERVER['HTTP_X_ORGANIZATION_ID'] !== '') {
-            return (string)$_SERVER['HTTP_X_ORGANIZATION_ID'];
-        }
-
-        // Fallback de mock: valor fijo para desarrollo.
-        return 'demo-organization';
-    }
-
-    /**
-     * Lee y decodifica el cuerpo JSON de la petición.
+     * Lee y decodifica el cuerpo JSON de la peticiÃ³n.
      *
      * @return array<string, mixed>
      */
+    private function fetchExistingProductIds(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter($ids, static fn (int $v): bool => $v > 0)));
+        if ($ids === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach ($ids as $idx => $idValue) {
+            $ph = ':pid_' . $idx;
+            $placeholders[] = $ph;
+            $params[$ph] = $idValue;
+        }
+
+        $sql = sprintf(
+            'SELECT id FROM tbl_productos WHERE id IN (%s)',
+            implode(', ', $placeholders)
+        );
+        $pdo = Database::getConnection();
+        $stmt = $pdo->prepare($sql);
+        $stmt->execute($params);
+
+        /** @var array<int, int> $out */
+        $out = [];
+        while ($row = $stmt->fetch()) {
+            if (!isset($row['id'])) {
+                continue;
+            }
+            $id = (int)$row['id'];
+            $out[$id] = $id;
+        }
+
+        return $out;
+    }
+
     private function readJsonBody(): array
     {
         $raw = file_get_contents('php://input') ?: '';
@@ -785,7 +1025,7 @@ final class TendersController
 
         $data = json_decode($raw, true);
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new \InvalidArgumentException('JSON inválido en el cuerpo de la petición.');
+            throw new \InvalidArgumentException('JSON invÃ¡lido en el cuerpo de la peticiÃ³n.');
         }
 
         /** @var array<string, mixed> $data */
@@ -793,7 +1033,7 @@ final class TendersController
     }
 
     /**
-     * Envía una respuesta JSON estándar.
+     * EnvÃ­a una respuesta JSON estÃ¡ndar.
      *
      * @param mixed $data
      */
@@ -810,7 +1050,7 @@ final class TendersController
     }
 
     /**
-     * Envía una respuesta JSON de error incluyendo, opcionalmente, detalles internos en desarrollo.
+     * EnvÃ­a una respuesta JSON de error incluyendo, opcionalmente, detalles internos en desarrollo.
      */
     private function jsonError(int $statusCode, string $message, \Throwable $e): void
     {
@@ -818,10 +1058,11 @@ final class TendersController
             'error' => $message,
         ];
 
-        // Podrías controlar la exposición de detalles según entorno.
+        // PodrÃ­as controlar la exposiciÃ³n de detalles segÃºn entorno.
         $payload['details'] = $e->getMessage();
 
         $this->jsonResponse($statusCode, $payload);
     }
 }
+
 

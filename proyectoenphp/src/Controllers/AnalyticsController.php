@@ -8,9 +8,9 @@ final class AnalyticsController
 {
     private AnalyticsRepository $repository;
 
-    public function __construct(string $organizationId)
+    public function __construct()
     {
-        $this->repository = new AnalyticsRepository($organizationId);
+        $this->repository = new AnalyticsRepository();
     }
 
     /**

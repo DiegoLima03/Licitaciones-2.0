@@ -8,14 +8,12 @@ require_once __DIR__ . '/../../config/database.php';
 final class ImportService
 {
     private \PDO $pdo;
-    private string $organizationId;
     private TendersRepository $tendersRepository;
 
-    public function __construct(string $organizationId)
+    public function __construct()
     {
         $this->pdo = Database::getConnection();
-        $this->organizationId = $organizationId;
-        $this->tendersRepository = new TendersRepository($organizationId);
+        $this->tendersRepository = new TendersRepository();
     }
 
     /**
@@ -208,15 +206,14 @@ final class ImportService
                 $productNombre = $this->getProductNameById($idProducto);
 
                 $sql = 'INSERT INTO tbl_precios_referencia
-                        (id_producto, producto, organization_id, pvu, pcu, unidades, proveedor, notas, fecha_presupuesto)
+                        (id_producto, producto, pvu, pcu, unidades, proveedor, notas, fecha_presupuesto)
                         VALUES
-                        (:id_producto, :producto, :organization_id, :pvu, :pcu, :unidades, :proveedor, :notas, :fecha_presupuesto)';
+                        (:id_producto, :producto, :pvu, :pcu, :unidades, :proveedor, :notas, :fecha_presupuesto)';
 
                 $stmt = $this->pdo->prepare($sql);
                 $stmt->execute([
                     ':id_producto' => $idProducto,
                     ':producto' => $productNombre ?? '',
-                    ':organization_id' => $this->organizationId,
                     ':pvu' => null,
                     ':pcu' => $precio,
                     ':unidades' => $cantidad,
@@ -285,7 +282,7 @@ final class ImportService
     }
 
     /**
-     * Obtiene el nombre de producto por ID (mismo organization_id).
+     * Obtiene el nombre de producto por ID.
      */
     private function getProductNameById(int $productId): ?string
     {

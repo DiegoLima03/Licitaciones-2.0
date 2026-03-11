@@ -14,7 +14,6 @@ $user = $_SESSION['user'];
 $email = (string)($user['email'] ?? '');
 $fullName = (string)($user['full_name'] ?? '');
 $role = (string)($user['role'] ?? '');
-$organizationId = (string)($user['organization_id'] ?? '');
 
 ?>
 <!DOCTYPE html>
@@ -197,8 +196,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
             <div class="sidebar-footer">
-                <?php echo htmlspecialchars($organizationId, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
-            </div>
+                            </div>
         </aside>
         <div class="main">
             <header>
@@ -236,6 +234,7 @@ $organizationId = (string)($user['organization_id'] ?? '');
     </div>
 </body>
 </html>
+
 
 
 

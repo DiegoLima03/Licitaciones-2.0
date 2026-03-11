@@ -7,11 +7,9 @@ require_once __DIR__ . '/../../config/database.php';
 abstract class BaseRepository
 {
     protected \PDO $pdo;
-    protected string $organizationId;
 
-    public function __construct(string $organizationId)
+    public function __construct()
     {
-        $this->organizationId = $organizationId;
         $this->pdo = Database::getConnection();
     }
 

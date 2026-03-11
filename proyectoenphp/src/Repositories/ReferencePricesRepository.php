@@ -73,14 +73,14 @@ final class ReferencePricesRepository extends BaseRepository
         $productStmt->execute($productParams);
         $product = $productStmt->fetch(\PDO::FETCH_ASSOC);
         if ($product === false || $product === null) {
-            throw new \RuntimeException('Producto no encontrado o no pertenece a tu organización.', 404);
+            throw new \RuntimeException('Producto no encontrado.', 404);
         }
 
         $sqlInsert = sprintf(
             'INSERT INTO %s
-             (id_producto, producto, organization_id, pvu, pcu, unidades, proveedor, notas, fecha_presupuesto)
+             (id_producto, producto, pvu, pcu, unidades, proveedor, notas, fecha_presupuesto)
              VALUES
-             (:id_producto, :producto, :organization_id, :pvu, :pcu, :unidades, :proveedor, :notas, :fecha_presupuesto)',
+             (:id_producto, :producto, :pvu, :pcu, :unidades, :proveedor, :notas, :fecha_presupuesto)',
             self::TABLE_PRECIOS_REFERENCIA
         );
 
@@ -88,7 +88,6 @@ final class ReferencePricesRepository extends BaseRepository
         $stmt->execute([
             ':id_producto' => $productId,
             ':producto' => (string)($product['nombre'] ?? ''),
-            ':organization_id' => $this->organizationId,
             ':pvu' => $this->normalizeNullableFloat($payload['pvu'] ?? null),
             ':pcu' => $this->normalizeNullableFloat($payload['pcu'] ?? null),
             ':unidades' => $this->normalizeNullableFloat($payload['unidades'] ?? null),
@@ -135,7 +134,7 @@ final class ReferencePricesRepository extends BaseRepository
         $stmt->execute($params);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
         if ($row === false || $row === null) {
-            throw new \RuntimeException('No se devolvió la fila creada.');
+            throw new \RuntimeException('No se devolviÃ³ la fila creada.');
         }
 
         return $this->normalizeRow($row);

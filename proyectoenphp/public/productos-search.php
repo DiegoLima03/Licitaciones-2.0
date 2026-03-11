@@ -17,15 +17,8 @@ try {
         exit;
     }
 
-    $organizationId = trim((string)($user['organization_id'] ?? ''));
-    if ($organizationId === '') {
-        http_response_code(403);
-        echo json_encode([], JSON_UNESCAPED_UNICODE);
-        exit;
-    }
-
     $q = trim((string)($_GET['q'] ?? ''));
-    if ($q === '' || mb_strlen($q, 'UTF-8') < 4) {
+    if ($q === '' || mb_strlen($q, 'UTF-8') < 2) {
         echo json_encode([], JSON_UNESCAPED_UNICODE);
         exit;
     }
@@ -37,7 +30,7 @@ try {
         $limit = 120;
     }
 
-    $repo = new ProductsRepository($organizationId);
+    $repo = new ProductsRepository();
     $results = $repo->searchProductos($q, $limit, false);
 
     $rows = [];

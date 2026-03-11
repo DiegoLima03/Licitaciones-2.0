@@ -769,6 +769,162 @@ body > .card {
     font-weight: 600;
 }
 
+.status-loss-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 55;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    background: rgba(16, 24, 14, 0.46);
+    backdrop-filter: blur(2px);
+}
+
+.status-loss-dialog {
+    width: min(100%, 520px);
+    border: 1px solid var(--vz-marron2);
+    border-radius: 12px;
+    background: var(--vz-blanco);
+    box-shadow: 0 14px 30px rgba(16, 24, 14, 0.24);
+    color: var(--vz-negro);
+    padding: 18px;
+}
+
+.status-loss-form {
+    display: grid;
+    gap: 12px;
+}
+
+.status-loss-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.status-loss-head h3 {
+    margin: 0;
+    font-size: 1rem;
+    color: var(--vz-marron1);
+}
+
+.status-loss-close {
+    border: none;
+    background: transparent;
+    color: var(--vz-marron2);
+    font-size: 1rem;
+    cursor: pointer;
+}
+
+.status-loss-intro {
+    margin: 0;
+    font-size: 0.82rem;
+    line-height: 1.45;
+    color: var(--vz-marron1);
+}
+
+.status-loss-lotes {
+    border-radius: 10px;
+    border: 1px solid rgba(133, 114, 94, 0.36);
+    background: #f8f6ef;
+    padding: 9px 10px;
+    font-size: 0.8rem;
+    color: var(--vz-marron1);
+}
+
+.status-loss-lotes.is-hidden {
+    display: none;
+}
+
+.status-loss-lotes-rows {
+    display: grid;
+    gap: 10px;
+}
+
+.status-loss-lote-row {
+    border: 1px solid rgba(133, 114, 94, 0.32);
+    border-radius: 10px;
+    background: #fcfbf7;
+    padding: 10px;
+    display: grid;
+    gap: 8px;
+}
+
+.status-loss-lote-name {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--vz-marron1);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.status-loss-lote-fields {
+    display: grid;
+    gap: 8px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.status-loss-field {
+    display: grid;
+    gap: 5px;
+    font-size: 0.8rem;
+    color: var(--vz-marron1);
+}
+
+.status-loss-field span {
+    font-weight: 700;
+}
+
+.status-loss-field input,
+.status-loss-field textarea {
+    width: 100%;
+    border: 1px solid rgba(133, 114, 94, 0.5);
+    border-radius: 10px;
+    background: var(--vz-blanco);
+    color: var(--vz-negro);
+    padding: 8px 10px;
+    font-size: 0.9rem;
+    font-family: inherit;
+}
+
+.status-loss-field textarea {
+    min-height: 88px;
+    resize: vertical;
+}
+
+.status-loss-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+}
+
+.status-loss-cancel {
+    border: 1px solid var(--vz-marron2);
+    border-radius: 8px;
+    background: var(--vz-crema);
+    color: var(--vz-marron1);
+    font-weight: 600;
+    padding: 7px 12px;
+    cursor: pointer;
+}
+
+.status-loss-submit {
+    border: 1px solid var(--vz-verde);
+    border-radius: 8px;
+    background: var(--vz-verde);
+    color: var(--vz-blanco);
+    font-weight: 700;
+    padding: 7px 12px;
+    cursor: pointer;
+}
+
+@media (max-width: 640px) {
+    .status-loss-lote-fields {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Presupuesto (detalle licitacion) */
 .budget-create-form {
     margin-top: 16px;
@@ -832,6 +988,18 @@ body > .card {
     font-variant-numeric: tabular-nums;
 }
 
+/* Hide native spinner controls in numeric budget cells. */
+.budget-input[type="number"] {
+    -moz-appearance: textfield;
+    appearance: textfield;
+}
+
+.budget-input[type="number"]::-webkit-outer-spin-button,
+.budget-input[type="number"]::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+}
+
 .budget-autocomplete-list {
     position: absolute;
     z-index: 120;
@@ -872,6 +1040,138 @@ body > .card {
 
 .budget-table-form {
     margin-top: 12px;
+}
+
+.budget-lote-cards {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.budget-lote-card {
+    border: 1px solid rgba(133, 114, 94, 0.35);
+    border-radius: 12px;
+    background: #fcfbf7;
+    padding: 10px 10px 8px;
+}
+
+.budget-lote-card.is-otros {
+    background: #f8f6ef;
+}
+
+.budget-lote-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.budget-lote-card-tools {
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-left: auto;
+}
+
+.budget-lote-title {
+    margin: 0;
+    font-size: 0.82rem;
+    text-transform: uppercase;
+    letter-spacing: 0.035em;
+    color: #6b5d47;
+    font-weight: 700;
+}
+
+.budget-lote-meta {
+    font-size: 0.72rem;
+    color: #85725e;
+    font-weight: 600;
+}
+
+.budget-lote-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 32px;
+    padding: 4px 10px 4px 8px;
+    border-radius: 9999px;
+    border: 1px solid rgba(133, 114, 94, 0.42);
+    background: #fff;
+    color: #3f3427;
+    cursor: pointer;
+    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+}
+
+.budget-lote-toggle:hover {
+    border-color: rgba(133, 114, 94, 0.6);
+}
+
+.budget-lote-toggle:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 3px rgba(56, 105, 216, 0.18);
+}
+
+.budget-lote-toggle:disabled {
+    opacity: 0.64;
+    cursor: not-allowed;
+}
+
+.budget-lote-toggle-track {
+    position: relative;
+    width: 38px;
+    height: 22px;
+    border-radius: 9999px;
+    background: #d7d0c1;
+    box-shadow: inset 0 0 0 1px rgba(87, 74, 58, 0.08);
+    transition: background-color 0.18s ease;
+}
+
+.budget-lote-toggle-thumb {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 2px rgba(16, 24, 14, 0.2);
+    transition: transform 0.18s ease;
+}
+
+.budget-lote-toggle.is-ganado .budget-lote-toggle-track {
+    background: #7fa57f;
+}
+
+.budget-lote-toggle.is-ganado .budget-lote-toggle-thumb {
+    transform: translateX(16px);
+}
+
+.budget-lote-toggle.is-ganado .budget-lote-toggle-label {
+    color: #1f6c3d;
+}
+
+.budget-lote-toggle.is-perdido .budget-lote-toggle-track {
+    background: #d6bcc4;
+}
+
+.budget-lote-toggle.is-perdido .budget-lote-toggle-label {
+    color: #9f1239;
+}
+
+.budget-lote-toggle-label {
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.budget-lote-empty-note {
+    margin: 0 0 8px;
+    color: #85725e;
+    font-size: 0.78rem;
 }
 
 .budget-lines-table-editable .budget-input {
@@ -1128,6 +1428,17 @@ body > .card {
     font-weight: 600;
 }
 
+.detail-error-banner {
+    margin-top: 10px;
+    border: 1px solid rgba(200, 60, 50, 0.45);
+    border-radius: 10px;
+    background: rgba(200, 60, 50, 0.1);
+    color: #7a2722;
+    padding: 8px 10px;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
 .missing-products-banner {
     margin-top: 10px;
     border: 1px solid rgba(200, 60, 50, 0.45);
@@ -1161,22 +1472,32 @@ body > .card {
     position: fixed;
     inset: 0;
     z-index: 70;
-    padding: 16px;
+    padding: 12px 10px;
     background: rgba(16, 24, 14, 0.46);
     backdrop-filter: blur(2px);
-    align-items: center;
+    align-items: flex-start;
     justify-content: center;
+    overflow-y: auto;
 }
 
 .map-products-dialog {
-    width: min(92vw, 820px);
-    max-height: 88vh;
-    overflow: auto;
+    width: min(96vw, 1120px);
+    max-height: calc(100vh - 24px);
+    margin: 2vh auto;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
     border-radius: 12px;
     border: 1px solid var(--vz-marron2);
     background: var(--vz-blanco);
     box-shadow: 0 14px 30px rgba(16, 24, 14, 0.24);
-    padding: 14px 16px;
+    padding: 18px 20px;
+}
+
+.map-products-dialog form {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 .map-products-header {
@@ -1218,6 +1539,9 @@ body > .card {
     display: flex;
     flex-direction: column;
     gap: 8px;
+    max-height: 62vh;
+    overflow-y: auto;
+    padding-right: 3px;
 }
 
 .map-products-row {
@@ -1225,6 +1549,7 @@ body > .card {
     background: #fcfbf8;
     border-radius: 10px;
     padding: 8px 10px;
+    overflow: visible;
 }
 
 .map-products-row-top {
@@ -1260,17 +1585,15 @@ body > .card {
 
 .map-product-suggestions {
     display: none;
-    position: absolute;
-    left: 0;
-    right: 0;
-    margin-top: 2px;
+    position: static;
+    margin-top: 6px;
     border: 1px solid rgba(133, 114, 94, 0.5);
     border-radius: 8px;
     background: #fff;
     box-shadow: 0 10px 18px rgba(16, 24, 14, 0.12);
-    max-height: 210px;
+    max-height: 180px;
     overflow-y: auto;
-    z-index: 5;
+    z-index: 1;
 }
 
 .map-product-option {
@@ -1294,10 +1617,13 @@ body > .card {
 }
 
 .map-products-actions {
-    margin-top: 10px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid rgba(133, 114, 94, 0.3);
     display: flex;
     justify-content: flex-end;
     gap: 8px;
+    background: var(--vz-blanco);
 }
 
 .map-products-cancel {
@@ -1318,4 +1644,34 @@ body > .card {
     font-size: 0.8rem;
     font-weight: 700;
     padding: 6px 11px;
+}
+
+@media (max-width: 720px) {
+    .budget-lote-card-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+
+    .budget-lote-card-tools {
+        width: 100%;
+        justify-content: space-between;
+        margin-left: 0;
+    }
+}
+
+@media (max-width: 900px) {
+    .map-products-modal {
+        padding: 8px;
+    }
+
+    .map-products-dialog {
+        width: 98vw;
+        max-height: calc(100vh - 16px);
+        margin: 0 auto;
+        padding: 14px 12px;
+    }
+
+    .map-products-list {
+        max-height: 58vh;
+    }
 }

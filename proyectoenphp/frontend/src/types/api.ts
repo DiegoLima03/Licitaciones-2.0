@@ -1,6 +1,6 @@
-/**
+﻿/**
  * Tipos de la API (equivalentes a backend/models.py y backend/schemas.php).
- * Versión para el frontend alojado dentro de proyectoenphp/frontend, usando el backend PHP.
+ * VersiÃ³n para el frontend alojado dentro de proyectoenphp/frontend, usando el backend PHP.
  */
 
 // ----- Auth -----
@@ -8,14 +8,13 @@
 export interface User {
   id?: number | string | null;
   email: string;
-  /** Rol en castellano (alias histórico). */
+  /** Rol en castellano (alias histÃ³rico). */
   rol?: string | null;
-  /** Nombre de la persona (alias histórico). */
+  /** Nombre de la persona (alias histÃ³rico). */
   nombre?: string | null;
   /** Rol normalizado (admin, admin_planta, admin_licitaciones, member_planta, member_licitaciones). */
   role?: string | null;
-  /** Organización (UUID) a la que pertenece el usuario. */
-  organization_id?: string | null;
+  /** OrganizaciÃ³n (UUID) a la que pertenece el usuario. */
   /** Nombre completo (equivalente a nombre/full_name en backend). */
   full_name?: string | null;
   /** JWT devuelto por el backend PHP. */
@@ -33,7 +32,7 @@ export interface Estado {
   nombre_estado: string;
 }
 
-// ----- Tipos de licitación (tbl_tipolicitacion) -----
+// ----- Tipos de licitaciÃ³n (tbl_tipolicitacion) -----
 
 export interface Tipo {
   id_tipolicitacion: number;
@@ -42,9 +41,9 @@ export interface Tipo {
 
 // ----- Licitaciones (tbl_licitaciones) -----
 
-export type PaisLicitacion = "España" | "Portugal";
+export type PaisLicitacion = "EspaÃ±a" | "Portugal";
 
-/** Tipo de procedimiento (Acuerdos Marco / SDA / jerarquía padre-hijo). */
+/** Tipo de procedimiento (Acuerdos Marco / SDA / jerarquÃ­a padre-hijo). */
 export type TipoProcedimiento =
   | "ORDINARIO"
   | "ACUERDO_MARCO"
@@ -56,11 +55,10 @@ export interface LoteConfigItem {
   ganado: boolean;
 }
 
-/** Estructura base que devuelve el backend PHP para una licitación (tbl_licitaciones). */
+/** Estructura base que devuelve el backend PHP para una licitaciÃ³n (tbl_licitaciones). */
 export interface Tender {
   id_licitacion: number;
-  /** Organización (RLS) a la que pertenece la licitación, tal y como la devuelve el backend PHP. */
-  organization_id?: string | null;
+  /** OrganizaciÃ³n (RLS) a la que pertenece la licitaciÃ³n, tal y como la devuelve el backend PHP. */
   nombre: string;
   pais?: PaisLicitacion | null;
   numero_expediente?: string | null;
@@ -118,7 +116,7 @@ export interface TenderUpdate {
   id_licitacion_padre?: number | null;
 }
 
-/** Payload para POST /tenders/{id}/change-status (máquina de estados) */
+/** Payload para POST /tenders/{id}/change-status (mÃ¡quina de estados) */
 export interface TenderStatusChange {
   nuevo_estado_id: number;
   motivo_descarte?: string | null;
@@ -153,23 +151,23 @@ export interface TenderPartida {
   [key: string]: unknown;
 }
 
-/** Datos mínimos del expediente padre (solo en detalle de contrato derivado). */
+/** Datos mÃ­nimos del expediente padre (solo en detalle de contrato derivado). */
 export interface LicitacionPadre {
   id_licitacion: number;
   nombre?: string | null;
   numero_expediente?: string | null;
 }
 
-/** Detalle de licitación con partidas (GET /tenders/{id}). Para AM/SDA incluye contratos_derivados. */
+/** Detalle de licitaciÃ³n con partidas (GET /tenders/{id}). Para AM/SDA incluye contratos_derivados. */
 export interface TenderDetail extends Tender {
   partidas: TenderPartida[];
-  /** Licitaciones hijo (CONTRATO_BASADO) cuando esta licitación es AM o SDA. */
+  /** Licitaciones hijo (CONTRATO_BASADO) cuando esta licitaciÃ³n es AM o SDA. */
   contratos_derivados?: Tender[];
-  /** Padre AM/SDA cuando esta licitación es contrato derivado (acceso desde el padre). */
+  /** Padre AM/SDA cuando esta licitaciÃ³n es contrato derivado (acceso desde el padre). */
   licitacion_padre?: LicitacionPadre | null;
 }
 
-/** Payload para añadir una partida manual (POST /tenders/{id}/partidas). id_producto opcional; si no se vincula Belneo, usar nombre_producto_libre. */
+/** Payload para aÃ±adir una partida manual (POST /tenders/{id}/partidas). id_producto opcional; si no se vincula Belneo, usar nombre_producto_libre. */
 export interface PartidaCreate {
   lote?: string | null;
   id_producto?: number | null;
@@ -209,11 +207,11 @@ export interface TipoGasto {
 }
 
 export interface DeliveryItem {
-  /** Null si la línea es gasto extraordinario (id_tipo_gasto en su lugar). */
+  /** Null si la lÃ­nea es gasto extraordinario (id_tipo_gasto en su lugar). */
   id_producto?: number | null;
   /** Si es null = gasto extraordinario (no presupuestado). */
   id_detalle?: number | null;
-  /** Si no null, línea es gasto extraordinario (concepto desde tbl_tipos_gasto). */
+  /** Si no null, lÃ­nea es gasto extraordinario (concepto desde tbl_tipos_gasto). */
   id_tipo_gasto?: number | null;
   proveedor?: string | null;
   cantidad: number;
@@ -232,13 +230,13 @@ export interface DeliveryCreateResponse {
   lines_count: number;
 }
 
-/** Payload para actualizar estado/cobrado de una línea de entrega. */
+/** Payload para actualizar estado/cobrado de una lÃ­nea de entrega. */
 export interface DeliveryLineUpdate {
   estado?: string | null;
   cobrado?: boolean | null;
 }
 
-/** Línea de una entrega (tbl_licitaciones_real). */
+/** LÃ­nea de una entrega (tbl_licitaciones_real). */
 export interface EntregaLinea {
   id_real?: number;
   id_detalle?: number | null;
@@ -252,7 +250,7 @@ export interface EntregaLinea {
   [key: string]: unknown;
 }
 
-/** Entrega con sus líneas (GET /deliveries?licitacion_id=X). */
+/** Entrega con sus lÃ­neas (GET /deliveries?licitacion_id=X). */
 export interface EntregaWithLines {
   id_entrega: number;
   id_licitacion: number;
@@ -263,7 +261,7 @@ export interface EntregaWithLines {
   [key: string]: unknown;
 }
 
-// ----- Importación Excel -----
+// ----- ImportaciÃ³n Excel -----
 
 export interface ExcelImportResponse {
   message: string;
@@ -320,7 +318,7 @@ export interface SearchResult {
 export interface PriceHistoryPoint {
   time: string;
   value: number;
-  /** Unidades (suma ese día) para tooltip en gráfico de evolución. */
+  /** Unidades (suma ese dÃ­a) para tooltip en grÃ¡fico de evoluciÃ³n. */
   unidades?: number | null;
 }
 
@@ -419,4 +417,5 @@ export interface PriceDeviationResult {
 export interface RolePermissionsMatrix {
   matrix: Record<string, Record<string, boolean>>;
 }
+
 

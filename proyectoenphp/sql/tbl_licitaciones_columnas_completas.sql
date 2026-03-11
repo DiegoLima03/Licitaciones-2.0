@@ -4,7 +4,6 @@
 --
 -- Resumen de columnas que debe tener tbl_licitaciones:
 --   id_licitacion (PK, AUTO_INCREMENT)
---   organization_id (VARCHAR, obligatorio para RLS)
 --   nombre, pais, numero_expediente, pres_maximo
 --   descripcion, enlace_gober, enlace_sharepoint
 --   id_tipolicitacion (FK a tbl_tipolicitacion), id_estado (FK a tbl_estados)
