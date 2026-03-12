@@ -11,78 +11,224 @@ final class SearchRepository extends BaseRepository
     private const TABLE_DETALLE = 'tbl_licitaciones_detalle';
     private const TABLE_REAL = 'tbl_licitaciones_real';
     private const TABLE_PRECIOS_REFERENCIA = 'tbl_precios_referencia';
+    private const TABLE_ALBARANES = 'tbl_albaranes';
+    private const TABLE_ALBARANES_LINEAS = 'tbl_albaranes_lineas';
 
     /**
-     * Búsqueda de productos con histórico en detalle o precios de referencia.
+     * Búsqueda unificada: albaranes + licitaciones_detalle + precios_referencia.
      *
-     * @return array<int, array<string, mixed>>
+     * @return array<string, mixed> {albaranes_venta, albaranes_compra, licitaciones, referencia}
      */
-    public function searchProducts(string $query): array
+    public function searchHistorico(string $query, int $limit = 200): array
     {
         $query = trim($query);
         if ($query === '') {
+            return [
+                'albaranes_venta' => [],
+                'albaranes_compra' => [],
+                'licitaciones' => [],
+                'referencia' => [],
+            ];
+        }
+
+        $albaranesVenta = $this->searchAlbaranes($query, 'VENTA', $limit);
+        $albaranesCompra = $this->searchAlbaranes($query, 'COMPRA', $limit);
+        $licitaciones = $this->searchLicitacionesDetalle($query, $limit);
+        $referencia = $this->searchPreciosRef($query, $limit);
+
+        return [
+            'albaranes_venta' => $albaranesVenta,
+            'albaranes_compra' => $albaranesCompra,
+            'licitaciones' => $licitaciones,
+            'referencia' => $referencia,
+        ];
+    }
+
+    /**
+     * Busca en tbl_albaranes_lineas + tbl_albaranes por nombre_articulo o ref_articulo.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function searchAlbaranes(string $query, string $tipo, int $limit): array
+    {
+        $tokens = $this->tokenize($query);
+        if ($tokens === []) {
             return [];
         }
 
-        $productIds = $this->getProductIdsWithHistory($query);
-        if ($productIds === []) {
-            return [];
+        $where = 'a.tipo_albaran = :tipo';
+        $params = [':tipo' => $tipo];
+
+        foreach ($tokens as $i => $tok) {
+            $escaped = '%' . $this->escapeLike($tok) . '%';
+            $phNom = ':tok_n_' . $i;
+            $phRef = ':tok_r_' . $i;
+            $params[$phNom] = $escaped;
+            $params[$phRef] = $escaped;
+            $where .= sprintf(
+                " AND (LOWER(COALESCE(l.nombre_articulo, '')) LIKE %s ESCAPE '\\\\'"
+                . " OR LOWER(COALESCE(l.ref_articulo, '')) LIKE %s ESCAPE '\\\\')",
+                $phNom,
+                $phRef
+            );
         }
+
+        $sql = sprintf(
+            "SELECT
+                l.id_linea,
+                l.id_producto,
+                l.ref_articulo,
+                l.nombre_articulo,
+                l.familia,
+                l.cantidad,
+                l.precio_unitario,
+                l.descuento_pct,
+                l.importe,
+                a.numero_albaran,
+                a.fecha_albaran,
+                a.nombre_contacto,
+                a.comercial,
+                a.numero_factura
+             FROM %s l
+             JOIN %s a ON a.id_albaran = l.id_albaran
+             WHERE %s
+               AND l.precio_unitario IS NOT NULL
+               AND l.cantidad > 0
+             ORDER BY a.fecha_albaran DESC, l.id_linea DESC
+             LIMIT %d",
+            self::TABLE_ALBARANES_LINEAS,
+            self::TABLE_ALBARANES,
+            $where,
+            max(1, min(500, $limit))
+        );
+
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
 
         $results = [];
+        foreach ($rows as $r) {
+            $results[] = [
+                'ref_articulo' => $r['ref_articulo'] ?? null,
+                'nombre_articulo' => $r['nombre_articulo'] ?? null,
+                'familia' => $r['familia'] ?? null,
+                'cantidad' => $r['cantidad'] !== null ? (float)$r['cantidad'] : null,
+                'precio_unitario' => $r['precio_unitario'] !== null ? (float)$r['precio_unitario'] : null,
+                'descuento_pct' => $r['descuento_pct'] !== null ? (float)$r['descuento_pct'] : null,
+                'importe' => $r['importe'] !== null ? (float)$r['importe'] : null,
+                'numero_albaran' => $r['numero_albaran'] ?? null,
+                'fecha_albaran' => $r['fecha_albaran'] ?? null,
+                'contacto' => $r['nombre_contacto'] ?? null,
+                'comercial' => $r['comercial'] ?? null,
+                'numero_factura' => $r['numero_factura'] ?? null,
+            ];
+        }
 
-        // 1) Partidas de licitaciones_detalle
-        $detalleRows = $this->searchDetalle($productIds);
+        return $results;
+    }
+
+    /**
+     * Busca en detalle de licitaciones por nombre de producto.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function searchLicitacionesDetalle(string $query, int $limit): array
+    {
+        $tokens = $this->tokenize($query);
+        if ($tokens === []) {
+            return [];
+        }
+
+        $where = 'd.activo = 1';
+        $params = [];
+
+        foreach ($tokens as $i => $tok) {
+            $escaped = '%' . $this->escapeLike($tok) . '%';
+            $phN = ':tok_n_' . $i;
+            $phR = ':tok_r_' . $i;
+            $phL = ':tok_l_' . $i;
+            $params[$phN] = $escaped;
+            $params[$phR] = $escaped;
+            $params[$phL] = $escaped;
+            $where .= sprintf(
+                " AND (LOWER(COALESCE(p.nombre, '')) LIKE %s ESCAPE '\\\\'"
+                . " OR LOWER(COALESCE(p.referencia, '')) LIKE %s ESCAPE '\\\\'"
+                . " OR LOWER(COALESCE(d.nombre_producto_libre, '')) LIKE %s ESCAPE '\\\\')",
+                $phN,
+                $phR,
+                $phL
+            );
+        }
+
+        $sql = sprintf(
+            "SELECT
+                d.id_detalle,
+                d.id_producto,
+                COALESCE(p.nombre, d.nombre_producto_libre) AS producto,
+                p.referencia,
+                p.nombre_proveedor,
+                d.unidades,
+                d.pvu,
+                d.pcu,
+                d.lote,
+                l.nombre AS licitacion_nombre,
+                l.numero_expediente,
+                l.fecha_presentacion
+             FROM %s d
+             LEFT JOIN %s p ON p.id = d.id_producto
+             JOIN %s l ON l.id_licitacion = d.id_licitacion
+             WHERE %s
+             ORDER BY l.fecha_presentacion DESC, d.id_detalle DESC
+             LIMIT %d",
+            self::TABLE_DETALLE,
+            self::TABLE_PRODUCTOS,
+            self::TABLE_LICITACIONES,
+            $where,
+            max(1, min(500, $limit))
+        );
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        } catch (\PDOException $e) {
+            return [];
+        }
+
+        // Enrich with PCU/proveedor from tbl_licitaciones_real
         $idDetalles = [];
-        foreach ($detalleRows as $row) {
+        foreach ($rows as $row) {
             if (isset($row['id_detalle'])) {
                 $idDetalles[] = (int)$row['id_detalle'];
             }
         }
         $pcuByDetalle = [];
-        $proveedorByDetalle = [];
+        $provByDetalle = [];
         if ($idDetalles !== []) {
-            [$pcuByDetalle, $proveedorByDetalle] = $this->getPcuAndProveedorFromReal($idDetalles);
+            try {
+                [$pcuByDetalle, $provByDetalle] = $this->getPcuAndProveedorFromReal($idDetalles);
+            } catch (\PDOException $e) {
+                // ignore
+            }
         }
 
-        foreach ($detalleRows as $row) {
-            $idDetalle = $row['id_detalle'] ?? null;
-            $pcu = $idDetalle !== null ? ($pcuByDetalle[$idDetalle] ?? null) : null;
-            $provReal = $idDetalle !== null ? ($proveedorByDetalle[$idDetalle] ?? null) : null;
-
-            $productoNombre = (string)($row['producto_nombre'] ?? '');
-            $productoNombreProveedor = (string)($row['producto_nombre_proveedor'] ?? '');
-
-            $proveedor = $this->getProveedorDisplay($provReal, $productoNombreProveedor);
+        $results = [];
+        foreach ($rows as $r) {
+            $idDet = $r['id_detalle'] ?? null;
+            $pcuReal = $idDet !== null ? ($pcuByDetalle[$idDet] ?? null) : null;
+            $provReal = $idDet !== null ? ($provByDetalle[$idDet] ?? null) : null;
+            $proveedor = $provReal ?? (trim((string)($r['nombre_proveedor'] ?? '')) ?: null);
 
             $results[] = [
-                'id_producto' => isset($row['id_producto']) ? (int)$row['id_producto'] : null,
-                'producto' => $productoNombre,
-                'pvu' => isset($row['pvu']) ? (float)$row['pvu'] : null,
-                'pcu' => $pcu,
-                'unidades' => isset($row['unidades']) ? (float)$row['unidades'] : null,
-                'licitacion_nombre' => $row['licitacion_nombre'] ?? null,
-                'numero_expediente' => $row['numero_expediente'] ?? null,
-                'proveedor' => $proveedor,
-            ];
-        }
-
-        // 2) Líneas de precios de referencia
-        $refRows = $this->searchPreciosReferencia($productIds);
-        foreach ($refRows as $r) {
-            $productoNombre = (string)($r['producto_nombre'] ?? '');
-            $productoNombreProveedor = (string)($r['producto_nombre_proveedor'] ?? '');
-            $provLinea = $r['proveedor'] ?? null;
-            $proveedor = $this->getProveedorDisplay($provLinea, $productoNombreProveedor);
-
-            $results[] = [
-                'id_producto' => isset($r['id_producto']) ? (int)$r['id_producto'] : null,
-                'producto' => $productoNombre,
-                'pvu' => isset($r['pvu']) ? (float)$r['pvu'] : null,
-                'pcu' => isset($r['pcu']) ? (float)$r['pcu'] : null,
-                'unidades' => isset($r['unidades']) ? (float)$r['unidades'] : null,
-                'licitacion_nombre' => null,
-                'numero_expediente' => null,
+                'producto' => $r['producto'] ?? null,
+                'referencia' => $r['referencia'] ?? null,
+                'unidades' => $r['unidades'] !== null ? (float)$r['unidades'] : null,
+                'pvu' => $r['pvu'] !== null ? (float)$r['pvu'] : null,
+                'pcu' => $pcuReal ?? ($r['pcu'] !== null ? (float)$r['pcu'] : null),
+                'lote' => $r['lote'] ?? null,
+                'licitacion' => $r['licitacion_nombre'] ?? null,
+                'expediente' => $r['numero_expediente'] ?? null,
+                'fecha' => $r['fecha_presentacion'] ?? null,
                 'proveedor' => $proveedor,
             ];
         }
@@ -91,188 +237,83 @@ final class SearchRepository extends BaseRepository
     }
 
     /**
-     * Calcula el precio medio histórico de referencia de un producto.
+     * Busca precios de referencia por nombre de producto.
      *
-     * @return array<string, mixed> {avg_pvu, avg_pcu, count, first_date, last_date}
+     * @return array<int, array<string, mixed>>
      */
-    public function getReferencePrice(int $productId): array
+    private function searchPreciosRef(string $query, int $limit): array
     {
-        $where = $this->getRlsClause() . ' AND id_producto = :id_producto';
-        $params = $this->getRlsParams();
-        $params[':id_producto'] = $productId;
+        $tokens = $this->tokenize($query);
+        if ($tokens === []) {
+            return [];
+        }
+
+        $where = '1 = 1';
+        $params = [];
+
+        foreach ($tokens as $i => $tok) {
+            $escaped = '%' . $this->escapeLike($tok) . '%';
+            $phN = ':tok_n_' . $i;
+            $phR = ':tok_r_' . $i;
+            $params[$phN] = $escaped;
+            $params[$phR] = $escaped;
+            $where .= sprintf(
+                " AND (LOWER(COALESCE(p.nombre, '')) LIKE %s ESCAPE '\\\\'"
+                . " OR LOWER(COALESCE(p.referencia, '')) LIKE %s ESCAPE '\\\\')",
+                $phN,
+                $phR
+            );
+        }
 
         $sql = sprintf(
-            'SELECT
-                 AVG(pvu) AS avg_pvu,
-                 AVG(pcu) AS avg_pcu,
-                 COUNT(*) AS total_rows,
-                 MIN(fecha_presupuesto) AS first_date,
-                 MAX(fecha_presupuesto) AS last_date
-             FROM %s
-             WHERE %s',
+            "SELECT
+                pr.id_producto,
+                p.nombre AS producto,
+                p.referencia,
+                p.nombre_proveedor,
+                pr.pvu,
+                pr.pcu,
+                pr.unidades,
+                pr.proveedor,
+                pr.fecha_presupuesto
+             FROM %s pr
+             JOIN %s p ON p.id = pr.id_producto
+             WHERE %s
+             ORDER BY pr.fecha_presupuesto DESC
+             LIMIT %d",
             self::TABLE_PRECIOS_REFERENCIA,
-            $where
+            self::TABLE_PRODUCTOS,
+            $where,
+            max(1, min(500, $limit))
         );
 
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        // tbl_precios_referencia may not exist yet
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        } catch (\Throwable $e) {
+            return [];
+        }
 
-        if ($row === false || $row === null || (int)($row['total_rows'] ?? 0) === 0) {
-            return [
-                'product_id' => $productId,
-                'avg_pvu' => null,
-                'avg_pcu' => null,
-                'count' => 0,
-                'first_date' => null,
-                'last_date' => null,
+        $results = [];
+        foreach ($rows as $r) {
+            $provLinea = $r['proveedor'] ?? null;
+            $provProd = trim((string)($r['nombre_proveedor'] ?? ''));
+            $proveedor = ($provLinea !== null && trim((string)$provLinea) !== '') ? trim((string)$provLinea) : ($provProd !== '' ? $provProd : null);
+
+            $results[] = [
+                'producto' => $r['producto'] ?? null,
+                'referencia' => $r['referencia'] ?? null,
+                'pvu' => $r['pvu'] !== null ? (float)$r['pvu'] : null,
+                'pcu' => $r['pcu'] !== null ? (float)$r['pcu'] : null,
+                'unidades' => $r['unidades'] !== null ? (float)$r['unidades'] : null,
+                'fecha' => $r['fecha_presupuesto'] ?? null,
+                'proveedor' => $proveedor,
             ];
         }
 
-        return [
-            'product_id' => $productId,
-            'avg_pvu' => $row['avg_pvu'] !== null ? (float)$row['avg_pvu'] : null,
-            'avg_pcu' => $row['avg_pcu'] !== null ? (float)$row['avg_pcu'] : null,
-            'count' => (int)$row['total_rows'],
-            'first_date' => $row['first_date'] !== null ? (string)$row['first_date'] : null,
-            'last_date' => $row['last_date'] !== null ? (string)$row['last_date'] : null,
-        ];
-    }
-
-    /**
-     * Devuelve IDs de productos que coinciden con el texto y que tienen histórico.
-     *
-     * @return array<int, int>
-     */
-    private function getProductIdsWithHistory(string $query): array
-    {
-        $pattern = '%' . $query . '%';
-        $paramsNombre = $this->getRlsParams();
-        $paramsNombre[':nombre'] = $pattern;
-
-        $sqlNombre = sprintf(
-            'SELECT id FROM %s WHERE %s AND nombre LIKE :nombre LIMIT 300',
-            self::TABLE_PRODUCTOS,
-            $this->getRlsClause()
-        );
-        $stmtNombre = $this->pdo->prepare($sqlNombre);
-        $stmtNombre->execute($paramsNombre);
-        $rowsNombre = $stmtNombre->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-
-        $paramsRef = $this->getRlsParams();
-        $paramsRef[':referencia'] = $pattern;
-        $sqlRef = sprintf(
-            'SELECT id FROM %s WHERE %s AND referencia LIKE :referencia LIMIT 300',
-            self::TABLE_PRODUCTOS,
-            $this->getRlsClause()
-        );
-        $stmtRef = $this->pdo->prepare($sqlRef);
-        $stmtRef->execute($paramsRef);
-        $rowsRef = $stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-
-        $candidatos = [];
-        foreach (array_merge($rowsNombre, $rowsRef) as $r) {
-            if (isset($r['id'])) {
-                $candidatos[(int)$r['id']] = (int)$r['id'];
-            }
-        }
-        $candidatos = array_values($candidatos);
-        if ($candidatos === []) {
-            return [];
-        }
-
-        // Filtrar solo los que tienen datos en precios_referencia o detalle (ambos con RLS).
-        $placeholders = [];
-        $paramsHist = $this->getRlsParams();
-        foreach ($candidatos as $idx => $pid) {
-            $ph = ':pid_' . $idx;
-            $placeholders[] = $ph;
-            $paramsHist[$ph] = $pid;
-        }
-
-        $sqlHistRef = sprintf(
-            'SELECT DISTINCT id_producto
-             FROM %s
-             WHERE %s AND id_producto IN (%s)',
-            self::TABLE_PRECIOS_REFERENCIA,
-            $this->getRlsClause(),
-            implode(', ', $placeholders)
-        );
-        $stmtHistRef = $this->pdo->prepare($sqlHistRef);
-        $stmtHistRef->execute($paramsHist);
-        $histRef = $stmtHistRef->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-
-        $sqlHistDet = sprintf(
-            'SELECT DISTINCT id_producto
-             FROM %s
-             WHERE %s AND activo = 1 AND id_producto IN (%s)',
-            self::TABLE_DETALLE,
-            $this->getRlsClause(),
-            implode(', ', $placeholders)
-        );
-        $stmtHistDet = $this->pdo->prepare($sqlHistDet);
-        $stmtHistDet->execute($paramsHist);
-        $histDet = $stmtHistDet->fetchAll(\PDO::FETCH_ASSOC) ?: [];
-
-        $conHistorico = [];
-        foreach (array_merge($histRef, $histDet) as $r) {
-            if (isset($r['id_producto'])) {
-                $conHistorico[(int)$r['id_producto']] = (int)$r['id_producto'];
-            }
-        }
-
-        return array_values(array_intersect($candidatos, array_values($conHistorico)));
-    }
-
-    /**
-     * Busca en detalle de licitaciones un conjunto de productos.
-     *
-     * @param array<int, int> $productIds
-     * @return array<int, array<string, mixed>>
-     */
-    private function searchDetalle(array $productIds): array
-    {
-        if ($productIds === []) {
-            return [];
-        }
-
-        $placeholders = [];
-        $params = $this->getRlsParams();
-        foreach ($productIds as $idx => $pid) {
-            $ph = ':pid_' . $idx;
-            $placeholders[] = $ph;
-            $params[$ph] = $pid;
-        }
-
-        $sql = sprintf(
-            'SELECT
-                 d.id_detalle,
-                 d.id_producto,
-                 d.unidades,
-                 d.pvu,
-                 l.nombre AS licitacion_nombre,
-                 l.numero_expediente,
-                 p.nombre AS producto_nombre,
-                 p.nombre_proveedor AS producto_nombre_proveedor
-             FROM %1$s d
-             JOIN %2$s l
-               ON l.id_licitacion = d.id_licitacion
-             JOIN %3$s p
-               ON p.id = d.id_producto
-             WHERE %4$s
-               AND d.activo = 1
-               AND d.id_producto IN (%5$s)',
-            self::TABLE_DETALLE,
-            self::TABLE_LICITACIONES,
-            self::TABLE_PRODUCTOS,
-            $this->getRlsClause(),
-            implode(', ', $placeholders)
-        );
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        return $results;
     }
 
     /**
@@ -288,7 +329,7 @@ final class SearchRepository extends BaseRepository
         }
 
         $placeholders = [];
-        $params = $this->getRlsParams();
+        $params = [];
         foreach ($detalleIds as $idx => $id) {
             $ph = ':det_' . $idx;
             $placeholders[] = $ph;
@@ -298,10 +339,9 @@ final class SearchRepository extends BaseRepository
         $sql = sprintf(
             'SELECT id_detalle, pcu, proveedor
              FROM %s
-             WHERE %s AND id_detalle IN (%s)
+             WHERE id_detalle IN (%s)
              ORDER BY id_real DESC',
             self::TABLE_REAL,
-            $this->getRlsClause(),
             implode(', ', $placeholders)
         );
 
@@ -326,61 +366,117 @@ final class SearchRepository extends BaseRepository
     }
 
     /**
-     * Busca precios de referencia para un conjunto de productos.
+     * Búsqueda legacy (mantenida por compatibilidad).
      *
-     * @param array<int, int> $productIds
      * @return array<int, array<string, mixed>>
      */
-    private function searchPreciosReferencia(array $productIds): array
+    public function searchProducts(string $query): array
     {
-        if ($productIds === []) {
-            return [];
+        $result = $this->searchHistorico($query, 200);
+        $out = [];
+
+        foreach ($result['licitaciones'] as $row) {
+            $out[] = [
+                'id_producto' => null,
+                'producto' => $row['producto'] ?? null,
+                'pvu' => $row['pvu'] ?? null,
+                'pcu' => $row['pcu'] ?? null,
+                'unidades' => $row['unidades'] ?? null,
+                'licitacion_nombre' => $row['licitacion'] ?? null,
+                'numero_expediente' => $row['expediente'] ?? null,
+                'proveedor' => $row['proveedor'] ?? null,
+            ];
         }
 
-        $placeholders = [];
-        $params = $this->getRlsParams();
-        foreach ($productIds as $idx => $pid) {
-            $ph = ':pid_' . $idx;
-            $placeholders[] = $ph;
-            $params[$ph] = $pid;
+        foreach ($result['referencia'] as $row) {
+            $out[] = [
+                'id_producto' => null,
+                'producto' => $row['producto'] ?? null,
+                'pvu' => $row['pvu'] ?? null,
+                'pcu' => $row['pcu'] ?? null,
+                'unidades' => $row['unidades'] ?? null,
+                'licitacion_nombre' => null,
+                'numero_expediente' => null,
+                'proveedor' => $row['proveedor'] ?? null,
+            ];
         }
 
-        $sql = sprintf(
-            'SELECT
-                 pr.id_producto,
-                 pr.pvu,
-                 pr.pcu,
-                 pr.unidades,
-                 pr.proveedor,
-                 p.nombre AS producto_nombre,
-                 p.nombre_proveedor AS producto_nombre_proveedor
-             FROM %1$s pr
-             JOIN %2$s p
-               ON p.id = pr.id_producto
-             WHERE %3$s
-               AND pr.id_producto IN (%4$s)',
-            self::TABLE_PRECIOS_REFERENCIA,
-            self::TABLE_PRODUCTOS,
-            $this->getRlsClause(),
-            implode(', ', $placeholders)
-        );
-
-        $stmt = $this->pdo->prepare($sql);
-        $stmt->execute($params);
-
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        return $out;
     }
 
     /**
-     * Determina el proveedor a mostrar: línea si existe, sino el del producto.
+     * Calcula el precio medio histórico de referencia de un producto.
+     *
+     * @return array<string, mixed>
      */
-    private function getProveedorDisplay(?string $proveedorLinea, string $productoNombreProveedor): ?string
+    public function getReferencePrice(int $productId): array
     {
-        if ($proveedorLinea !== null && trim($proveedorLinea) !== '') {
-            return trim($proveedorLinea);
+        $sql = sprintf(
+            'SELECT
+                 AVG(pvu) AS avg_pvu,
+                 AVG(pcu) AS avg_pcu,
+                 COUNT(*) AS total_rows,
+                 MIN(fecha_presupuesto) AS first_date,
+                 MAX(fecha_presupuesto) AS last_date
+             FROM %s
+             WHERE id_producto = :id_producto',
+            self::TABLE_PRECIOS_REFERENCIA
+        );
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([':id_producto' => $productId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        } catch (\PDOException $e) {
+            $row = null;
         }
-        $nom = trim($productoNombreProveedor);
-        return $nom !== '' ? $nom : null;
+
+        if ($row === false || $row === null || (int)($row['total_rows'] ?? 0) === 0) {
+            return [
+                'product_id' => $productId,
+                'avg_pvu' => null,
+                'avg_pcu' => null,
+                'count' => 0,
+                'first_date' => null,
+                'last_date' => null,
+            ];
+        }
+
+        return [
+            'product_id' => $productId,
+            'avg_pvu' => $row['avg_pvu'] !== null ? (float)$row['avg_pvu'] : null,
+            'avg_pcu' => $row['avg_pcu'] !== null ? (float)$row['avg_pcu'] : null,
+            'count' => (int)$row['total_rows'],
+            'first_date' => $row['first_date'] !== null ? (string)$row['first_date'] : null,
+            'last_date' => $row['last_date'] !== null ? (string)$row['last_date'] : null,
+        ];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function tokenize(string $query): array
+    {
+        $q = mb_strtolower(trim($query), 'UTF-8');
+        if ($q === '') {
+            return [];
+        }
+
+        $parts = preg_split('/\s+/u', $q) ?: [];
+        $tokens = array_values(array_filter(
+            $parts,
+            static fn(string $t): bool => mb_strlen($t, 'UTF-8') >= 2
+        ));
+
+        return $tokens !== [] ? $tokens : [$q];
+    }
+
+    private function escapeLike(string $value): string
+    {
+        return strtr($value, [
+            '\\' => '\\\\',
+            '%' => '\%',
+            '_' => '\_',
+        ]);
     }
 }
-

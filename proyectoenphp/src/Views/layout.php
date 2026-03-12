@@ -79,6 +79,27 @@ $pageTitle = isset($title) && $title !== ''
                     <span>Analítica</span>
                 </a>
                 <a
+                    href="disponible.php"
+                    class="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+                >
+                    <span class="inline-block h-2 w-2 rounded-full bg-cyan-400"></span>
+                    <span>Disponible</span>
+                </a>
+                <a
+                    href="disponible-cliente.php"
+                    class="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+                >
+                    <span class="inline-block h-2 w-2 rounded-full bg-teal-400"></span>
+                    <span>Vista Cliente</span>
+                </a>
+                <a
+                    href="pedidos-disponible.php"
+                    class="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
+                >
+                    <span class="inline-block h-2 w-2 rounded-full bg-orange-400"></span>
+                    <span>Pedidos</span>
+                </a>
+                <a
                     href="usuarios.php"
                     class="flex items-center gap-2 rounded-lg px-3 py-2 text-slate-100 hover:bg-slate-800 hover:text-white"
                 >

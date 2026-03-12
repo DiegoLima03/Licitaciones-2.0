@@ -1092,8 +1092,11 @@ try {
                 $isContratoDerivadoCfg = !empty($licitacionActual['id_licitacion_padre'])
                     || $tipoProcCfg === 'CONTRATO_BASADO'
                     || $tipoProcCfg === 'ESPECIFICO_SDA';
+                $estadoActualCfg = (int)($licitacionActual['id_estado'] ?? 0);
                 if ($isContratoDerivadoCfg) {
                     $loadError = 'En contratos basados/especificos no se usan lotes.';
+                } elseif ($estadoActualCfg !== 3) {
+                    $loadError = 'Solo puedes generar lotes en estado En analisis.';
                 }
                 $numLotes = isset($_POST['num_lotes']) ? (int)$_POST['num_lotes'] : 0;
                 if ($loadError !== null) {
@@ -2230,6 +2233,114 @@ if ($pendingPartidasSinProducto === []) {
             padding: 0 12px;
             cursor: pointer;
         }
+        .kpi-grid {
+            display: grid;
+            gap: 10px;
+            margin-top: 12px;
+        }
+        .kpi-grid-main {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+        }
+        .kpi-grid-secondary {
+            grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+        .kpi-card {
+            border: 1px solid rgba(133, 114, 94, 0.45);
+            border-radius: 12px;
+            background: linear-gradient(180deg, rgba(255, 255, 255, 0.99) 0%, rgba(245, 242, 235, 0.98) 100%);
+            padding: 10px 12px;
+            box-shadow: 0 2px 8px rgba(16, 24, 14, 0.05);
+        }
+        .kpi-label {
+            display: block;
+            margin: 0 0 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            color: #7c6f58;
+            letter-spacing: 0.05em;
+            text-transform: uppercase;
+        }
+        .kpi-value {
+            margin: 0;
+            font-size: 1.05rem;
+            font-weight: 700;
+            color: #111827;
+            line-height: 1.2;
+        }
+        .kpi-value.is-positive {
+            color: #14532d;
+        }
+        .kpi-value.is-warning {
+            color: #7c2d12;
+        }
+        .kpi-value.is-negative {
+            color: #9f1239;
+        }
+        .kpi-note {
+            margin-top: 10px;
+            border: 1px solid #bae6fd;
+            background: #eff6ff;
+            color: #1e3a8a;
+            border-radius: 10px;
+            padding: 9px 12px;
+            font-size: 0.83rem;
+        }
+        .kpi-deviation {
+            margin-top: 12px;
+            border: 1px solid rgba(133, 114, 94, 0.45);
+            border-radius: 12px;
+            background: #fff;
+            padding: 10px 12px;
+        }
+        .kpi-deviation-title {
+            margin: 0 0 8px;
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.04em;
+            text-transform: uppercase;
+            color: #7c6f58;
+        }
+        .kpi-deviation-content {
+            display: flex;
+            flex-wrap: wrap;
+            align-items: center;
+            gap: 12px;
+        }
+        .kpi-deviation-item {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.83rem;
+            color: #475569;
+        }
+        .kpi-deviation-item strong {
+            color: #111827;
+            font-size: 0.88rem;
+        }
+        .kpi-deviation-pill {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 9999px;
+            padding: 3px 10px;
+            font-size: 0.83rem;
+            font-weight: 700;
+            border: 1px solid transparent;
+        }
+        .kpi-deviation-pill.is-over {
+            background: #fee2e2;
+            border-color: #fecaca;
+            color: #991b1b;
+        }
+        .kpi-deviation-pill.is-under {
+            background: #dcfce7;
+            border-color: #bbf7d0;
+            color: #166534;
+        }
+        .kpi-deviation-pill.is-neutral {
+            background: #f1f5f9;
+            border-color: #e2e8f0;
+            color: #334155;
+        }
         .derived-parent-hint {
             margin-top: 10px;
             padding: 10px 12px;
@@ -2392,6 +2503,12 @@ if ($pendingPartidasSinProducto === []) {
             .detail-title {
                 font-size: 1.5rem;
             }
+            .kpi-grid-main {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+            .kpi-grid-secondary {
+                grid-template-columns: 1fr;
+            }
         }
     </style>
     <link
@@ -2411,6 +2528,9 @@ if ($pendingPartidasSinProducto === []) {
                 <a href="buscador.php" class="nav-link">Buscador historico</a>
                 <a href="lineas-referencia.php" class="nav-link">Anadir lineas</a>
                 <a href="analytics.php" class="nav-link">Analitica</a>
+                <a href="disponible.php" class="nav-link">Disponible</a>
+                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
+                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
             <div class="sidebar-footer">
@@ -2700,6 +2820,11 @@ if ($pendingPartidasSinProducto === []) {
                                                     <?php echo htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?> (vincular productos antes)
                                                 </button>
                                             <?php elseif ($requiresLossModal): ?>
+                                                <?php
+                                                $lossTriggerStyle = $nuevoEstadoId === 6
+                                                    ? 'width:100%;text-align:left;border:1px solid #b91c1c;border-radius:8px;background:#fef2f2;color:#7f1d1d;font-size:0.8rem;font-weight:600;padding:6px 10px;cursor:pointer;'
+                                                    : 'width:100%;text-align:left;border:1px solid #1f2937;border-radius:8px;background:#020617;color:#e5e7eb;font-size:0.8rem;font-weight:500;padding:6px 10px;cursor:pointer;';
+                                                ?>
                                                 <button
                                                     type="button"
                                                     class="js-open-loss-status-modal"
@@ -2707,7 +2832,7 @@ if ($pendingPartidasSinProducto === []) {
                                                     data-title="<?php echo htmlspecialchars($lossModalTitle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                     data-intro="<?php echo htmlspecialchars($lossModalIntro, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                     data-lotes-json="<?php echo htmlspecialchars(json_encode($lossModalLotesList, JSON_UNESCAPED_UNICODE), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
-                                                    style="width:100%;text-align:left;border:1px solid #1f2937;border-radius:8px;background:#020617;color:#e5e7eb;font-size:0.8rem;font-weight:500;padding:6px 10px;cursor:pointer;"
+                                                    style="<?php echo htmlspecialchars($lossTriggerStyle, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                 >
                                                     <?php echo htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                                                 </button>
@@ -3036,6 +3161,135 @@ if ($pendingPartidasSinProducto === []) {
                         }
 
                         // -------------------------
+                        // Indicadores (replica del frontend antiguo)
+                        // -------------------------
+                        $formatEuroKpi = static function (float $value): string {
+                            return number_format($value, 0, ',', '.') . ' EUR';
+                        };
+                        $formatPctKpi = static function (float $value): string {
+                            return number_format($value, 1, ',', '.') . '%';
+                        };
+
+                        $presupuestoBaseKpi = (float)($licitacion['pres_maximo'] ?? 0.0);
+                        $isTipo2Kpi = $idTipoLicitacionVista === 2;
+
+                        /** @var array<int, array<string,mixed>> $partidasActivasKpi */
+                        $partidasActivasKpi = [];
+                        foreach ($partidas as $pKpi) {
+                            if (!is_array($pKpi)) {
+                                continue;
+                            }
+                            $activaKpi = array_key_exists('activo', $pKpi) ? (bool)$pKpi['activo'] : true;
+                            if (!$activaKpi) {
+                                continue;
+                            }
+                            $loteKpi = trim((string)($pKpi['lote'] ?? ''));
+                            if ($loteKpi === '') {
+                                $loteKpi = 'General';
+                            }
+                            if ($filtrarPorLotesGanados) {
+                                $loteKeyKpi = mb_strtolower($loteKpi, 'UTF-8');
+                                if (!isset($lotesGanadosSet[$loteKeyKpi])) {
+                                    continue;
+                                }
+                            }
+                            $partidasActivasKpi[] = $pKpi;
+                        }
+
+                        $ofertadoKpi = 0.0;
+                        $costePrevistoKpi = 0.0;
+                        if ($isTipo2Kpi) {
+                            $totalPmaxuKpi = 0.0;
+                            $totalPvuKpi = 0.0;
+                            $totalPcuKpi = 0.0;
+                            $numPartidasTipo2Kpi = count($partidasActivasKpi);
+                            foreach ($partidasActivasKpi as $pTipo2Kpi) {
+                                $totalPmaxuKpi += (float)($pTipo2Kpi['pmaxu'] ?? 0.0);
+                                $totalPvuKpi += (float)($pTipo2Kpi['pvu'] ?? 0.0);
+                                $totalPcuKpi += (float)($pTipo2Kpi['pcu'] ?? 0.0);
+                            }
+                            if ($presupuestoBaseKpi > 0.0) {
+                                $factorKpi = $totalPmaxuKpi > 0.0
+                                    ? max(0.0, min(1.0, $totalPvuKpi / $totalPmaxuKpi))
+                                    : 1.0;
+                                $ofertadoKpi = $presupuestoBaseKpi * $factorKpi;
+                            } else {
+                                $ofertadoKpi = $totalPvuKpi;
+                            }
+                            if ($numPartidasTipo2Kpi > 0) {
+                                $mediaPvuKpi = $totalPvuKpi / $numPartidasTipo2Kpi;
+                                $mediaCosteKpi = $totalPcuKpi / $numPartidasTipo2Kpi;
+                                $udsTeoricasKpi = $mediaPvuKpi > 0.0 ? $ofertadoKpi / $mediaPvuKpi : 0.0;
+                                $costePrevistoKpi = $udsTeoricasKpi * $mediaCosteKpi;
+                            }
+                        } else {
+                            foreach ($partidasActivasKpi as $pKpi) {
+                                $udsKpi = (float)($pKpi['unidades'] ?? 0.0);
+                                $pvuKpi = (float)($pKpi['pvu'] ?? 0.0);
+                                $pcuKpi = (float)($pKpi['pcu'] ?? 0.0);
+                                $ofertadoKpi += $udsKpi * $pvuKpi;
+                                $costePrevistoKpi += $udsKpi * $pcuKpi;
+                            }
+                        }
+                        $beneficioPrevistoKpi = $ofertadoKpi - $costePrevistoKpi;
+
+                        $costeRealEntregadoKpi = 0.0;
+                        $gastosExtraEntregasKpi = 0.0;
+                        $totalCobradoKpi = 0.0;
+                        $totalPendienteKpi = 0.0;
+                        foreach ($entregas as $entKpi) {
+                            $lineasKpi = isset($entKpi['lineas']) && is_array($entKpi['lineas']) ? $entKpi['lineas'] : [];
+                            foreach ($lineasKpi as $linKpi) {
+                                $idDetKpi = $linKpi['id_detalle'] ?? null;
+                                $idTipoGastoKpi = $linKpi['id_tipo_gasto'] ?? null;
+                                $cantidadKpi = (float)($linKpi['cantidad'] ?? 0.0);
+                                $pcuKpi = (float)($linKpi['pcu'] ?? 0.0);
+                                $esGastoExtraKpi = $idDetKpi === null && $idTipoGastoKpi !== null;
+
+                                if ($esGastoExtraKpi) {
+                                    $gastosExtraEntregasKpi += $pcuKpi;
+                                    continue;
+                                }
+
+                                $costeRealEntregadoKpi += $cantidadKpi * $pcuKpi;
+                                $importeKpi = $cantidadKpi * $pcuKpi;
+                                if ($importeKpi <= 0.0) {
+                                    continue;
+                                }
+                                $cobradoRawKpi = $linKpi['cobrado'] ?? false;
+                                $isCobradoKpi = $cobradoRawKpi === true
+                                    || $cobradoRawKpi === 1
+                                    || $cobradoRawKpi === '1';
+                                if ($isCobradoKpi) {
+                                    $totalCobradoKpi += $importeKpi;
+                                } else {
+                                    $totalPendienteKpi += $importeKpi;
+                                }
+                            }
+                        }
+                        $beneficioRealKpi = $ofertadoKpi - ($costeRealEntregadoKpi + $gastosExtraEntregasKpi);
+                        $totalEntregadoImporteKpi = $totalCobradoKpi + $totalPendienteKpi;
+                        $pctCobradoKpi = $totalEntregadoImporteKpi > 0.0
+                            ? (int)round(($totalCobradoKpi / $totalEntregadoImporteKpi) * 100.0)
+                            : 0;
+                        $showExecutionKpis = $idEstado >= 5;
+
+                        $costePresupuestadoRawKpi = $licitacion['coste_presupuestado'] ?? null;
+                        $costeRealRawKpi = $licitacion['coste_real'] ?? null;
+                        $costePresupuestadoKpi = parseNullableAmount($costePresupuestadoRawKpi);
+                        $costeRealHistoricoKpi = parseNullableAmount($costeRealRawKpi);
+                        $gastosExtraHistoricoKpi = parseNullableAmount($licitacion['gastos_extraordinarios'] ?? null);
+                        $costeRealTotalHistoricoKpi = ($costeRealHistoricoKpi ?? 0.0) + ($gastosExtraHistoricoKpi ?? 0.0);
+                        $hasPresuHistoricoKpi = $costePresupuestadoKpi !== null && $costePresupuestadoKpi > 0.0;
+                        $hasRealHistoricoKpi = $costeRealTotalHistoricoKpi > 0.0;
+                        $showCostDeviationKpi = ($costePresupuestadoRawKpi !== null || $costeRealRawKpi !== null)
+                            && ($hasPresuHistoricoKpi || $hasRealHistoricoKpi);
+                        $deviationPctKpi = null;
+                        if ($hasPresuHistoricoKpi && $costeRealTotalHistoricoKpi > 0.0) {
+                            $deviationPctKpi = (($costeRealTotalHistoricoKpi - (float)$costePresupuestadoKpi) / (float)$costePresupuestadoKpi) * 100.0;
+                        }
+
+                        // -------------------------
                         // Calculos para Remaining
                         // -------------------------
                         // Mapa id_detalle => partida
@@ -3120,6 +3374,101 @@ if ($pendingPartidasSinProducto === []) {
                             }
                         }
                         ?>
+
+                        <section class="kpi-grid kpi-grid-main">
+                            <article class="kpi-card">
+                                <span class="kpi-label">Presupuesto Base</span>
+                                <p class="kpi-value"><?php echo $formatEuroKpi($presupuestoBaseKpi); ?></p>
+                            </article>
+                            <article class="kpi-card">
+                                <span class="kpi-label">Ofertado (Partidas activas)</span>
+                                <p class="kpi-value is-positive"><?php echo $formatEuroKpi($ofertadoKpi); ?></p>
+                            </article>
+                            <article class="kpi-card">
+                                <span class="kpi-label">Coste Estimado</span>
+                                <p class="kpi-value is-warning"><?php echo $formatEuroKpi($costePrevistoKpi); ?></p>
+                            </article>
+                            <article class="kpi-card">
+                                <span class="kpi-label">Beneficio Previsto</span>
+                                <p class="kpi-value <?php echo $beneficioPrevistoKpi >= 0.0 ? 'is-positive' : 'is-negative'; ?>">
+                                    <?php echo $formatEuroKpi($beneficioPrevistoKpi); ?>
+                                </p>
+                            </article>
+                        </section>
+
+                        <?php if ($showExecutionKpis): ?>
+                            <section class="kpi-grid kpi-grid-secondary">
+                                <article class="kpi-card">
+                                    <span class="kpi-label">Coste real (entregado)</span>
+                                    <p class="kpi-value is-warning"><?php echo $formatEuroKpi($costeRealEntregadoKpi); ?></p>
+                                </article>
+                                <article class="kpi-card">
+                                    <span class="kpi-label">Gastos extraordinarios</span>
+                                    <p class="kpi-value is-warning"><?php echo $formatEuroKpi($gastosExtraEntregasKpi); ?></p>
+                                </article>
+                                <article class="kpi-card">
+                                    <span class="kpi-label">Beneficio real</span>
+                                    <p class="kpi-value <?php echo $beneficioRealKpi >= 0.0 ? 'is-positive' : 'is-negative'; ?>">
+                                        <?php echo $formatEuroKpi($beneficioRealKpi); ?>
+                                    </p>
+                                </article>
+                            </section>
+
+                            <section class="kpi-grid kpi-grid-secondary">
+                                <article class="kpi-card">
+                                    <span class="kpi-label">Importe cobrado</span>
+                                    <p class="kpi-value is-positive"><?php echo $formatEuroKpi($totalCobradoKpi); ?></p>
+                                </article>
+                                <article class="kpi-card">
+                                    <span class="kpi-label">Importe pendiente de cobro</span>
+                                    <p class="kpi-value is-warning"><?php echo $formatEuroKpi($totalPendienteKpi); ?></p>
+                                </article>
+                                <article class="kpi-card">
+                                    <span class="kpi-label">% cobrado sobre entregado</span>
+                                    <p class="kpi-value"><?php echo $pctCobradoKpi; ?>%</p>
+                                </article>
+                            </section>
+                        <?php endif; ?>
+
+                        <?php if ($isAmSda): ?>
+                            <div class="kpi-note">
+                                Este es un Acuerdo Marco / SDA. La gestion de presupuesto, entregas y remaining se hace en cada contrato derivado.
+                            </div>
+                        <?php endif; ?>
+
+                        <?php if ($showCostDeviationKpi): ?>
+                            <?php
+                            $desviacionClassKpi = 'is-neutral';
+                            if ($deviationPctKpi !== null) {
+                                if ($deviationPctKpi > 0.0) {
+                                    $desviacionClassKpi = 'is-over';
+                                } elseif ($deviationPctKpi < 0.0) {
+                                    $desviacionClassKpi = 'is-under';
+                                }
+                            }
+                            ?>
+                            <section class="kpi-deviation">
+                                <p class="kpi-deviation-title">Desviacion de coste</p>
+                                <div class="kpi-deviation-content">
+                                    <div class="kpi-deviation-item">
+                                        <span>Presupuestado</span>
+                                        <strong><?php echo $formatEuroKpi((float)($costePresupuestadoKpi ?? 0.0)); ?></strong>
+                                    </div>
+                                    <div class="kpi-deviation-item">
+                                        <span>Real / historico</span>
+                                        <strong><?php echo $formatEuroKpi($costeRealTotalHistoricoKpi); ?></strong>
+                                        <?php if (($gastosExtraHistoricoKpi ?? 0.0) > 0.0): ?>
+                                            <span>(+ <?php echo $formatEuroKpi((float)$gastosExtraHistoricoKpi); ?> extra)</span>
+                                        <?php endif; ?>
+                                    </div>
+                                    <?php if ($deviationPctKpi !== null): ?>
+                                        <div class="kpi-deviation-pill <?php echo $desviacionClassKpi; ?>">
+                                            <?php echo ($deviationPctKpi > 0.0 ? '+' : '') . $formatPctKpi($deviationPctKpi); ?> desviacion
+                                        </div>
+                                    <?php endif; ?>
+                                </div>
+                            </section>
+                        <?php endif; ?>
 
                         <div class="tabs">
                             <div class="tabs-list">
@@ -3344,7 +3693,7 @@ if ($pendingPartidasSinProducto === []) {
                                         Productos vinculados correctamente.
                                     </div>
                                 <?php endif; ?>
-                                <?php if ($isContratoDerivado || $lotesConfigItems === []): ?>
+                                <?php if ($isContratoDerivado || ($lotesConfigItems === [] && $idEstado === 3)): ?>
                                     <div class="lotes-config-panel">
                                         <?php if ($isContratoDerivado): ?>
                                             <div class="lotes-config-empty">
@@ -3352,16 +3701,21 @@ if ($pendingPartidasSinProducto === []) {
                                             </div>
                                         <?php else: ?>
                                             <div class="lotes-config-empty">
-                                                <span>Esta licitacion no tiene lotes configurados.</span>
                                                 <form
                                                     method="post"
                                                     action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id . '&tab=presupuesto', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                     class="lotes-config-form"
                                                 >
                                                     <input type="hidden" name="form_tipo" value="guardar_lotes_config">
-                                                    <label for="num-lotes-input" class="lotes-config-label">Cuantos lotes</label>
-                                                    <input id="num-lotes-input" type="number" name="num_lotes" min="1" max="20" value="2">
-                                                    <button type="submit">Generar lotes</button>
+                                                    <input type="hidden" name="num_lotes" value="2" class="js-generate-lotes-count">
+                                                    <button
+                                                        type="button"
+                                                        class="js-generate-lotes-flow"
+                                                        data-min="1"
+                                                        data-max="20"
+                                                    >
+                                                        Generar lotes
+                                                    </button>
                                                 </form>
                                             </div>
                                         <?php endif; ?>
@@ -3469,6 +3823,7 @@ if ($pendingPartidasSinProducto === []) {
                                         method="post"
                                         action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id . '&tab=presupuesto', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                         class="budget-table-form"
+                                        novalidate
                                     >
                                         <input type="hidden" name="form_tipo" value="budget_table_action">
                                         <?php if ($isTipoDescuentoPresupuesto): ?>
@@ -3632,18 +3987,18 @@ if ($pendingPartidasSinProducto === []) {
                                                         <?php endif; ?>
                                                         <?php if ($showUnidadesPresupuesto): ?>
                                                             <td class="budget-cell-num">
-                                                                <input type="number" step="0.01" min="0" name="lineas[<?php echo $detalleId; ?>][unidades]" value="<?php echo $uds > 0 ? htmlspecialchars((string)$uds, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>" class="budget-input budget-input-right" />
+                                                                <input type="number" step="any" min="0" name="lineas[<?php echo $detalleId; ?>][unidades]" value="<?php echo $uds > 0 ? htmlspecialchars((string)$uds, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>" class="budget-input budget-input-right" />
                                                             </td>
                                                         <?php endif; ?>
                                                         <?php if ($showPmaxuPresupuesto): ?>
                                                             <td class="budget-cell-num">
-                                                                <input type="number" step="0.01" min="0" name="lineas[<?php echo $detalleId; ?>][pmaxu]" value="<?php echo $pmaxu > 0 ? htmlspecialchars((string)$pmaxu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>" class="budget-input budget-input-right" />
+                                                                <input type="number" step="any" min="0" name="lineas[<?php echo $detalleId; ?>][pmaxu]" value="<?php echo $pmaxu > 0 ? htmlspecialchars((string)$pmaxu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>" class="budget-input budget-input-right" />
                                                             </td>
                                                         <?php endif; ?>
                                                         <td class="budget-cell-num">
                                                             <input
                                                                 type="number"
-                                                                step="0.01"
+                                                                step="any"
                                                                 min="0"
                                                                 name="lineas[<?php echo $detalleId; ?>][pvu]"
                                                                 value="<?php echo $pvu > 0 ? htmlspecialchars((string)$pvu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>"
@@ -3652,7 +4007,7 @@ if ($pendingPartidasSinProducto === []) {
                                                             />
                                                         </td>
                                                         <td class="budget-cell-num">
-                                                            <input type="number" step="0.01" min="0" name="lineas[<?php echo $detalleId; ?>][pcu]" value="<?php echo $pcu > 0 ? htmlspecialchars((string)$pcu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>" class="budget-input budget-input-right" />
+                                                            <input type="number" step="any" min="0" name="lineas[<?php echo $detalleId; ?>][pcu]" value="<?php echo $pcu > 0 ? htmlspecialchars((string)$pcu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>" class="budget-input budget-input-right" />
                                                         </td>
                                                         <td class="is-right"><?php echo number_format($importe, 2, ',', '.'); ?></td>
                                                         <td class="budget-cell-actions">
@@ -3719,18 +4074,18 @@ if ($pendingPartidasSinProducto === []) {
                                                     <?php endif; ?>
                                                     <?php if ($showUnidadesPresupuesto): ?>
                                                         <td class="budget-cell-num">
-                                                            <input type="number" step="0.01" min="0" name="lineas_nuevas[<?php echo $newRowIndex; ?>][unidades]" placeholder="0" class="budget-input budget-input-right" />
+                                                            <input type="number" step="any" min="0" name="lineas_nuevas[<?php echo $newRowIndex; ?>][unidades]" placeholder="0" class="budget-input budget-input-right" />
                                                         </td>
                                                     <?php endif; ?>
                                                     <?php if ($showPmaxuPresupuesto): ?>
                                                         <td class="budget-cell-num">
-                                                            <input type="number" step="0.01" min="0" name="lineas_nuevas[<?php echo $newRowIndex; ?>][pmaxu]" placeholder="0" class="budget-input budget-input-right" />
+                                                            <input type="number" step="any" min="0" name="lineas_nuevas[<?php echo $newRowIndex; ?>][pmaxu]" placeholder="0" class="budget-input budget-input-right" />
                                                         </td>
                                                     <?php endif; ?>
                                                     <td class="budget-cell-num">
                                                         <input
                                                             type="number"
-                                                            step="0.01"
+                                                            step="any"
                                                             min="0"
                                                             name="lineas_nuevas[<?php echo $newRowIndex; ?>][pvu]"
                                                             placeholder="0"
@@ -3739,7 +4094,7 @@ if ($pendingPartidasSinProducto === []) {
                                                         />
                                                     </td>
                                                     <td class="budget-cell-num">
-                                                        <input type="number" step="0.01" min="0" name="lineas_nuevas[<?php echo $newRowIndex; ?>][pcu]" placeholder="0" class="budget-input budget-input-right" />
+                                                        <input type="number" step="any" min="0" name="lineas_nuevas[<?php echo $newRowIndex; ?>][pcu]" placeholder="0" class="budget-input budget-input-right" />
                                                     </td>
                                                     <td class="is-right budget-new-importe">-</td>
                                                     <td class="budget-cell-actions">
@@ -4124,6 +4479,7 @@ if ($pendingPartidasSinProducto === []) {
                                                                     <td style="padding:4px 6px;min-width:200px;">
                                                                         <select
                                                                             name="lineas_presu[<?php echo $i; ?>][id_detalle]"
+                                                                            class="js-albaran-partida-select"
                                                                             style="width:100%;height:30px;border-radius:6px;border:1px solid #1f2937;background:#020617;color:#e5e7eb;font-size:0.75rem;padding:2px 6px;"
                                                                         >
                                                                             <option value="">Selecciona partida...</option>
@@ -4142,9 +4498,20 @@ if ($pendingPartidasSinProducto === []) {
                                                                                 $baseLabel = $usaLotesPresupuesto
                                                                                     ? ($lote . ' - ' . $nombreProd)
                                                                                     : $nombreProd;
-                                                                                $label = $baseLabel . ' (restante por entregar: ' . $restanteTxt . ')';
+                                                                                $proveedorPartida = trim((string)($p['nombre_proveedor'] ?? ''));
+                                                                                if ($proveedorPartida === '') {
+                                                                                    $proveedorPartida = trim((string)($p['proveedor'] ?? ''));
+                                                                                }
+                                                                                if ($showUnidadesPresupuesto) {
+                                                                                    $label = $baseLabel . ' (restante por entregar: ' . $restanteTxt . ')';
+                                                                                } else {
+                                                                                    $label = $baseLabel;
+                                                                                }
                                                                                 ?>
-                                                                                <option value="<?php echo $idDet; ?>">
+                                                                                <option
+                                                                                    value="<?php echo $idDet; ?>"
+                                                                                    data-proveedor="<?php echo htmlspecialchars($proveedorPartida, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                                                >
                                                                                     <?php echo htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                                                                                 </option>
                                                                             <?php endforeach; ?>
@@ -4154,14 +4521,17 @@ if ($pendingPartidasSinProducto === []) {
                                                                         <input
                                                                             type="text"
                                                                             name="lineas_presu[<?php echo $i; ?>][proveedor]"
+                                                                            class="js-albaran-proveedor-input"
                                                                             placeholder="Proveedor"
+                                                                            readonly
+                                                                            aria-readonly="true"
                                                                             style="width:100%;height:30px;border-radius:6px;border:1px solid #1f2937;background:#020617;color:#e5e7eb;font-size:0.75rem;padding:2px 6px;"
                                                                         />
                                                                     </td>
                                                                     <td style="padding:4px 6px;text-align:right;width:80px;">
                                                                         <input
                                                                             type="number"
-                                                                            step="0.01"
+                                                                            step="any"
                                                                             min="0"
                                                                             name="lineas_presu[<?php echo $i; ?>][cantidad]"
                                                                             placeholder="0"
@@ -4171,7 +4541,7 @@ if ($pendingPartidasSinProducto === []) {
                                                                     <td style="padding:4px 6px;text-align:right;width:90px;">
                                                                         <input
                                                                             type="number"
-                                                                            step="0.01"
+                                                                            step="any"
                                                                             min="0"
                                                                             name="lineas_presu[<?php echo $i; ?>][coste_unit]"
                                                                             placeholder="0,00"
@@ -4225,7 +4595,7 @@ if ($pendingPartidasSinProducto === []) {
                                                                     <td style="padding:4px 6px;text-align:right;width:90px;">
                                                                         <input
                                                                             type="number"
-                                                                            step="0.01"
+                                                                            step="any"
                                                                             min="0"
                                                                             name="lineas_ext[<?php echo $j; ?>][coste_unit]"
                                                                             placeholder="0,00"
@@ -4370,8 +4740,82 @@ document.addEventListener('DOMContentLoaded', function () {
     }
 });
 
+// Lotes: flujo en dos pasos (confirmar -> indicar cantidad)
+document.addEventListener('DOMContentLoaded', function () {
+    var buttons = Array.prototype.slice.call(document.querySelectorAll('.js-generate-lotes-flow'));
+    if (buttons.length === 0) return;
+
+    buttons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+            var form = btn.closest('form');
+            if (!form) return;
+            var countInput = form.querySelector('.js-generate-lotes-count');
+            if (!countInput) return;
+
+            var accepted = window.confirm('Quieres generar lotes para esta licitacion?');
+            if (!accepted) return;
+
+            var min = parseInt(btn.getAttribute('data-min') || '1', 10);
+            var max = parseInt(btn.getAttribute('data-max') || '20', 10);
+            if (!Number.isFinite(min)) min = 1;
+            if (!Number.isFinite(max)) max = 20;
+            if (max < min) {
+                var tmp = min;
+                min = max;
+                max = tmp;
+            }
+
+            var current = String(countInput.value || '2').trim();
+            if (current === '') current = '2';
+
+            var answer = window.prompt('Cuantos lotes quieres generar?', current);
+            if (answer === null) return;
+            var cleaned = String(answer).trim();
+
+            if (!/^\d+$/.test(cleaned)) {
+                window.alert('Introduce un numero entero entre ' + min + ' y ' + max + '.');
+                return;
+            }
+
+            var value = parseInt(cleaned, 10);
+            if (!Number.isFinite(value) || value < min || value > max) {
+                window.alert('Introduce un numero de lotes entre ' + min + ' y ' + max + '.');
+                return;
+            }
+
+            countInput.value = String(value);
+            form.submit();
+        });
+    });
+});
+
 // Presupuesto: mantener siempre una fila nueva vacia al final (sin boton "Anadir")
 document.addEventListener('DOMContentLoaded', function () {
+    var budgetForms = Array.prototype.slice.call(document.querySelectorAll('form.budget-table-form'));
+
+    function isBudgetDecimalField(field) {
+        if (!field || field.type !== 'number') return false;
+        var name = String(field.getAttribute('name') || '');
+        if (name === 'descuento_global') return true;
+        return /\[(unidades|pmaxu|pvu|pcu)\]/.test(name);
+    }
+
+    function normalizeBudgetNumericFields(scope) {
+        if (!scope || !scope.querySelectorAll) return;
+        var numericFields = scope.querySelectorAll('input[type="number"]');
+        numericFields.forEach(function (field) {
+            if (isBudgetDecimalField(field)) {
+                field.setAttribute('step', 'any');
+            }
+        });
+    }
+
+    budgetForms.forEach(function (form) {
+        form.setAttribute('novalidate', 'novalidate');
+        form.noValidate = true;
+        normalizeBudgetNumericFields(form);
+    });
+
     var tables = Array.prototype.slice.call(document.querySelectorAll('.budget-lines-table-editable'));
     if (tables.length === 0) return;
 
@@ -4490,6 +4934,7 @@ document.addEventListener('DOMContentLoaded', function () {
     function bindNewRow(row) {
         if (!row || row.getAttribute('data-budget-bound') === '1') return;
         row.setAttribute('data-budget-bound', '1');
+        normalizeBudgetNumericFields(row);
         var fields = row.querySelectorAll('input, select');
         fields.forEach(function (field) {
             field.addEventListener('input', function () {
@@ -4521,6 +4966,7 @@ document.addEventListener('DOMContentLoaded', function () {
         clone.setAttribute('data-budget-bound', '0');
         clone.setAttribute('data-budget-ac-bound', '0');
         clone.classList.add('js-budget-new-row');
+        normalizeBudgetNumericFields(clone);
         renumberRow(clone, idx);
 
         var textInputs = clone.querySelectorAll('input[type=\"text\"], input[type=\"number\"], input[type=\"hidden\"]');
@@ -5037,7 +5483,40 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     }
 
+    function getSelectedProveedor(selectEl) {
+        if (!selectEl || !selectEl.options || selectEl.selectedIndex < 0) return '';
+        var selectedOpt = selectEl.options[selectEl.selectedIndex];
+        if (!selectedOpt) return '';
+        var proveedor = selectedOpt.getAttribute('data-proveedor');
+        return typeof proveedor === 'string' ? proveedor.trim() : '';
+    }
+
+    function syncProveedorForRow(row) {
+        if (!row) return;
+        var partidaSelect = row.querySelector('.js-albaran-partida-select');
+        var proveedorInput = row.querySelector('.js-albaran-proveedor-input');
+        if (!partidaSelect || !proveedorInput) return;
+        proveedorInput.value = getSelectedProveedor(partidaSelect);
+    }
+
+    function bindProveedorAutofill() {
+        if (!secPresu) return;
+        var rows = secPresu.querySelectorAll('tbody tr');
+        rows.forEach(function (row) {
+            var partidaSelect = row.querySelector('.js-albaran-partida-select');
+            if (!partidaSelect) return;
+            if (partidaSelect.getAttribute('data-prov-bound') !== '1') {
+                partidaSelect.setAttribute('data-prov-bound', '1');
+                partidaSelect.addEventListener('change', function () {
+                    syncProveedorForRow(row);
+                });
+            }
+            syncProveedorForRow(row);
+        });
+    }
+
     function openModal() {
+        bindProveedorAutofill();
         modal.style.display = 'flex';
     }
     function closeModal() {
@@ -5067,6 +5546,7 @@ document.addEventListener('DOMContentLoaded', function () {
     // Tipo por defecto: partidas
     activarTipo('presu');
     limpiarEtiquetaGastosExtra();
+    bindProveedorAutofill();
 
     var closeByBackdropPress = false;
     modal.addEventListener('mousedown', function (e) {
@@ -5148,7 +5628,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 var row = document.createElement('button');
                 row.type = 'button';
                 row.className = 'map-product-option';
-                row.textContent = it.nombre + (it.referencia ? ' (' + it.referencia + ')' : '');
+                var proveedor = typeof it.nombre_proveedor === 'string' ? it.nombre_proveedor.trim() : '';
+                var label = (it.nombre || '') + (it.referencia ? ' (' + it.referencia + ')' : '');
+                if (proveedor !== '') {
+                    label += ' - Proveedor: ' + proveedor;
+                }
+                row.textContent = label;
                 row.addEventListener('click', function () {
                     input.value = it.nombre || '';
                     hidden.value = String(it.id_producto || '');
@@ -5169,7 +5654,7 @@ document.addEventListener('DOMContentLoaded', function () {
             }
             timer = window.setTimeout(function () {
                 var xhr = new XMLHttpRequest();
-                xhr.open('GET', PRODUCTOS_SEARCH_URL + '?q=' + encodeURIComponent(q), true);
+                xhr.open('GET', PRODUCTOS_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=0', true);
                 xhr.onreadystatechange = function () {
                     if (xhr.readyState !== 4) return;
                     if (xhr.status === 200) {
@@ -5278,7 +5763,12 @@ document.addEventListener('DOMContentLoaded', function () {
                 opt.style.fontSize = '0.8rem';
                 opt.style.padding = '7px 8px';
                 opt.style.cursor = 'pointer';
-                opt.textContent = (it.nombre || '') + (it.referencia ? ' (' + it.referencia + ')' : '');
+                var proveedor = typeof it.nombre_proveedor === 'string' ? it.nombre_proveedor.trim() : '';
+                var label = (it.nombre || '') + (it.referencia ? ' (' + it.referencia + ')' : '');
+                if (proveedor !== '') {
+                    label += ' - Proveedor: ' + proveedor;
+                }
+                opt.textContent = label;
 
                 opt.addEventListener('mouseenter', function () {
                     activeIndex = idx;
@@ -5309,7 +5799,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 var currentRequestId = ++requestId;
                 renderInfoRow('Buscando...');
                 var xhr = new XMLHttpRequest();
-                xhr.open('GET', PRODUCTOS_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=12', true);
+                xhr.open('GET', PRODUCTOS_SEARCH_URL + '?q=' + encodeURIComponent(q) + '&limit=0', true);
                 xhr.onreadystatechange = function () {
                     if (xhr.readyState !== 4) return;
                     if (currentRequestId !== requestId) return;

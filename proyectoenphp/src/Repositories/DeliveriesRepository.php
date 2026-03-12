@@ -17,6 +17,8 @@ final class DeliveriesRepository extends BaseRepository
     private const ESTADO_ADJUDICADA = 5;
     private const ESTADOS_PERMITEN_ENTREGAS = [self::ESTADO_ADJUDICADA];
     private const QTY_EPSILON = 0.0001;
+    private bool $realProductFkTableResolved = false;
+    private ?string $realProductFkTable = null;
 
     /**
      * Lista entregas. Si se pasa licitacionId, filtra por esa licitación e incluye líneas.
@@ -58,17 +60,25 @@ final class DeliveriesRepository extends BaseRepository
             $paramsLines[':id_entrega'] = (int)$idEntrega;
 
             $sqlLines = sprintf(
-                'SELECT lr.*, p.nombre AS producto_nombre, tg.nombre AS tipo_gasto_nombre
+                'SELECT lr.*,
+                        COALESCE(p.nombre, pd.nombre, ld.nombre_producto_libre, tg.nombre) AS producto_nombre,
+                        tg.nombre AS tipo_gasto_nombre
                  FROM %1$s lr
                  LEFT JOIN %2$s p
                    ON p.id = lr.id_producto
+                 LEFT JOIN %4$s ld
+                   ON ld.id_detalle = lr.id_detalle
+                  AND ld.id_licitacion = lr.id_licitacion
+                 LEFT JOIN %2$s pd
+                   ON pd.id = ld.id_producto
                  LEFT JOIN %3$s tg
                    ON tg.id = lr.id_tipo_gasto
-                 WHERE %4$s
+                 WHERE %5$s
                  ORDER BY lr.id_real',
                 self::TABLE_LICITACIONES_REAL,
                 self::TABLE_PRODUCTOS,
                 self::TABLE_TIPOS_GASTO,
+                self::TABLE_LICITACIONES_DETALLE,
                 $whereLines
             );
 
@@ -331,6 +341,25 @@ final class DeliveriesRepository extends BaseRepository
         $fecha = (string)($cabecera['fecha'] ?? '');
 
         $lineasAInsertar = [];
+        $candidateProductIds = [];
+        foreach ($lineas as $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $idTipoGasto = $line['id_tipo_gasto'] ?? null;
+            if ($idTipoGasto !== null) {
+                continue;
+            }
+            $idProductoRaw = $line['id_producto'] ?? null;
+            if ($idProductoRaw === null) {
+                continue;
+            }
+            $idProducto = (int)$idProductoRaw;
+            if ($idProducto > 0) {
+                $candidateProductIds[$idProducto] = $idProducto;
+            }
+        }
+        $validProductIds = $this->filterValidProductIdsForRealTable(array_values($candidateProductIds));
 
         foreach ($lineas as $line) {
             if (!is_array($line)) {
@@ -350,12 +379,16 @@ final class DeliveriesRepository extends BaseRepository
             $idProducto = $line['id_producto'] ?? null;
             $idProducto = $idProducto !== null ? (int)$idProducto : null;
 
-            if (!$isExtraordinario && $idProducto === null) {
-                continue;
+            if ($idProducto !== null && $idProducto > 0 && !isset($validProductIds[$idProducto])) {
+                $idProducto = null;
             }
 
             $idDetalle = $line['id_detalle'] ?? null;
             $idDetalle = $idDetalle !== null ? (int)$idDetalle : null;
+
+            if (!$isExtraordinario && $idProducto === null && $idDetalle === null) {
+                continue;
+            }
 
             $provLinea = isset($line['proveedor']) ? trim((string)$line['proveedor']) : '';
 
@@ -572,6 +605,109 @@ final class DeliveriesRepository extends BaseRepository
         }
 
         return $out;
+    }
+
+    /**
+     * @param array<int, int> $ids
+     * @return array<int, int> mapa [id => id] de productos válidos para la FK de tbl_licitaciones_real.id_producto
+     */
+    private function filterValidProductIdsForRealTable(array $ids): array
+    {
+        $ids = array_values(array_unique(array_filter(
+            $ids,
+            static fn (int $value): bool => $value > 0
+        )));
+        if ($ids === []) {
+            return [];
+        }
+
+        $fkTable = $this->getRealProductFkTable();
+        if ($fkTable === null) {
+            /** @var array<int, int> $all */
+            $all = [];
+            foreach ($ids as $id) {
+                $all[$id] = $id;
+            }
+            return $all;
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach ($ids as $idx => $id) {
+            $ph = ':pid_' . $idx;
+            $placeholders[] = $ph;
+            $params[$ph] = $id;
+        }
+
+        $sql = sprintf(
+            'SELECT id FROM `%s` WHERE id IN (%s)',
+            $fkTable,
+            implode(', ', $placeholders)
+        );
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute($params);
+        } catch (\Throwable) {
+            // Si no podemos validar contra la tabla referenciada, anulamos id_producto
+            // para evitar violaciones de FK al insertar en real.
+            return [];
+        }
+
+        /** @var array<int, int> $out */
+        $out = [];
+        while ($row = $stmt->fetch()) {
+            if (!isset($row['id'])) {
+                continue;
+            }
+            $pid = (int)$row['id'];
+            if ($pid > 0) {
+                $out[$pid] = $pid;
+            }
+        }
+
+        return $out;
+    }
+
+    private function getRealProductFkTable(): ?string
+    {
+        if ($this->realProductFkTableResolved) {
+            return $this->realProductFkTable;
+        }
+
+        $this->realProductFkTableResolved = true;
+        $this->realProductFkTable = null;
+
+        $sql = 'SELECT REFERENCED_TABLE_NAME
+                FROM information_schema.KEY_COLUMN_USAGE
+                WHERE TABLE_SCHEMA = DATABASE()
+                  AND TABLE_NAME = :table_name
+                  AND COLUMN_NAME = :column_name
+                  AND REFERENCED_TABLE_NAME IS NOT NULL
+                ORDER BY ORDINAL_POSITION
+                LIMIT 1';
+
+        try {
+            $stmt = $this->pdo->prepare($sql);
+            $stmt->execute([
+                ':table_name' => self::TABLE_LICITACIONES_REAL,
+                ':column_name' => 'id_producto',
+            ]);
+            $row = $stmt->fetch();
+        } catch (\Throwable) {
+            return null;
+        }
+
+        $table = is_array($row) && isset($row['REFERENCED_TABLE_NAME'])
+            ? (string)$row['REFERENCED_TABLE_NAME']
+            : '';
+        $table = trim($table);
+        if ($table === '' || !preg_match('/^[A-Za-z0-9_]+$/', $table)) {
+            return null;
+        }
+
+        $this->realProductFkTable = $table;
+        return $this->realProductFkTable;
     }
 
     /**

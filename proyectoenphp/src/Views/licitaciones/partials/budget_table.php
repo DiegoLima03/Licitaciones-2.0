@@ -34,6 +34,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
   action="/licitaciones/<?php echo $idLicitacion; ?>/presupuesto"
   method="POST"
   class="mt-4"
+  novalidate
 >
   <input type="hidden" name="id_licitacion" value="<?php echo $idLicitacion; ?>">
 
@@ -84,7 +85,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
                 <td class="py-2 pr-2 text-right align-middle">
                   <input
                     type="number"
-                    step="0.01"
+                    step="any"
                     min="0"
                     name="productos[<?php echo $index; ?>][unidades]"
                     value="<?php echo $uds > 0 ? htmlspecialchars((string)$uds, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>"
@@ -98,7 +99,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
                 <td class="py-2 pr-2 text-right align-middle">
                   <input
                     type="number"
-                    step="0.01"
+                    step="any"
                     min="0"
                     name="productos[<?php echo $index; ?>][pmaxu]"
                     value="<?php echo $pmaxu > 0 ? htmlspecialchars((string)$pmaxu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>"
@@ -111,7 +112,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
               <td class="py-2 pr-2 text-right align-middle">
                 <input
                   type="number"
-                  step="0.01"
+                  step="any"
                   min="0"
                   name="productos[<?php echo $index; ?>][pvu]"
                   value="<?php echo $pvu > 0 ? htmlspecialchars((string)$pvu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>"
@@ -123,7 +124,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
               <td class="py-2 pr-2 text-right align-middle">
                 <input
                   type="number"
-                  step="0.01"
+                  step="any"
                   min="0"
                   name="productos[<?php echo $index; ?>][pcu]"
                   value="<?php echo $pcu > 0 ? htmlspecialchars((string)$pcu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>"
@@ -159,7 +160,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
               <td class="py-2 pr-2 text-right align-middle">
                 <input
                   type="number"
-                  step="0.01"
+                  step="any"
                   min="0"
                   name="productos[new][unidades]"
                   class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"
@@ -172,7 +173,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
               <td class="py-2 pr-2 text-right align-middle">
                 <input
                   type="number"
-                  step="0.01"
+                  step="any"
                   min="0"
                   name="productos[new][pmaxu]"
                   class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"
@@ -184,7 +185,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
             <td class="py-2 pr-2 text-right align-middle">
               <input
                 type="number"
-                step="0.01"
+                step="any"
                 min="0"
                 name="productos[new][pvu]"
                 class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"
@@ -195,7 +196,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
             <td class="py-2 pr-2 text-right align-middle">
               <input
                 type="number"
-                step="0.01"
+                step="any"
                 min="0"
                 name="productos[new][pcu]"
                 class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"
@@ -287,7 +288,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
     // Uds.
     if (showUnidades) {
       cells += '<td class="py-2 pr-2 text-right align-middle">';
-      cells += '<input type="number" step="0.01" min="0" name="productos[' + key + '][unidades]"';
+      cells += '<input type="number" step="any" min="0" name="productos[' + key + '][unidades]"';
       cells += ' class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"';
       cells += ' placeholder="0">';
       cells += '</td>';
@@ -296,7 +297,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
     // PMAXU
     if (showPmaxu) {
       cells += '<td class="py-2 pr-2 text-right align-middle">';
-      cells += '<input type="number" step="0.01" min="0" name="productos[' + key + '][pmaxu]"';
+      cells += '<input type="number" step="any" min="0" name="productos[' + key + '][pmaxu]"';
       cells += ' class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"';
       cells += ' placeholder="0">';
       cells += '</td>';
@@ -304,14 +305,14 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
 
     // PVU
     cells += '<td class="py-2 pr-2 text-right align-middle">';
-    cells += '<input type="number" step="0.01" min="0" name="productos[' + key + '][pvu]" data-role="pvu"';
+    cells += '<input type="number" step="any" min="0" name="productos[' + key + '][pvu]" data-role="pvu"';
     cells += ' class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"';
     cells += ' placeholder="0">';
     cells += '</td>';
 
     // PCU
     cells += '<td class="py-2 pr-2 text-right align-middle">';
-    cells += '<input type="number" step="0.01" min="0" name="productos[' + key + '][pcu]" data-role="pcu"';
+    cells += '<input type="number" step="any" min="0" name="productos[' + key + '][pcu]" data-role="pcu"';
     cells += ' class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"';
     cells += ' placeholder="0">';
     cells += '</td>';

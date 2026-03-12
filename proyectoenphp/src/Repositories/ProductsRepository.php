@@ -16,9 +16,17 @@ final class ProductsRepository extends BaseRepository
      *
      * @return array<int, array<string, mixed>>
      */
-    public function searchProductos(string $query, int $limit = 30, bool $onlyWithPreciosReferencia = false): array
+    public function searchProductos(
+        string $query,
+        int $limit = 30,
+        bool $onlyWithPreciosReferencia = false,
+        bool $onlyNombre = false
+    ): array
     {
-        $limit = max(5, min(120, $limit));
+        $applyLimit = $limit > 0;
+        if ($applyLimit) {
+            $limit = max(5, min(2000, $limit));
+        }
         $query = trim($query);
 
         if ($query === '' || mb_strlen($query, 'UTF-8') < 2) {
@@ -47,82 +55,108 @@ final class ProductsRepository extends BaseRepository
             $escapedTok = $this->escapeLike($tok);
 
             $phNombreContains = ':tw_n_' . $i;
-            $phReferenciaContains = ':tw_r_' . $i;
-            $phCodigoContains = ':tw_c_' . $i;
-            $phIdContains = ':tw_id_' . $i;
-            $phIdErpContains = ':tw_iderp_' . $i;
-
-            $where .= sprintf(
-                ' AND (
-                    LOWER(COALESCE(nombre, \'\')) LIKE %1$s ESCAPE \'\\\\\'
-                    OR LOWER(COALESCE(referencia, \'\')) LIKE %2$s ESCAPE \'\\\\\'
-                    OR LOWER(COALESCE(codigo_barras, \'\')) LIKE %3$s ESCAPE \'\\\\\'
-                    OR CAST(id AS CHAR) LIKE %4$s ESCAPE \'\\\\\'
-                    OR CAST(id_erp AS CHAR) LIKE %5$s ESCAPE \'\\\\\'
-                )',
-                $phNombreContains,
-                $phReferenciaContains,
-                $phCodigoContains,
-                $phIdContains,
-                $phIdErpContains
-            );
-
             $params[$phNombreContains] = '%' . $escapedTok . '%';
-            $params[$phReferenciaContains] = '%' . $escapedTok . '%';
-            $params[$phCodigoContains] = '%' . $escapedTok . '%';
-            $params[$phIdContains] = '%' . $escapedTok . '%';
-            $params[$phIdErpContains] = '%' . $escapedTok . '%';
+            if ($onlyNombre) {
+                $where .= sprintf(
+                    ' AND LOWER(COALESCE(nombre, \'\')) LIKE %s ESCAPE \'\\\\\'',
+                    $phNombreContains
+                );
+            } else {
+                $phReferenciaContains = ':tw_r_' . $i;
+                $phCodigoContains = ':tw_c_' . $i;
+                $phIdContains = ':tw_id_' . $i;
+                $phIdErpContains = ':tw_iderp_' . $i;
+
+                $where .= sprintf(
+                    ' AND (
+                        LOWER(COALESCE(nombre, \'\')) LIKE %1$s ESCAPE \'\\\\\'
+                        OR LOWER(COALESCE(referencia, \'\')) LIKE %2$s ESCAPE \'\\\\\'
+                        OR LOWER(COALESCE(codigo_barras, \'\')) LIKE %3$s ESCAPE \'\\\\\'
+                        OR CAST(id AS CHAR) LIKE %4$s ESCAPE \'\\\\\'
+                        OR CAST(id_erp AS CHAR) LIKE %5$s ESCAPE \'\\\\\'
+                    )',
+                    $phNombreContains,
+                    $phReferenciaContains,
+                    $phCodigoContains,
+                    $phIdContains,
+                    $phIdErpContains
+                );
+
+                $params[$phReferenciaContains] = '%' . $escapedTok . '%';
+                $params[$phCodigoContains] = '%' . $escapedTok . '%';
+                $params[$phIdContains] = '%' . $escapedTok . '%';
+                $params[$phIdErpContains] = '%' . $escapedTok . '%';
+            }
 
             $phNombreExact = ':teq_' . $i;
             $phNombrePrefix = ':tpfx_' . $i;
             $phNombreWord = ':twrd_' . $i;
             $phNombreContainsScore = ':tcon_' . $i;
-            $phReferenciaScore = ':tref_' . $i;
-            $phCodigoScore = ':tbar_' . $i;
-            $phIdErpExact = ':id_erp_exact_' . $i;
-            $phIdErpLike = ':id_erp_like_' . $i;
 
             $params[$phNombreExact] = $tok;
             $params[$phNombrePrefix] = $escapedTok . '%';
             $params[$phNombreWord] = '% ' . $escapedTok . '%';
             $params[$phNombreContainsScore] = '%' . $escapedTok . '%';
-            $params[$phReferenciaScore] = '%' . $escapedTok . '%';
-            $params[$phCodigoScore] = '%' . $escapedTok . '%';
-            $params[$phIdErpExact] = $tok;
-            $params[$phIdErpLike] = '%' . $escapedTok . '%';
+            if ($onlyNombre) {
+                $scoreParts[] = sprintf(
+                    '(
+                        CASE
+                            WHEN LOWER(COALESCE(nombre, \'\')) = %1$s THEN 220
+                            WHEN LOWER(COALESCE(nombre, \'\')) LIKE %2$s ESCAPE \'\\\\\' THEN 190
+                            WHEN LOWER(COALESCE(nombre, \'\')) LIKE %3$s ESCAPE \'\\\\\' THEN 165
+                            WHEN LOWER(COALESCE(nombre, \'\')) LIKE %4$s ESCAPE \'\\\\\' THEN 130
+                            ELSE 0
+                        END
+                    )',
+                    $phNombreExact,
+                    $phNombrePrefix,
+                    $phNombreWord,
+                    $phNombreContainsScore
+                );
+            } else {
+                $phReferenciaScore = ':tref_' . $i;
+                $phCodigoScore = ':tbar_' . $i;
+                $phIdErpExact = ':id_erp_exact_' . $i;
+                $phIdErpLike = ':id_erp_like_' . $i;
 
-            $scoreParts[] = sprintf(
-                '(
-                    CASE
-                        WHEN LOWER(COALESCE(nombre, \'\')) = %1$s THEN 220
-                        WHEN LOWER(COALESCE(nombre, \'\')) LIKE %2$s ESCAPE \'\\\\\' THEN 190
-                        WHEN LOWER(COALESCE(nombre, \'\')) LIKE %3$s ESCAPE \'\\\\\' THEN 165
-                        WHEN LOWER(COALESCE(nombre, \'\')) LIKE %4$s ESCAPE \'\\\\\' THEN 130
-                        ELSE 0
-                    END
-                    + CASE
-                        WHEN LOWER(COALESCE(referencia, \'\')) LIKE %5$s ESCAPE \'\\\\\' THEN 55
-                        ELSE 0
-                    END
-                    + CASE
-                        WHEN LOWER(COALESCE(codigo_barras, \'\')) LIKE %6$s ESCAPE \'\\\\\' THEN 45
-                        ELSE 0
-                    END
-                    + CASE
-                        WHEN CAST(id_erp AS CHAR) = %7$s THEN 90
-                        WHEN CAST(id_erp AS CHAR) LIKE %8$s ESCAPE \'\\\\\' THEN 35
-                        ELSE 0
-                    END
-                )',
-                $phNombreExact,
-                $phNombrePrefix,
-                $phNombreWord,
-                $phNombreContainsScore,
-                $phReferenciaScore,
-                $phCodigoScore,
-                $phIdErpExact,
-                $phIdErpLike
-            );
+                $params[$phReferenciaScore] = '%' . $escapedTok . '%';
+                $params[$phCodigoScore] = '%' . $escapedTok . '%';
+                $params[$phIdErpExact] = $tok;
+                $params[$phIdErpLike] = '%' . $escapedTok . '%';
+
+                $scoreParts[] = sprintf(
+                    '(
+                        CASE
+                            WHEN LOWER(COALESCE(nombre, \'\')) = %1$s THEN 220
+                            WHEN LOWER(COALESCE(nombre, \'\')) LIKE %2$s ESCAPE \'\\\\\' THEN 190
+                            WHEN LOWER(COALESCE(nombre, \'\')) LIKE %3$s ESCAPE \'\\\\\' THEN 165
+                            WHEN LOWER(COALESCE(nombre, \'\')) LIKE %4$s ESCAPE \'\\\\\' THEN 130
+                            ELSE 0
+                        END
+                        + CASE
+                            WHEN LOWER(COALESCE(referencia, \'\')) LIKE %5$s ESCAPE \'\\\\\' THEN 55
+                            ELSE 0
+                        END
+                        + CASE
+                            WHEN LOWER(COALESCE(codigo_barras, \'\')) LIKE %6$s ESCAPE \'\\\\\' THEN 45
+                            ELSE 0
+                        END
+                        + CASE
+                            WHEN CAST(id_erp AS CHAR) = %7$s THEN 90
+                            WHEN CAST(id_erp AS CHAR) LIKE %8$s ESCAPE \'\\\\\' THEN 35
+                            ELSE 0
+                        END
+                    )',
+                    $phNombreExact,
+                    $phNombrePrefix,
+                    $phNombreWord,
+                    $phNombreContainsScore,
+                    $phReferenciaScore,
+                    $phCodigoScore,
+                    $phIdErpExact,
+                    $phIdErpLike
+                );
+            }
         }
 
         if ($productoIds !== null) {
@@ -144,6 +178,7 @@ final class ProductsRepository extends BaseRepository
 
         $scoreSql = $scoreParts !== [] ? implode(' + ', $scoreParts) : '0';
 
+        $limitClause = $applyLimit ? (' LIMIT ' . (int)$limit) : '';
         $sql = sprintf(
             'SELECT
                 id,
@@ -156,12 +191,11 @@ final class ProductsRepository extends BaseRepository
                 (%s) AS score
              FROM %s
              WHERE %s
-             ORDER BY score DESC, nombre ASC
-             LIMIT %d',
+             ORDER BY score DESC, nombre ASC%s',
             $scoreSql,
             self::TABLE_PRODUCTOS,
             $where,
-            $limit
+            $limitClause
         );
 
         $stmt = $this->pdo->prepare($sql);

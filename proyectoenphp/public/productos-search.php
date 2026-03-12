@@ -23,15 +23,17 @@ try {
         exit;
     }
 
-    $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 12;
-    if ($limit < 5) {
-        $limit = 5;
-    } elseif ($limit > 120) {
-        $limit = 120;
+    // limit=0 => sin limite (devolver todas las coincidencias para el autocompletado).
+    $limit = isset($_GET['limit']) ? (int)$_GET['limit'] : 0;
+    if ($limit < 0) {
+        $limit = 0;
+    } elseif ($limit > 2000) {
+        $limit = 2000;
     }
 
     $repo = new ProductsRepository();
-    $results = $repo->searchProductos($q, $limit, false);
+    // En este autocompletado del detalle de licitacion buscamos solo por nombre.
+    $results = $repo->searchProductos($q, $limit, false, true);
 
     $rows = [];
     foreach ($results as $row) {

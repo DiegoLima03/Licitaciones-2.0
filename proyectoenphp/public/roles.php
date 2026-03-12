@@ -429,6 +429,9 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
                 <a href="buscador.php" class="nav-link">Buscador historico</a>
                 <a href="lineas-referencia.php" class="nav-link">Anadir lineas</a>
                 <a href="analytics.php" class="nav-link">Analitica</a>
+                <a href="disponible.php" class="nav-link">Disponible</a>
+                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
+                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
                 <a href="roles.php" class="nav-link active">Roles</a>
             </nav>

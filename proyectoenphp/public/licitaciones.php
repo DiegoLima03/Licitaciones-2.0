@@ -108,6 +108,32 @@ function canonicalCountryLabel(string $value): string
     return $value;
 }
 
+function countryFlagByKey(string $countryKey): string
+{
+    if ($countryKey === 'espana') {
+        return '🇪🇸';
+    }
+    if ($countryKey === 'portugal') {
+        return '🇵🇹';
+    }
+    return '';
+}
+
+function countryLabelWithFlag(string $value): string
+{
+    $label = canonicalCountryLabel($value);
+    if ($label === '') {
+        return '';
+    }
+
+    $flag = countryFlagByKey(normalizeCountryKey($label));
+    if ($flag === '') {
+        return $label;
+    }
+
+    return $flag . ' ' . $label;
+}
+
 function isValidDateYmd(string $value): bool
 {
     if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $value)) {
@@ -206,17 +232,22 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         if (!in_array($tipoProcedimiento, ['ORDINARIO', 'ACUERDO_MARCO', 'SDA'], true)) {
             throw new \InvalidArgumentException('Tipo de procedimiento no valido.');
         }
+        $esTipoCarpeta = in_array($tipoProcedimiento, ['ACUERDO_MARCO', 'SDA'], true);
 
-        $idTipo = (string)($_POST['id_tipolicitacion'] ?? '');
-        if ($idTipo === '' || !ctype_digit($idTipo) || (int)$idTipo <= 0) {
-            throw new \InvalidArgumentException('Debes seleccionar un tipo de licitacion.');
+        $idTipo = null;
+        if (!$esTipoCarpeta) {
+            $idTipoRaw = (string)($_POST['id_tipolicitacion'] ?? '');
+            if ($idTipoRaw === '' || !ctype_digit($idTipoRaw) || (int)$idTipoRaw <= 0) {
+                throw new \InvalidArgumentException('Debes seleccionar un tipo de licitacion.');
+            }
+            $idTipo = (int)$idTipoRaw;
         }
         // En esta pantalla solo se crean expedientes raiz.
         // Los contratos derivados se generan desde el detalle del AM/SDA padre.
         $idPadre = null;
 
         $descripcion = (string)($_POST['descripcion'] ?? '');
-        $crearLotes = (string)($_POST['crear_lotes'] ?? '0');
+        $crearLotes = $esTipoCarpeta ? '0' : (string)($_POST['crear_lotes'] ?? '0');
         $numLotesRaw = (string)($_POST['num_lotes'] ?? '');
 
         $lotesConfigJson = null;
@@ -247,7 +278,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             'fecha_adjudicacion' => $fechaAdjudicacion,
             'fecha_finalizacion' => $fechaFinalizacion,
             'tipo_procedimiento' => $tipoProcedimiento,
-            'id_tipolicitacion' => (int)$idTipo,
+            'id_tipolicitacion' => $idTipo,
             'id_licitacion_padre' => $idPadre,
             // Estado inicial igual que en el proyecto anterior: "En analisis" (id_estado = 3)
             'id_estado' => 3,
@@ -844,6 +875,9 @@ foreach ($licitacionesBase as $lic) {
                 <a href="buscador.php" class="nav-link">Buscador historico</a>
                 <a href="lineas-referencia.php" class="nav-link">Anadir lineas</a>
                 <a href="analytics.php" class="nav-link">Analitica</a>
+                <a href="disponible.php" class="nav-link">Disponible</a>
+                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
+                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
             <div class="sidebar-footer">
@@ -892,7 +926,7 @@ foreach ($licitacionesBase as $lic) {
                                             value="<?php echo htmlspecialchars($paisOption, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                             <?php echo $filterPaisKey !== null && normalizeCountryKey($paisOption) === $filterPaisKey ? 'selected' : ''; ?>
                                         >
-                                            <?php echo htmlspecialchars($paisOption, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                            <?php echo htmlspecialchars(countryLabelWithFlag($paisOption), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                                         </option>
                                     <?php endforeach; ?>
                                 </select>
@@ -1053,8 +1087,8 @@ foreach ($licitacionesBase as $lic) {
                             <label for="modal-pais">Pais</label>
                             <select id="modal-pais" name="pais" required>
                                 <option value="">Selecciona pais...</option>
-                                <option value="<?php echo htmlspecialchars(spainLabel(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"><?php echo htmlspecialchars(spainLabel(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></option>
-                                <option value="Portugal">Portugal</option>
+                                <option value="<?php echo htmlspecialchars(spainLabel(), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"><?php echo htmlspecialchars(countryLabelWithFlag(spainLabel()), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></option>
+                                <option value="Portugal"><?php echo htmlspecialchars(countryLabelWithFlag('Portugal'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></option>
                             </select>
                         </div>
                         <div class="field half">
@@ -1099,7 +1133,7 @@ foreach ($licitacionesBase as $lic) {
                                 <option value="SDA">SDA</option>
                             </select>
                         </div>
-                        <div class="field half">
+                        <div class="field half" id="modal-crear-lotes-wrap">
                             <label for="modal-crear_lotes">Quieres crear lotes</label>
                             <select id="modal-crear_lotes" name="crear_lotes">
                                 <option value="0" selected>No</option>
@@ -1110,7 +1144,7 @@ foreach ($licitacionesBase as $lic) {
                             <label for="modal-num_lotes">Cuantos lotes</label>
                             <input id="modal-num_lotes" name="num_lotes" type="number" min="2" step="1" value="2" />
                         </div>
-                        <div class="field half">
+                        <div class="field half" id="modal-tipo-licitacion-wrap">
                             <label for="modal-tipo_id">Tipo de licitacion</label>
                             <select id="modal-tipo_id" name="id_tipolicitacion" required>
                                 <option value="" selected disabled><?php echo count($tipos) === 0 ? ($catalogError !== '' ? 'Error: ' . htmlspecialchars(mb_substr($catalogError, 0, 60), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : 'No hay tipos (ejecuta seed_tipos_licitacion.sql)') : 'Selecciona un tipo'; ?></option>
@@ -1153,27 +1187,61 @@ foreach ($licitacionesBase as $lic) {
         btnOpen.addEventListener('click', openModal);
         btnClose.addEventListener('click', closeModal);
         btnCancel.addEventListener('click', closeModal);
+        var closeByBackdropPress = false;
+        overlay.addEventListener('mousedown', function (e) {
+            closeByBackdropPress = (e.target === overlay);
+        });
         overlay.addEventListener('click', function (e) {
-            if (e.target === overlay) closeModal();
+            if (closeByBackdropPress && e.target === overlay) {
+                closeModal();
+            }
+            closeByBackdropPress = false;
         });
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape' && overlay.classList.contains('is-open')) closeModal();
         });
 
+        var tipoProc = document.getElementById('modal-tipo_procedimiento');
+        var crearLotesWrap = document.getElementById('modal-crear-lotes-wrap');
+        var tipoLicitacionWrap = document.getElementById('modal-tipo-licitacion-wrap');
+        var tipoLicitacionSelect = document.getElementById('modal-tipo_id');
         var crearLotes = document.getElementById('modal-crear_lotes');
         var numLotesWrap = document.getElementById('modal-num-lotes-wrap');
         var numLotesInput = document.getElementById('modal-num_lotes');
         var fechaPresentacionInput = document.getElementById('modal-fecha_presentacion');
         var fechaAdjudicacionInput = document.getElementById('modal-fecha_adjudicacion');
         var enlaceGoberInput = document.getElementById('modal-enlace_gober');
+        function isFolderProcedureSelected() {
+            if (!(tipoProc instanceof HTMLSelectElement)) return false;
+            return tipoProc.value === 'ACUERDO_MARCO' || tipoProc.value === 'SDA';
+        }
+        function toggleProcedureSpecificFields() {
+            var isFolder = isFolderProcedureSelected();
+            if (crearLotesWrap) crearLotesWrap.style.display = isFolder ? 'none' : '';
+            if (tipoLicitacionWrap) tipoLicitacionWrap.style.display = isFolder ? 'none' : '';
+            if (tipoLicitacionSelect instanceof HTMLSelectElement) {
+                tipoLicitacionSelect.required = !isFolder;
+                if (isFolder) {
+                    tipoLicitacionSelect.value = '';
+                }
+            }
+            if (crearLotes instanceof HTMLSelectElement) {
+                crearLotes.disabled = isFolder;
+                if (isFolder) {
+                    crearLotes.value = '0';
+                }
+            }
+            toggleNumLotes();
+        }
         function toggleNumLotes() {
             if (!crearLotes || !numLotesWrap || !numLotesInput) return;
-            var enabled = crearLotes.value === '1';
+            var enabled = crearLotes.value === '1' && !crearLotes.disabled;
             numLotesWrap.style.display = enabled ? 'block' : 'none';
             numLotesInput.disabled = !enabled;
         }
+        if (tipoProc) tipoProc.addEventListener('change', toggleProcedureSpecificFields);
         if (crearLotes) crearLotes.addEventListener('change', toggleNumLotes);
-        toggleNumLotes();
+        toggleProcedureSpecificFields();
 
         function clearCreateTenderValidity() {
             if (fechaPresentacionInput instanceof HTMLInputElement) {

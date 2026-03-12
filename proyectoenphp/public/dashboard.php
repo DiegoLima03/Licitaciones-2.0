@@ -637,6 +637,9 @@ $pctDescEuros = isset($kpis['pct_descartadas_euros']) ? (float)$kpis['pct_descar
                 <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
                 <a href="lineas-referencia.php" class="nav-link">A&ntilde;adir l&iacute;neas</a>
                 <a href="analytics.php" class="nav-link">Anal&iacute;tica</a>
+                <a href="disponible.php" class="nav-link">Disponible</a>
+                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
+                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
         </aside>

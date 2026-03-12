@@ -727,6 +727,9 @@ ksort($summaryByEstado, SORT_NATURAL | SORT_FLAG_CASE);
                 <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
                 <a href="lineas-referencia.php" class="nav-link">A&ntilde;adir l&iacute;neas</a>
                 <a href="analytics.php" class="nav-link active">Anal&iacute;tica</a>
+                <a href="disponible.php" class="nav-link">Disponible</a>
+                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
+                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
                 <a href="usuarios.php" class="nav-link">Usuarios</a>
             </nav>
         </aside>
