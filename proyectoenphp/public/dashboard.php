@@ -431,18 +431,19 @@ $pctDescEuros = isset($kpis['pct_descartadas_euros']) ? (float)$kpis['pct_descar
         .panel {
             margin-top: 14px;
             border-radius: 12px;
-            border: 1px solid #1f2937;
-            background: #0f172a;
+            border: 1px solid rgba(133, 114, 94, 0.35);
+            background: var(--vz-blanco);
             padding: 14px;
         }
         .panel h2 {
             margin: 0;
             font-size: 1rem;
+            color: var(--vz-negro);
         }
         .panel .hint {
             margin: 4px 0 0;
             font-size: 0.82rem;
-            color: #94a3b8;
+            color: var(--vz-marron2);
         }
         .timeline-chart {
             margin-top: 12px;
@@ -583,13 +584,13 @@ $pctDescEuros = isset($kpis['pct_descartadas_euros']) ? (float)$kpis['pct_descar
         }
         .empty {
             margin: 8px 0 0;
-            color: #94a3b8;
+            color: var(--vz-marron2);
             font-size: 0.9rem;
         }
         .error {
-            border: 1px solid #7f1d1d;
-            background: #450a0a;
-            color: #fecaca;
+            border: 1px solid rgba(200, 60, 50, 0.38);
+            background: rgba(200, 60, 50, 0.14);
+            color: #7a2722;
             border-radius: 10px;
             padding: 12px;
             margin-bottom: 12px;
@@ -635,7 +636,6 @@ $pctDescEuros = isset($kpis['pct_descartadas_euros']) ? (float)$kpis['pct_descar
                 <a href="dashboard.php" class="nav-link active">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link">Licitaciones</a>
                 <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
-                <a href="lineas-referencia.php" class="nav-link">A&ntilde;adir l&iacute;neas</a>
                 <a href="analytics.php" class="nav-link">Anal&iacute;tica</a>
                 <a href="disponible.php" class="nav-link">Disponible</a>
                 <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>

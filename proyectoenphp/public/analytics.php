@@ -469,16 +469,16 @@ ksort($summaryByEstado, SORT_NATURAL | SORT_FLAG_CASE);
             font-size: 0.92rem;
         }
         .input-row button {
-            background: #21304c;
-            border-color: #21304c;
-            color: var(--vz-blanco);
+            background: var(--vz-verde);
+            border-color: var(--vz-verde);
+            color: var(--vz-crema);
             font-weight: 700;
             cursor: pointer;
             transition: transform 0.18s ease, box-shadow 0.18s ease;
         }
         .input-row button:hover {
             transform: translateY(-1px);
-            box-shadow: 0 10px 18px rgba(33, 48, 76, 0.2);
+            box-shadow: 0 10px 18px rgba(142, 139, 48, 0.2);
         }
         .field-material {
             min-width: 260px;
@@ -725,7 +725,6 @@ ksort($summaryByEstado, SORT_NATURAL | SORT_FLAG_CASE);
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link">Licitaciones</a>
                 <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
-                <a href="lineas-referencia.php" class="nav-link">A&ntilde;adir l&iacute;neas</a>
                 <a href="analytics.php" class="nav-link active">Anal&iacute;tica</a>
                 <a href="disponible.php" class="nav-link">Disponible</a>
                 <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>

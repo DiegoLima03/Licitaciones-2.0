@@ -206,7 +206,6 @@ $role = (string)($user['role'] ?? '');
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link">Licitaciones</a>
                 <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
-                <a href="lineas-referencia.php" class="nav-link active">A&ntilde;adir l&iacute;neas</a>
                 <a href="analytics.php" class="nav-link">Anal&iacute;tica</a>
                 <a href="disponible.php" class="nav-link">Disponible</a>
                 <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>

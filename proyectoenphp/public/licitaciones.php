@@ -873,7 +873,6 @@ foreach ($licitacionesBase as $lic) {
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link active">Licitaciones</a>
                 <a href="buscador.php" class="nav-link">Buscador historico</a>
-                <a href="lineas-referencia.php" class="nav-link">Anadir lineas</a>
                 <a href="analytics.php" class="nav-link">Analitica</a>
                 <a href="disponible.php" class="nav-link">Disponible</a>
                 <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>

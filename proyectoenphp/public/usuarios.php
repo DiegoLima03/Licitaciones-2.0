@@ -502,9 +502,9 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
             filter: brightness(1.05);
         }
         .btn-danger-outline {
-            border-color: rgba(200, 60, 50, 0.45);
-            background: #fff5f5;
-            color: #8d2b23;
+            border-color: rgba(200, 60, 50, 0.45) !important;
+            background: #fff5f5 !important;
+            color: #8d2b23 !important;
         }
         .btn:disabled {
             cursor: not-allowed;
@@ -751,7 +751,6 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link">Licitaciones</a>
                 <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
-                <a href="lineas-referencia.php" class="nav-link">A&ntilde;adir l&iacute;neas</a>
                 <a href="analytics.php" class="nav-link">Anal&iacute;tica</a>
                 <a href="disponible.php" class="nav-link">Disponible</a>
                 <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>

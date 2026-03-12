@@ -294,17 +294,17 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
         .subtitle {
             margin: 5px 0 0;
             font-size: 0.9rem;
-            color: #94a3b8;
+            color: var(--vz-marron2);
         }
         .hint {
             margin: 8px 0 14px;
             font-size: 0.82rem;
-            color: #9ca3af;
+            color: var(--vz-marron2);
         }
         .alert {
             margin: 0 0 12px;
             border-radius: 8px;
-            border: 1px solid #334155;
+            border: 1px solid rgba(133, 114, 94, 0.35);
             padding: 8px 10px;
             font-size: 0.84rem;
         }
@@ -328,7 +328,7 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
             font-size: 0.83rem;
         }
         th, td {
-            border-bottom: 1px solid #1f2937;
+            border-bottom: 1px solid rgba(133, 114, 94, 0.35);
             padding: 9px 10px;
             vertical-align: top;
             text-align: left;
@@ -337,7 +337,7 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
             font-size: 0.74rem;
             letter-spacing: 0.04em;
             text-transform: uppercase;
-            color: #94a3b8;
+            color: var(--vz-marron2);
         }
         th.is-center,
         td.is-center {
@@ -348,9 +348,9 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
             display: inline-flex;
             align-items: center;
             border-radius: 9999px;
-            border: 1px solid #334155;
-            background: #1e293b;
-            color: #cbd5e1;
+            border: 1px solid rgba(133, 114, 94, 0.45);
+            background: var(--vz-crema);
+            color: var(--vz-marron1);
             font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
             font-size: 0.69rem;
             font-weight: 700;
@@ -389,9 +389,9 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
         }
         .btn-save {
             border-radius: 9999px;
-            border: 1px solid #334155;
-            background: #1e293b;
-            color: #e2e8f0;
+            border: 1px solid var(--vz-verde);
+            background: var(--vz-verde);
+            color: var(--vz-crema);
             font-size: 0.84rem;
             font-weight: 700;
             line-height: 1.2;
@@ -427,7 +427,6 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
                 <a href="dashboard.php" class="nav-link">Dashboard</a>
                 <a href="licitaciones.php" class="nav-link">Licitaciones</a>
                 <a href="buscador.php" class="nav-link">Buscador historico</a>
-                <a href="lineas-referencia.php" class="nav-link">Anadir lineas</a>
                 <a href="analytics.php" class="nav-link">Analitica</a>
                 <a href="disponible.php" class="nav-link">Disponible</a>
                 <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>

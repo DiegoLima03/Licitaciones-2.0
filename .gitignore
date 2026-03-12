@@ -1,9 +1,15 @@
-# Entorno y secretos (no subir credenciales)
+# Entorno y secretos
 .env
 .env.local
 .env.*.local
-frontend/.env.local
 
+# IDE y sistema
+.DS_Store
+*.log
+.idea/
+.vscode/
+
+# ── Proyecto antiguo (Next.js + FastAPI) ──────────────
 # Python
 __pycache__/
 *.py[cod]
@@ -13,15 +19,11 @@ venv/
 *.egg-info/
 .eggs/
 
-# Next.js / frontend
-frontend/node_modules/
-frontend/.next/
-frontend/out/
-frontend/build/
-.next/
+# Next.js / Node
+proyecto-antiguo/frontend/node_modules/
+proyecto-antiguo/frontend/.next/
+proyecto-antiguo/frontend/out/
+proyecto-antiguo/frontend/build/
 
-# IDE y sistema
-.DS_Store
-*.log
-.idea/
-.vscode/
+# ── Proyecto PHP activo ───────────────────────────────
+# Nada que ignorar de momento (sin dependencias externas)
