@@ -97,8 +97,29 @@ $role = (string)($user['role'] ?? '');
             font-weight: 600;
         }
         .user-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
             font-size: 0.85rem;
-            text-align: right;
+        }
+        .user-top {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .user-avatar {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.78rem;
+            flex-shrink: 0;
+        }
+        .user-name {
+            font-weight: 600; color: #e5e7eb; font-size: 0.85rem;
+        }
+        .user-meta {
+            display: flex; align-items: center; gap: 8px; justify-content: center;
         }
         .pill {
             display: inline-block;
@@ -106,9 +127,17 @@ $role = (string)($user['role'] ?? '');
             border-radius: 9999px;
             background-color: #1e293b;
             color: #a5b4fc;
-            font-size: 0.75rem;
-            margin-top: 2px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
         }
+        .logout-link {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+        .logout-link:hover { color: #f87171; }
         main {
             max-width: 900px;
             margin: 32px auto;
@@ -205,33 +234,28 @@ $role = (string)($user['role'] ?? '');
 </head>
 <body>
     <div class="layout">
-        <aside class="sidebar">
-            <div class="sidebar-logo">
-                Licitaciones
-            </div>
-            <nav class="sidebar-nav">
-                <a href="dashboard.php" class="nav-link">Dashboard</a>
-                <a href="licitaciones.php" class="nav-link active">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador histÃƒÂ³rico</a>
-                <a href="analytics.php" class="nav-link">AnalÃƒÂ­tica</a>
-                <a href="disponible.php" class="nav-link">Disponible</a>
-                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
-                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
-                <a href="usuarios.php" class="nav-link">Usuarios</a>
-            </nav>
-            <div class="sidebar-footer">
-                            </div>
-        </aside>
+        <?php $activePage = 'licitaciones'; include __DIR__ . '/partials/sidebar.php'; ?>
         <div class="main">
             <header>
                 <h1>Nueva licitaciÃƒÂ³n</h1>
                 <div class="user-info">
-                    <div><?php echo htmlspecialchars($fullName !== '' ? $fullName : $email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
-                    <?php if ($role !== ''): ?>
-                        <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
-                    <?php endif; ?>
-                    <div>
-                        <a href="logout.php">Cerrar sesiÃƒÂ³n</a>
+                    <?php
+                        $displayName = $fullName !== '' ? $fullName : $email;
+                        $initials = '';
+                        $parts = explode(' ', trim($displayName));
+                        foreach (array_slice($parts, 0, 2) as $p) {
+                            if ($p !== '') $initials .= mb_strtoupper(mb_substr($p, 0, 1));
+                        }
+                    ?>
+                    <div class="user-top">
+                        <div class="user-avatar"><?php echo $initials; ?></div>
+                        <span class="user-name"><?php echo htmlspecialchars($displayName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
+                    </div>
+                    <div class="user-meta">
+                        <?php if ($role !== ''): ?>
+                            <span class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
+                        <?php endif; ?>
+                        <a href="logout.php" class="logout-link">Cerrar sesi&oacute;n</a>
                     </div>
                 </div>
             </header>
@@ -264,7 +288,7 @@ $role = (string)($user['role'] ?? '');
                                 <input id="numero_expediente" name="numero_expediente" type="text" />
                             </div>
                             <div class="field">
-                                <label for="pres_maximo">Presupuesto mÃƒÂ¡ximo (EUR)</label>
+                                <label for="pres_maximo">Presupuesto máximo (€)</label>
                                 <input id="pres_maximo" name="pres_maximo" type="number" step="0.01" min="0" />
                             </div>
                             <div class="field">

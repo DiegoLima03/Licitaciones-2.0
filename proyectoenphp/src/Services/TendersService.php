@@ -379,10 +379,7 @@ final class TendersService
         }
 
         if ($nuevoId === self::ESTADO_DESCARTADA && !empty($payload['motivo_descarte'])) {
-            $desc = (string)($licitacion['descripcion'] ?? '');
-            $updateData['descripcion'] = trim(
-                $desc . "\n[MOTIVO DESCARTE]: " . (string)$payload['motivo_descarte']
-            );
+            $updateData['motivo_descarte'] = trim((string)$payload['motivo_descarte']);
         }
 
         if ($nuevoId === self::ESTADO_NO_ADJUDICADA) {

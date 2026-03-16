@@ -151,8 +151,48 @@ $totalImporte  = array_sum(array_column($porCliente, 'total'));
         .main   { flex: 1; display: flex; flex-direction: column; min-width: 0; }
         header  { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px; }
         header h1 { margin: 0; font-size: 1.1rem; font-weight: 700; }
-        .user-info { font-size: 0.85rem; text-align: right; }
-        .pill { display: inline-block; padding: 2px 8px; border-radius: 9999px; font-size: 0.75rem; margin-top: 2px; }
+        .user-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.85rem;
+        }
+        .user-top {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .user-avatar {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.78rem;
+            flex-shrink: 0;
+        }
+        .user-name {
+            font-weight: 600; color: #e5e7eb; font-size: 0.85rem;
+        }
+        .user-meta {
+            display: flex; align-items: center; gap: 8px; justify-content: center;
+        }
+        .pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            background-color: #1e293b;
+            color: #a5b4fc;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .logout-link {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+        .logout-link:hover { color: #f87171; }
         main  { padding: 20px; }
 
         /* ── Stats ──────────────────────────────────────────────────── */
@@ -348,28 +388,30 @@ $totalImporte  = array_sum(array_column($porCliente, 'total'));
 <body>
 <div class="layout">
 
-    <!-- Sidebar -->
-    <aside class="sidebar">
-        <div class="sidebar-logo">Licitaciones</div>
-        <nav class="sidebar-nav">
-            <a href="dashboard.php"         class="nav-link">Dashboard</a>
-            <a href="licitaciones.php"       class="nav-link">Licitaciones</a>
-            <a href="buscador.php"           class="nav-link">Buscador hist&oacute;rico</a>
-            <a href="analytics.php"          class="nav-link">Anal&iacute;tica</a>
-            <a href="disponible.php"         class="nav-link">Disponible</a>
-            <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
-            <a href="pedidos-disponible.php" class="nav-link active">Pedidos</a>
-            <a href="usuarios.php"           class="nav-link">Usuarios</a>
-        </nav>
-    </aside>
+    <?php $activePage = 'pedidos'; include __DIR__ . '/partials/sidebar.php'; ?>
 
     <div class="main">
         <header>
             <h1>Pedidos de Clientes</h1>
             <div class="user-info">
-                <div><?php echo $h($fullName !== '' ? $fullName : $email); ?></div>
-                <div class="pill"><?php echo $h($role); ?></div>
-                <div><a href="logout.php">Cerrar sesi&oacute;n</a></div>
+                <?php
+                    $displayName = $fullName !== '' ? $fullName : $email;
+                    $initials = '';
+                    $parts = explode(' ', trim($displayName));
+                    foreach (array_slice($parts, 0, 2) as $p) {
+                        if ($p !== '') $initials .= mb_strtoupper(mb_substr($p, 0, 1));
+                    }
+                ?>
+                <div class="user-top">
+                    <div class="user-avatar"><?php echo $initials; ?></div>
+                    <span class="user-name"><?php echo $h($displayName); ?></span>
+                </div>
+                <div class="user-meta">
+                    <?php if ($role !== ''): ?>
+                        <span class="pill"><?php echo $h($role); ?></span>
+                    <?php endif; ?>
+                    <a href="logout.php" class="logout-link">Cerrar sesi&oacute;n</a>
+                </div>
             </div>
         </header>
 

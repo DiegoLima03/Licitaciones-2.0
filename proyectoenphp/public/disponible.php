@@ -112,7 +112,7 @@ function buildPayloadFromPost(): array
         'unids_disponibles'          => toIntOrNull((string)($_POST['unids_disponibles'] ?? '')),
         'fecha_sem_produccion'       => $str('fecha_sem_produccion'),
         'ultimo_cambio'              => toDateOrNull((string)($_POST['ultimo_cambio'] ?? '')),
-        'pasado_a_freshportal'       => isset($_POST['pasado_a_freshportal']) ? 1 : 0,
+
         'total_unids_x_linea'        => toIntOrNull((string)($_POST['total_unids_x_linea'] ?? '')) ?? 0,
         'incremento_precio_x_unid'   => toDecimalOrNull((string)($_POST['incremento_precio_x_unid'] ?? '')),
     ];
@@ -203,7 +203,8 @@ function fmtN($v): string
             background-color: #e5e2dc;
             color: #10180e;
         }
-        .layout { display: flex; min-height: 100vh; }
+        html, body { height: 100%; overflow: hidden; }
+        .layout { display: flex; height: 100vh; overflow: hidden; }
         .sidebar {
             width: 220px;
             flex-shrink: 0;
@@ -212,6 +213,7 @@ function fmtN($v): string
             padding: 16px 14px;
             display: flex;
             flex-direction: column;
+            overflow-y: auto;
         }
         .sidebar-logo { font-weight: 600; font-size: 1rem; margin-bottom: 18px; }
         .sidebar-nav { display: flex; flex-direction: column; gap: 4px; margin-bottom: auto; }
@@ -225,7 +227,7 @@ function fmtN($v): string
             background: linear-gradient(135deg, #22c55e, #14b8a6);
             color: #020617; font-weight: 600;
         }
-        .main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+        .main { flex: 1; display: flex; flex-direction: column; min-width: 0; overflow: hidden; }
         header {
             display: flex; align-items: center; justify-content: space-between;
             padding: 12px 20px;
@@ -233,17 +235,55 @@ function fmtN($v): string
             border-bottom: 1px solid #1f2937;
         }
         header h1 { margin: 0; font-size: 1.1rem; font-weight: 600; }
-        .user-info { font-size: 0.85rem; text-align: right; }
-        .pill {
-            display: inline-block; padding: 2px 8px; border-radius: 9999px;
-            background-color: #1e293b; color: #a5b4fc; font-size: 0.75rem; margin-top: 2px;
+        .user-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
+            font-size: 0.85rem;
         }
-        main { max-width: 100%; margin: 0; padding: 20px; }
+        .user-top {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .user-avatar {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.78rem;
+            flex-shrink: 0;
+        }
+        .user-name {
+            font-weight: 600; color: #e5e7eb; font-size: 0.85rem;
+        }
+        .user-meta {
+            display: flex; align-items: center; gap: 8px; justify-content: center;
+        }
+        .pill {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 9999px;
+            background-color: #1e293b;
+            color: #a5b4fc;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .logout-link {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+        .logout-link:hover { color: #f87171; }
+        main { max-width: 100%; margin: 0; padding: 20px; flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         .card {
             border-radius: 12px; border: 1px solid #1f2937;
             background: #0f172a;
             box-shadow: 0 18px 35px rgba(15,23,42,.35);
             padding: 18px; overflow: hidden;
+            flex: 1; display: flex; flex-direction: column; min-height: 0;
         }
         .toolbar {
             display: flex; align-items: flex-end; gap: 10px;
@@ -284,13 +324,18 @@ function fmtN($v): string
         .alert-error   { border-color: rgba(200,60,50,.45); background: rgba(200,60,50,.10); color: #fecaca; }
         .alert-warn    { border-color: rgba(212,168,48,.45); background: rgba(212,168,48,.10); color: #fef08a; }
         /* Tabla */
-        .table-wrap { overflow-x: auto; border-radius: 8px; }
-        table { width: 100%; border-collapse: collapse; font-size: 0.82rem; background: #0a1020; }
+        .table-wrap {
+            overflow: auto;
+            border-radius: 8px;
+            flex: 1; min-height: 0;
+        }
+        table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.82rem; background: #0a1020; }
         thead tr { background: #8e8b30; }
+        thead { position: sticky; top: 0; z-index: 2; }
         th {
             padding: 9px 10px; font-size: 0.72rem; text-transform: uppercase;
             letter-spacing: .04em; color: #10180e; font-weight: 700;
-            white-space: nowrap; text-align: left;
+            white-space: nowrap; text-align: left; background: #8e8b30;
         }
         td { padding: 8px 10px; border-bottom: 1px solid #1f2937; color: #cbd5e1; vertical-align: middle; white-space: nowrap; }
         tbody tr { cursor: pointer; }
@@ -398,27 +443,30 @@ function fmtN($v): string
 <div class="layout">
 
     <!-- Sidebar -->
-    <aside class="sidebar">
-        <div class="sidebar-logo">Licitaciones</div>
-        <nav class="sidebar-nav">
-            <a href="dashboard.php" class="nav-link">Dashboard</a>
-            <a href="licitaciones.php" class="nav-link">Licitaciones</a>
-            <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
-            <a href="analytics.php" class="nav-link">Anal&iacute;tica</a>
-            <a href="disponible.php" class="nav-link active">Disponible</a>
-            <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
-            <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
-            <a href="usuarios.php" class="nav-link">Usuarios</a>
-        </nav>
-    </aside>
+    <?php $activePage = 'disponible'; include __DIR__ . '/partials/sidebar.php'; ?>
 
     <div class="main">
         <header>
             <h1>Disponible</h1>
             <div class="user-info">
-                <div><?php echo $h($fullName !== '' ? $fullName : $email); ?></div>
-                <div class="pill"><?php echo $h($role); ?></div>
-                <div><a href="logout.php">Cerrar sesi&oacute;n</a></div>
+                <?php
+                    $displayName = $fullName !== '' ? $fullName : $email;
+                    $initials = '';
+                    $parts = explode(' ', trim($displayName));
+                    foreach (array_slice($parts, 0, 2) as $p) {
+                        if ($p !== '') $initials .= mb_strtoupper(mb_substr($p, 0, 1));
+                    }
+                ?>
+                <div class="user-top">
+                    <div class="user-avatar"><?php echo $initials; ?></div>
+                    <span class="user-name"><?php echo $h($displayName); ?></span>
+                </div>
+                <div class="user-meta">
+                    <?php if ($role !== ''): ?>
+                        <span class="pill"><?php echo $h($role); ?></span>
+                    <?php endif; ?>
+                    <a href="logout.php" class="logout-link">Cerrar sesi&oacute;n</a>
+                </div>
             </div>
         </header>
 
@@ -507,7 +555,6 @@ function fmtN($v): string
                                 <th class="td-right">Ud/CC</th>
                                 <th class="td-right">Pedido Ud</th>
                                 <th class="td-right">Total Ud</th>
-                                <th class="td-center">Freshportal</th>
                                 <th class="td-right">Acciones</th>
                             </tr>
                         </thead>
@@ -520,7 +567,7 @@ function fmtN($v): string
                         <?php foreach ($rows as $row):
                             $rowId = (int)($row['id'] ?? 0);
                             $disp  = (bool)($row['disponible'] ?? false);
-                            $fresh = (bool)($row['pasado_a_freshportal'] ?? false);
+
                         ?>
                             <tr onclick="openModal(<?php echo $rowId; ?>)">
                                 <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:#e2e8f0;">
@@ -553,11 +600,6 @@ function fmtN($v): string
                                 <td class="td-right"><?php echo fmtN($row['unids_x_cc'] ?? null); ?></td>
                                 <td class="td-right" style="font-weight:700;color:#7dd3fc;"><?php echo fmtN($row['pedido_x_unid'] ?? null); ?></td>
                                 <td class="td-right" style="font-weight:700;"><?php echo fmtN($row['total_unids_x_linea'] ?? null); ?></td>
-                                <td class="td-center">
-                                    <span class="badge <?php echo $fresh ? 'badge-si' : 'badge-no'; ?>">
-                                        <?php echo $fresh ? 'S&Iacute;' : 'NO'; ?>
-                                    </span>
-                                </td>
                                 <td class="td-right" onclick="event.stopPropagation()">
                                     <button class="btn btn-edit" onclick="openModal(<?php echo $rowId; ?>)">Editar</button>
                                     <button class="btn btn-danger" style="margin-left:4px;"
@@ -787,12 +829,6 @@ function fmtN($v): string
                             <label for="f-disponible">Disponible para pedido</label>
                         </div>
                     </div>
-                    <div class="field">
-                        <div class="checkbox-row">
-                            <input type="checkbox" name="pasado_a_freshportal" id="f-pasado_a_freshportal">
-                            <label for="f-pasado_a_freshportal">Pasado a Freshportal</label>
-                        </div>
-                    </div>
                     <div class="field fg-col2">
                         <label>Caracter&iacute;sticas</label>
                         <textarea name="caracteristicas" id="f-caracteristicas" rows="2"></textarea>
@@ -920,7 +956,7 @@ function openModal(id) {
         ck('campanya_precios_espec');
         ck('producto_precio_espec');
         ck('disponible');
-        ck('pasado_a_freshportal');
+
 
         const obs = document.getElementById('f-observaciones');   if (obs)  obs.value  = r['observaciones']  ?? '';
         const car = document.getElementById('f-caracteristicas'); if (car)  car.value  = r['caracteristicas'] ?? '';

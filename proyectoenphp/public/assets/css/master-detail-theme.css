@@ -29,6 +29,10 @@ body {
 .sidebar {
     background: linear-gradient(180deg, #5c472f, var(--vz-marron1) 52%, var(--vz-negro)) !important;
     border-right: 1px solid rgba(229, 226, 220, 0.25) !important;
+    position: sticky !important;
+    top: 0 !important;
+    height: 100vh !important;
+    overflow-y: auto !important;
 }
 
 .sidebar-logo,

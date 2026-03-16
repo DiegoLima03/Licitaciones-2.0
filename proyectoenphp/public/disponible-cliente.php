@@ -83,15 +83,27 @@ function fmtPrecio($v): string
     return number_format((float)$v, 2, ',', '.') . ' €';
 }
 
-// Agrupar categorías únicas para el filtro lateral
+// Agrupar categorías, formatos y colores únicos para filtros
 $categorias = [];
+$formatos   = [];
+$colores    = [];
 foreach ($productos as $p) {
     $cat = trim((string)($p['clasificacion_compra_facil'] ?? ''));
     if ($cat !== '' && !in_array($cat, $categorias, true)) {
         $categorias[] = $cat;
     }
+    $fmt = trim((string)($p['formato'] ?? ''));
+    if ($fmt !== '' && !in_array($fmt, $formatos, true)) {
+        $formatos[] = $fmt;
+    }
+    $col = trim((string)($p['color'] ?? ''));
+    if ($col !== '' && !in_array($col, $colores, true)) {
+        $colores[] = $col;
+    }
 }
 sort($categorias);
+sort($formatos);
+sort($colores);
 
 ?><!DOCTYPE html>
 <html lang="es">
@@ -239,6 +251,55 @@ sort($categorias);
             color: var(--muted); transition: all .12s;
         }
         .view-btn.active { background: var(--g); border-color: var(--g); color: #fff; }
+
+        /* ─── FILTER PANEL (left side) ────────────────────────────────────── */
+        .left-col {
+            width: 230px; flex-shrink: 0;
+            position: sticky; top: 74px;
+            max-height: calc(100vh - 94px);
+            overflow-y: auto;
+        }
+        .right-col {
+            width: 310px; flex-shrink: 0;
+            position: sticky; top: 74px;
+            max-height: calc(100vh - 94px);
+            display: flex; flex-direction: column;
+        }
+        .filter-panel {
+            background: var(--w); border: 1px solid var(--bdr);
+            border-radius: 10px; box-shadow: 0 2px 12px var(--sh);
+            padding: 14px 16px;
+        }
+        .fp-title {
+            font-size: 13px; font-weight: 700; color: var(--fg);
+            margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
+        }
+        .fp-section { margin-bottom: 10px; }
+        .fp-section:last-child { margin-bottom: 0; }
+        .fp-label {
+            font-size: 11px; font-weight: 700; text-transform: uppercase;
+            letter-spacing: .04em; color: var(--muted); margin-bottom: 5px;
+        }
+        .fp-select {
+            width: 100%; padding: 6px 8px;
+            border: 1.5px solid var(--bdr); border-radius: var(--rad);
+            font-size: 12px; background: var(--w); outline: none; cursor: pointer;
+        }
+        .fp-select:focus { border-color: var(--g); }
+        .fp-toggle {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 12px; color: var(--fg); cursor: pointer;
+            padding: 5px 0;
+        }
+        .fp-toggle input[type="checkbox"] {
+            width: 15px; height: 15px; accent-color: var(--g); cursor: pointer;
+        }
+        .fp-clear {
+            display: inline-block; font-size: 11px; color: var(--g);
+            cursor: pointer; border: none; background: none; font-weight: 600;
+            text-decoration: underline; padding: 0; margin-top: 6px;
+        }
+        .fp-clear:hover { color: var(--g-dk); }
 
         /* ─── LAYOUT ──────────────────────────────────────────────────────── */
         .layout {
@@ -395,13 +456,12 @@ sort($categorias);
 
         /* ─── CART PANEL ──────────────────────────────────────────────────── */
         .cart-panel {
-            width: 310px; flex-shrink: 0;
-            position: sticky; top: 74px;
             background: var(--w); border: 1px solid var(--bdr);
             border-radius: 10px;
             box-shadow: 0 4px 20px var(--sh);
             display: flex; flex-direction: column;
-            max-height: calc(100vh - 94px);
+            flex: 1; min-height: 0;
+            overflow: hidden;
         }
         .cp-head {
             padding: 14px 16px;
@@ -523,7 +583,7 @@ sort($categorias);
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
             <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
         </svg>
-        <input id="buscador" type="text" placeholder="Buscar producto, productor, formato…" autocomplete="off">
+        <input id="buscador" type="text" placeholder="Buscar producto, formato…" autocomplete="off">
     </div>
 
     <div class="tb-right">
@@ -595,6 +655,58 @@ sort($categorias);
 <!-- ═══ MAIN LAYOUT ══════════════════════════════════════════════════════════ -->
 <div class="layout">
 
+    <!-- ── FILTROS (izquierda) ── -->
+    <aside class="left-col">
+    <div class="filter-panel" id="filter-panel">
+        <div class="fp-title">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+                <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/>
+            </svg>
+            Filtros
+        </div>
+
+        <?php if (!empty($formatos)): ?>
+        <div class="fp-section">
+            <div class="fp-label">Formato</div>
+            <select id="fp-formato" class="fp-select">
+                <option value="">Todos los formatos</option>
+                <?php foreach ($formatos as $fmt): ?>
+                <option value="<?= h(strtolower($fmt)) ?>"><?= h($fmt) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <?php endif; ?>
+
+        <?php if (!empty($colores)): ?>
+        <div class="fp-section">
+            <div class="fp-label">Color</div>
+            <select id="fp-color" class="fp-select">
+                <option value="">Todos los colores</option>
+                <?php foreach ($colores as $col): ?>
+                <option value="<?= h(strtolower($col)) ?>"><?= h($col) ?></option>
+                <?php endforeach; ?>
+            </select>
+        </div>
+        <?php endif; ?>
+
+        <div class="fp-section">
+            <div class="fp-label">Disponibilidad</div>
+            <label class="fp-toggle">
+                <input type="checkbox" id="fp-disponible"> Solo con stock
+            </label>
+        </div>
+
+        <div class="fp-section">
+            <div class="fp-label">Mi pedido</div>
+            <label class="fp-toggle">
+                <input type="checkbox" id="fp-en-pedido"> Solo en mi pedido
+            </label>
+        </div>
+
+        <button type="button" class="fp-clear" id="fp-clear">Limpiar filtros</button>
+    </div>
+    </aside><!-- /left-col -->
+
     <!-- ── CATALOG ── -->
     <main class="catalog">
 
@@ -642,7 +754,6 @@ sort($categorias);
                     $search = mb_strtolower(implode(' ', [
                         $nombre,
                         $p['descripcion_rach'] ?? '',
-                        $p['nombre_productor'] ?? '',
                         $p['formato'] ?? '',
                         $p['zona'] ?? '',
                         $p['clasificacion_compra_facil'] ?? '',
@@ -655,6 +766,9 @@ sort($categorias);
                      data-min="<?= $minQty ?>"
                      data-zona="<?= h(strtoupper((string)($p['zona'] ?? ''))) ?>"
                      data-cat="<?= h($cat) ?>"
+                     data-fmt="<?= h(strtolower(trim((string)($p['formato'] ?? '')))) ?>"
+                     data-color="<?= h(strtolower(trim((string)($p['color'] ?? '')))) ?>"
+                     data-avail="<?= ($p['unids_disponibles'] ?? null) !== null && (int)$p['unids_disponibles'] > 0 ? '1' : '0' ?>"
                      data-search="<?= h($search) ?>">
 
                     <div class="prow-thumb">
@@ -667,14 +781,7 @@ sort($categorias);
                             <?php if ($p['formato']): ?>
                             <span><span class="badge-fmt"><?= h($p['formato']) ?></span></span>
                             <?php endif; ?>
-                            <?php if ($p['nombre_productor']): ?>
-                            <span>
-                                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
-                                </svg>
-                                <?= h($p['nombre_productor']) ?>
-                            </span>
-                            <?php endif; ?>
+                            <?php /* proveedor oculto en vista cliente */ ?>
                             <?php if ($p['caracteristicas']): ?>
                             <span><?= h($p['caracteristicas']) ?></span>
                             <?php endif; ?>
@@ -759,7 +866,7 @@ sort($categorias);
                         <div class="pcard-name" title="<?= h($nombre) ?>"><?= h($nombre) ?></div>
                         <div class="pcard-meta2">
                             <?php if ($p['formato']): ?><span class="badge-fmt"><?= h($p['formato']) ?></span><?php endif; ?>
-                            <?= h($p['nombre_productor'] ?? '') ?>
+                            <?php /* proveedor oculto en vista cliente */ ?>
                         </div>
                         <?php if ($availUd !== null): ?>
                         <div class="pcard-meta2">Disponible: <strong><?= (int)$availUd ?> ud</strong></div>
@@ -799,8 +906,9 @@ sort($categorias);
 
     </main><!-- /catalog -->
 
-    <!-- ── CART PANEL ── -->
-    <aside class="cart-panel" id="cart-panel">
+    <!-- ── CART PANEL (derecha) ── -->
+    <aside class="right-col">
+    <div class="cart-panel" id="cart-panel">
         <div class="cp-head">
             <span>🛒</span>
             <span class="cp-title">Mi Pedido</span>
@@ -821,7 +929,9 @@ sort($categorias);
             <button class="btn-enviar" onclick="submitPedido()">Enviar Pedido</button>
             <div class="cp-note">Guardado automáticamente</div>
         </div>
-    </aside>
+    </div><!-- /cart-panel -->
+
+    </aside><!-- /right-col -->
 
 </div><!-- /layout -->
 
@@ -1048,6 +1158,30 @@ document.getElementById('zone-chips').addEventListener('click', function(e) {
 const catSel = document.getElementById('cat-filter');
 if (catSel) catSel.addEventListener('change', function() { activeCat = this.value; applyFilters(); });
 
+// ── Right-panel filters ──────────────────────────────────────────────────────
+let activeFormato = '';
+let activeColor   = '';
+let onlyAvail     = false;
+let onlyInCart    = false;
+
+const fpFormato    = document.getElementById('fp-formato');
+const fpColor      = document.getElementById('fp-color');
+const fpDisponible = document.getElementById('fp-disponible');
+const fpEnPedido   = document.getElementById('fp-en-pedido');
+const fpClear      = document.getElementById('fp-clear');
+
+if (fpFormato)    fpFormato.addEventListener('change', function() { activeFormato = this.value; applyFilters(); });
+if (fpColor)      fpColor.addEventListener('change', function() { activeColor = this.value; applyFilters(); });
+if (fpDisponible) fpDisponible.addEventListener('change', function() { onlyAvail = this.checked; applyFilters(); });
+if (fpEnPedido)   fpEnPedido.addEventListener('change', function() { onlyInCart = this.checked; applyFilters(); });
+if (fpClear) fpClear.addEventListener('click', function() {
+    if (fpFormato)    { fpFormato.value = ''; activeFormato = ''; }
+    if (fpColor)      { fpColor.value = ''; activeColor = ''; }
+    if (fpDisponible) { fpDisponible.checked = false; onlyAvail = false; }
+    if (fpEnPedido)   { fpEnPedido.checked = false; onlyInCart = false; }
+    applyFilters();
+});
+
 function applyFilters() {
     const q = document.getElementById('buscador').value.toLowerCase().trim();
     let count = 0;
@@ -1072,6 +1206,13 @@ function matchRow(row, q) {
     if (q && !row.dataset.search.includes(q)) return false;
     if (activeZona && row.dataset.zona !== activeZona) return false;
     if (activeCat  && row.dataset.cat !== activeCat)   return false;
+    if (activeFormato && row.dataset.fmt !== activeFormato) return false;
+    if (activeColor && row.dataset.color !== activeColor) return false;
+    if (onlyAvail && row.dataset.avail !== '1') return false;
+    if (onlyInCart) {
+        const id = row.dataset.id;
+        if (!cartData[id] || cartData[id].unids <= 0) return false;
+    }
     return true;
 }
 

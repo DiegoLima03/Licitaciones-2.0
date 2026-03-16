@@ -443,7 +443,7 @@ function parseNullableAmount($raw): ?float
 
 function formatEuroNote(float $amount): string
 {
-    return number_format($amount, 2, ',', '.') . ' EUR';
+    return number_format($amount, 2, ',', '.') . ' €';
 }
 
 /**
@@ -1488,7 +1488,7 @@ try {
                         if ($estadoActual === 1 || $estadoActual === 3) {
                             $transiciones = [
                                 4 => 'Presentada',
-                                2 => 'Descartar',
+                                2 => 'Descartada',
                             ];
                         } elseif ($estadoActual === 4) {
                             $transiciones = [
@@ -1698,6 +1698,15 @@ try {
                                         exit;
                                     }
                                 }
+                            } elseif ($estadoId === 2) {
+                                $motivoDescarte = isset($_POST['motivo_descarte']) ? trim((string)$_POST['motivo_descarte']) : '';
+                                $updateEstadoData = ['id_estado' => $estadoId];
+                                if ($motivoDescarte !== '') {
+                                    $updateEstadoData['motivo_descarte'] = $motivoDescarte;
+                                }
+                                $repo->update($id, $updateEstadoData);
+                                header('Location: ' . $selfUrl . '?id=' . $id);
+                                exit;
                             } else {
                                 $repo->update($id, ['id_estado' => $estadoId]);
                                 header('Location: ' . $selfUrl . '?id=' . $id);
@@ -1981,19 +1990,47 @@ if ($pendingPartidasSinProducto === []) {
             color: var(--vz-crema);
         }
         .user-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
             font-size: 0.85rem;
-            text-align: right;
-            color: var(--vz-crema);
+        }
+        .user-top {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .user-avatar {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.78rem;
+            flex-shrink: 0;
+        }
+        .user-name {
+            font-weight: 600; color: #e5e7eb; font-size: 0.85rem;
+        }
+        .user-meta {
+            display: flex; align-items: center; gap: 8px; justify-content: center;
         }
         .pill {
             display: inline-block;
             padding: 2px 8px;
             border-radius: 9999px;
-            background-color: rgba(229, 226, 220, 0.96);
-            color: var(--vz-marron1);
-            font-size: 0.75rem;
-            margin-top: 2px;
+            background-color: #1e293b;
+            color: #a5b4fc;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
         }
+        .logout-link {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+        .logout-link:hover { color: #f87171; }
         main {
             width: 1100px;
             max-width: 1100px;
@@ -2096,6 +2133,38 @@ if ($pendingPartidasSinProducto === []) {
             font-weight: 600;
             color: var(--vz-negro);
             line-height: 1.2;
+        }
+        .detail-link-card {
+            min-width: 160px;
+            border: 1px solid rgba(133, 114, 94, 0.45);
+            border-radius: 12px;
+            padding: 8px 12px;
+            box-shadow: 0 2px 8px rgba(16, 24, 14, 0.06);
+            text-decoration: none;
+            transition: filter 0.15s, box-shadow 0.15s;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .detail-link-card:hover {
+            filter: brightness(1.05);
+            box-shadow: 0 4px 14px rgba(16, 24, 14, 0.13);
+        }
+        .detail-link-gober {
+            background: linear-gradient(135deg, #1e40af, #3b82f6);
+            border-color: rgba(59, 130, 246, 0.5);
+        }
+        .detail-link-gober .detail-type-label { color: rgba(255,255,255,0.7); }
+        .detail-link-sharepoint {
+            background: linear-gradient(135deg, #0e7439, #22c55e);
+            border-color: rgba(34, 197, 94, 0.5);
+        }
+        .detail-link-sharepoint .detail-type-label { color: rgba(255,255,255,0.7); }
+        .detail-link-text {
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: #fff;
+            line-height: 1.3;
         }
         .meta-grid {
             display: grid;
@@ -2518,33 +2587,28 @@ if ($pendingPartidasSinProducto === []) {
 </head>
 <body>
     <div class="layout">
-        <aside class="sidebar">
-            <div class="sidebar-logo">
-                Licitaciones
-            </div>
-            <nav class="sidebar-nav">
-                <a href="dashboard.php" class="nav-link">Dashboard</a>
-                <a href="licitaciones.php" class="nav-link active">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador historico</a>
-                <a href="analytics.php" class="nav-link">Analitica</a>
-                <a href="disponible.php" class="nav-link">Disponible</a>
-                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
-                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
-                <a href="usuarios.php" class="nav-link">Usuarios</a>
-            </nav>
-            <div class="sidebar-footer">
-                            </div>
-        </aside>
+        <?php $activePage = 'licitaciones'; include __DIR__ . '/partials/sidebar.php'; ?>
         <div class="main">
             <header>
                 <h1>Detalle de licitacion</h1>
                 <div class="user-info">
-                    <div><?php echo htmlspecialchars($fullName !== '' ? $fullName : $email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
-                    <?php if ($role !== ''): ?>
-                        <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
-                    <?php endif; ?>
-                    <div>
-                        <a href="logout.php">Cerrar sesion</a>
+                    <?php
+                        $displayName = $fullName !== '' ? $fullName : $email;
+                        $initials = '';
+                        $parts = explode(' ', trim($displayName));
+                        foreach (array_slice($parts, 0, 2) as $p) {
+                            if ($p !== '') $initials .= mb_strtoupper(mb_substr($p, 0, 1));
+                        }
+                    ?>
+                    <div class="user-top">
+                        <div class="user-avatar"><?php echo $initials; ?></div>
+                        <span class="user-name"><?php echo htmlspecialchars($displayName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
+                    </div>
+                    <div class="user-meta">
+                        <?php if ($role !== ''): ?>
+                            <span class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
+                        <?php endif; ?>
+                        <a href="logout.php" class="logout-link">Cerrar sesi&oacute;n</a>
                     </div>
                 </div>
             </header>
@@ -2623,7 +2687,7 @@ if ($pendingPartidasSinProducto === []) {
                         if ($estadoIdActual === 1 || $estadoIdActual === 3) {
                             $transicionesDisponibles = [
                                 4 => 'Presentada',
-                                2 => 'Descartar',
+                                2 => 'Descartada',
                             ];
                         } elseif ($estadoIdActual === 4) {
                             $transicionesDisponibles = [
@@ -2751,6 +2815,24 @@ if ($pendingPartidasSinProducto === []) {
                                             <?php echo htmlspecialchars($tipoProcedimiento, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                                         </span>
                                     </div>
+                                    <?php
+                                        $enlaceGober      = trim((string)($licitacion['enlace_gober'] ?? ''));
+                                        $enlaceSharepoint = trim((string)($licitacion['enlace_sharepoint'] ?? ''));
+                                    ?>
+                                    <?php if ($enlaceGober !== ''): ?>
+                                    <a href="<?php echo htmlspecialchars($enlaceGober, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                       target="_blank" rel="noopener noreferrer" class="detail-link-card detail-link-gober">
+                                        <span class="detail-type-label">Gober</span>
+                                        <span class="detail-link-text">Abrir en Gober &nearr;</span>
+                                    </a>
+                                    <?php endif; ?>
+                                    <?php if ($enlaceSharepoint !== ''): ?>
+                                    <a href="<?php echo htmlspecialchars($enlaceSharepoint, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                       target="_blank" rel="noopener noreferrer" class="detail-link-card detail-link-sharepoint">
+                                        <span class="detail-type-label">SharePoint</span>
+                                        <span class="detail-link-text">Abrir carpeta &nearr;</span>
+                                    </a>
+                                    <?php endif; ?>
                                 </div>
                             </div>
                         </div>
@@ -2835,6 +2917,14 @@ if ($pendingPartidasSinProducto === []) {
                                                 >
                                                     <?php echo htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
                                                 </button>
+                                            <?php elseif ($nuevoEstadoId === 2): ?>
+                                                <button
+                                                    type="button"
+                                                    id="btn-open-discard-modal"
+                                                    style="width:100%;text-align:left;border:1px solid #b91c1c;border-radius:8px;background:#fef2f2;color:#7f1d1d;font-size:0.8rem;font-weight:600;padding:6px 10px;cursor:pointer;"
+                                                >
+                                                    <?php echo htmlspecialchars($label, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
+                                                </button>
                                             <?php else: ?>
                                                 <form
                                                     action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
@@ -2859,6 +2949,55 @@ if ($pendingPartidasSinProducto === []) {
                                     >
                                         Cancelar
                                     </button>
+                                </div>
+                            </div>
+                        <?php endif; ?>
+                        <?php if ($transicionesDisponibles !== [] && isset($transicionesDisponibles[2])): ?>
+                            <div
+                                id="modal-motivo-descarte"
+                                style="position:fixed;inset:0;background:rgba(0,0,0,0.5);display:none;align-items:center;justify-content:center;z-index:60;"
+                            >
+                                <div style="background:#fff;border-radius:12px;border:1px solid #d8d2c4;box-shadow:0 18px 35px rgba(0,0,0,0.15);max-width:440px;width:100%;padding:20px 22px;">
+                                    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:10px;">
+                                        <h3 style="margin:0;font-size:0.95rem;font-weight:600;color:#1f2937;">Descartar licitacion</h3>
+                                        <button
+                                            type="button"
+                                            id="modal-descarte-close"
+                                            style="border:none;background:transparent;color:#9ca3af;font-size:1.1rem;cursor:pointer;"
+                                        >&times;</button>
+                                    </div>
+                                    <p style="margin:0 0 12px;font-size:0.8rem;color:#6b7280;">
+                                        Indica el motivo por el que se descarta esta licitacion.
+                                    </p>
+                                    <form
+                                        method="POST"
+                                        action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                        style="margin:0;"
+                                    >
+                                        <input type="hidden" name="estado" value="2">
+                                        <textarea
+                                            name="motivo_descarte"
+                                            rows="4"
+                                            required
+                                            placeholder="Escribe el motivo del descarte..."
+                                            style="width:100%;border:1px solid #d1d5db;border-radius:8px;padding:8px 10px;font-size:0.8rem;resize:vertical;margin-bottom:12px;font-family:inherit;box-sizing:border-box;"
+                                        ></textarea>
+                                        <div style="display:flex;gap:8px;justify-content:flex-end;">
+                                            <button
+                                                type="button"
+                                                id="modal-descarte-cancel"
+                                                style="border:1px solid #d1d5db;border-radius:8px;background:#fff;color:#6b7280;font-size:0.8rem;padding:6px 14px;cursor:pointer;"
+                                            >
+                                                Cancelar
+                                            </button>
+                                            <button
+                                                type="submit"
+                                                style="border:1px solid #b91c1c;border-radius:8px;background:#dc2626;color:#fff;font-size:0.8rem;font-weight:600;padding:6px 14px;cursor:pointer;"
+                                            >
+                                                Descartar
+                                            </button>
+                                        </div>
+                                    </form>
                                 </div>
                             </div>
                         <?php endif; ?>
@@ -2971,50 +3110,7 @@ if ($pendingPartidasSinProducto === []) {
                                 </div>
                             </div>
                         <?php endif; ?>
-                        <div class="meta-grid">
-                            <div>
-                                <span class="meta-label">Nro expediente</span>
-                                <span class="meta-value">
-                                    <?php echo htmlspecialchars((string)($licitacion['numero_expediente'] ?? '-'), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
-                                </span>
-                            </div>
-                            <div>
-                                <span class="meta-label">Presupuesto maximo</span>
-                                <span class="meta-value">
-                                    <?php echo number_format((float)($licitacion['pres_maximo'] ?? 0), 0, ',', '.'); ?> EUR
-                                </span>
-                            </div>
-                            <div>
-                                <span class="meta-label">Fecha presentacion</span>
-                                <span class="meta-value">
-                                    <?php
-                                    $fp = (string)($licitacion['fecha_presentacion'] ?? '');
-                                    if ($fp !== '' && str_contains($fp, ' ')) {
-                                        $fp = explode(' ', $fp)[0];
-                                    }
-                                    if ($fp !== '' && str_contains($fp, '-')) {
-                                        $parts = explode('-', $fp);
-                                        if (count($parts) === 3) {
-                                            echo htmlspecialchars($parts[2] . '/' . $parts[1] . '/' . $parts[0], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-                                        } else {
-                                            echo htmlspecialchars($fp, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-                                        }
-                                    } else {
-                                        echo '-';
-                                    }
-                                    ?>
-                                </span>
-                            </div>
-                            <div>
-                                <span class="meta-label">Pais</span>
-                                <span class="meta-value">
-                                    <?php
-                                    $paisDisplay = normalizeCountryDisplay((string)($licitacion['pais'] ?? ''));
-                                    echo htmlspecialchars($paisDisplay !== '' ? $paisDisplay : '-', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-                                    ?>
-                                </span>
-                            </div>
-                        </div>
+                        <!-- meta-grid eliminada -->
                         <?php
                         $licitacionPadreVista = is_array($licitacion['licitacion_padre'] ?? null)
                             ? $licitacion['licitacion_padre']
@@ -3163,7 +3259,7 @@ if ($pendingPartidasSinProducto === []) {
                         // Indicadores (replica del frontend antiguo)
                         // -------------------------
                         $formatEuroKpi = static function (float $value): string {
-                            return number_format($value, 0, ',', '.') . ' EUR';
+                            return number_format($value, 0, ',', '.') . ' €';
                         };
                         $formatPctKpi = static function (float $value): string {
                             return number_format($value, 1, ',', '.') . '%';
@@ -3537,7 +3633,7 @@ if ($pendingPartidasSinProducto === []) {
                                                     />
                                                 </div>
                                                 <div class="derived-form-field">
-                                                    <label for="nuevo-presupuesto">Presupuesto max. (EUR)</label>
+                                                    <label for="nuevo-presupuesto">Presupuesto max. (€)</label>
                                                     <input
                                                         id="nuevo-presupuesto"
                                                         name="nuevo_pres_maximo"
@@ -3647,7 +3743,7 @@ if ($pendingPartidasSinProducto === []) {
                                                         <th>Nombre</th>
                                                         <th>Procedimiento</th>
                                                         <th>Estado</th>
-                                                        <th class="is-right">Presupuesto (EUR)</th>
+                                                        <th class="is-right">Presupuesto (€)</th>
                                                     </tr>
                                                 </thead>
                                                 <tbody>
@@ -3916,11 +4012,11 @@ if ($pendingPartidasSinProducto === []) {
                                                         <th class="is-right">Uds.</th>
                                                     <?php endif; ?>
                                                     <?php if ($showPmaxuPresupuesto): ?>
-                                                        <th class="is-right">PMAXU (EUR)</th>
+                                                        <th class="is-right">PMAXU (€)</th>
                                                     <?php endif; ?>
-                                                    <th class="is-right">PVU (EUR)</th>
-                                                    <th class="is-right">PCU (EUR)</th>
-                                                    <th class="is-right">Importe (EUR)</th>
+                                                    <th class="is-right">PVU (€)</th>
+                                                    <th class="is-right">PCU (€)</th>
+                                                    <th class="is-right">Importe (€)</th>
                                                     <th class="is-right">Acciones</th>
                                                 </tr>
                                             </thead>
@@ -4178,11 +4274,11 @@ if ($pendingPartidasSinProducto === []) {
                                                                     <th class="is-right">Uds.</th>
                                                                 <?php endif; ?>
                                                                 <?php if ($showPmaxuPresupuesto): ?>
-                                                                    <th class="is-right">PMAXU (EUR)</th>
+                                                                    <th class="is-right">PMAXU (€)</th>
                                                                 <?php endif; ?>
-                                                                <th class="is-right">PVU (EUR)</th>
-                                                                <th class="is-right">PCU (EUR)</th>
-                                                                <th class="is-right">Importe (EUR)</th>
+                                                                <th class="is-right">PVU (€)</th>
+                                                                <th class="is-right">PCU (€)</th>
+                                                                <th class="is-right">Importe (€)</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
@@ -4311,7 +4407,7 @@ if ($pendingPartidasSinProducto === []) {
                                                                             <td><?php echo htmlspecialchars($concepto, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
                                                                             <td><?php echo htmlspecialchars($proveedor, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></td>
                                                                             <td class="is-right"><?php echo number_format($cantidad, 2, ',', '.'); ?></td>
-                                                                            <td class="is-right"><?php echo number_format($pcu, 2, ',', '.'); ?> EUR</td>
+                                                                            <td class="is-right"><?php echo number_format($pcu, 2, ',', '.'); ?> €</td>
                                                                             <td class="is-center">
                                                                                 <?php if ($esGastoExtra): ?>
                                                                                     <span class="linea-tag-extra">Gasto ext.</span>
@@ -4469,7 +4565,7 @@ if ($pendingPartidasSinProducto === []) {
                                                                 <th style="padding:4px 6px;text-align:left;">Partida</th>
                                                                 <th style="padding:4px 6px;text-align:left;">Proveedor</th>
                                                                 <th style="padding:4px 6px;text-align:right;">Cantidad</th>
-                                                                <th style="padding:4px 6px;text-align:right;">Coste EUR</th>
+                                                                <th style="padding:4px 6px;text-align:right;">Coste €</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
@@ -4560,7 +4656,7 @@ if ($pendingPartidasSinProducto === []) {
                                                             <tr style="border-bottom:1px solid #1f2937;font-size:0.7rem;text-transform:uppercase;color:#9ca3af;">
                                                                 <th style="padding:4px 6px;text-align:left;">Tipo gasto</th>
                                                                 <th style="padding:4px 6px;text-align:left;">Detalle (solo para "Otros")</th>
-                                                                <th style="padding:4px 6px;text-align:right;">Coste EUR</th>
+                                                                <th style="padding:4px 6px;text-align:right;">Coste €</th>
                                                             </tr>
                                                         </thead>
                                                         <tbody>
@@ -5272,6 +5368,40 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 });
 
+// Modal "Motivo descarte"
+document.addEventListener('DOMContentLoaded', function () {
+    var btnOpen = document.getElementById('btn-open-discard-modal');
+    var modal = document.getElementById('modal-motivo-descarte');
+    var btnClose = document.getElementById('modal-descarte-close');
+    var btnCancel = document.getElementById('modal-descarte-cancel');
+
+    if (!btnOpen || !modal) return;
+
+    function openModal() {
+        var statusModal = document.getElementById('modal-cambiar-estado');
+        if (statusModal) statusModal.style.display = 'none';
+        modal.style.display = 'flex';
+    }
+    function closeModal() {
+        modal.style.display = 'none';
+    }
+
+    btnOpen.addEventListener('click', openModal);
+    if (btnClose) btnClose.addEventListener('click', closeModal);
+    if (btnCancel) btnCancel.addEventListener('click', closeModal);
+
+    var closeByBackdropPress = false;
+    modal.addEventListener('mousedown', function (e) {
+        closeByBackdropPress = (e.target === modal);
+    });
+    modal.addEventListener('click', function (e) {
+        if (closeByBackdropPress && e.target === modal) {
+            closeModal();
+        }
+        closeByBackdropPress = false;
+    });
+});
+
 // Modal "Detalle de perdida" para cambios de estado desde Presentada
 document.addEventListener('DOMContentLoaded', function () {
     var modal = document.getElementById('modal-detalle-perdida-estado');
@@ -5362,7 +5492,7 @@ document.addEventListener('DOMContentLoaded', function () {
             importeInput.value = lotValues.importe ? String(lotValues.importe) : '';
 
             fieldsWrap.appendChild(createLossField('Competidor ganador', ganadorInput));
-            fieldsWrap.appendChild(createLossField('Importe ganador (EUR)', importeInput));
+            fieldsWrap.appendChild(createLossField('Importe ganador (€)', importeInput));
             row.appendChild(fieldsWrap);
             lotesRows.appendChild(row);
         });

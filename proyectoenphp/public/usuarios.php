@@ -6,6 +6,8 @@ session_start();
 
 require_once __DIR__ . '/../src/Repositories/AuthRepository.php';
 require_once __DIR__ . '/../src/Repositories/PermissionsRepository.php';
+require_once __DIR__ . '/../src/Repositories/ReservasDisponibleRepository.php';
+require_once __DIR__ . '/../src/Repositories/DisponibleRepository.php';
 
 if (!isset($_SESSION['user']) || !is_array($_SESSION['user'])) {
     header('Location: login.php');
@@ -59,6 +61,46 @@ $actorRole = $normalizeRole($actorRoleRaw);
 
 $authRepo = new AuthRepository();
 $permissionsRepo = new PermissionsRepository();
+$reservasRepo = new ReservasDisponibleRepository();
+$disponibleRepo = new DisponibleRepository();
+
+/**
+ * Tipos de cliente disponibles.
+ * @var array<string, string>
+ */
+$tiposCliente = [
+    'mayorista'    => 'Mayorista',
+    'minorista'    => 'Minorista',
+    'garden'       => 'Garden Center',
+    'florista'     => 'Florista',
+    'distribuidor' => 'Distribuidor',
+    'online'       => 'Online',
+    'otro'         => 'Otro',
+];
+
+/**
+ * Columnas de precio disponibles.
+ * @var array<string, string>
+ */
+$tarifasDisponibles = [
+    'precio_x_unid'           => 'Precio x Unidad',
+    'precio_x_unid_diplad_m7' => 'Precio x Unid Diplad M7',
+    'precio_x_unid_almeria'   => 'Precio x Unid Almeria',
+    'precio_t5_directo'       => 'Tarifa T5 Directo',
+    'precio_t5_almeria'       => 'Tarifa T5 Almeria',
+    'precio_t10'              => 'Tarifa T10',
+    'precio_t15'              => 'Tarifa T15',
+    'precio_dipladen_t25'     => 'Tarifa Dipladen T25',
+    'precio_t25'              => 'Tarifa T25',
+];
+
+// Obtener zonas disponibles desde la BD
+$zonasDisponibles = [];
+try {
+    $zonasDisponibles = $disponibleRepo->getZonas();
+} catch (\Throwable) {
+    // Sin zonas disponibles, el campo será de texto libre
+}
 
 $canManageUsers = false;
 if ($actorRole === 'admin') {
@@ -281,6 +323,113 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
             $clearModal();
             $setFlash('success', 'Usuario eliminado correctamente.');
+        } elseif ($action === 'create_client') {
+            $clientUserId = trim((string)($_POST['client_user_id'] ?? ''));
+            $tipoCliente = trim((string)($_POST['tipo_cliente'] ?? 'minorista'));
+            $zonasRaw = $_POST['zonas'] ?? [];
+            $columnaPrecio = trim((string)($_POST['columna_precio'] ?? 'precio_x_unid'));
+            $puedeReservar = isset($_POST['puede_reservar']);
+            $clientNotas = trim((string)($_POST['client_notas'] ?? ''));
+
+            $clientFormData = [
+                'client_user_id' => $clientUserId,
+                'tipo_cliente' => $tipoCliente,
+                'zonas' => $zonasRaw,
+                'columna_precio' => $columnaPrecio,
+                'puede_reservar' => $puedeReservar,
+                'client_notas' => $clientNotas,
+            ];
+
+            if ($clientUserId === '') {
+                $setModal('create_client', 'Debes seleccionar un usuario.', $clientFormData);
+                header('Location: usuarios.php#clientes');
+                exit;
+            }
+
+            // Verificar que el usuario existe
+            $targetUser = $authRepo->findById($clientUserId);
+            if ($targetUser === null) {
+                $setModal('create_client', 'El usuario seleccionado no existe.', $clientFormData);
+                header('Location: usuarios.php#clientes');
+                exit;
+            }
+
+            // Construir zonas
+            $zonasStr = 'TODAS';
+            if (is_array($zonasRaw) && count($zonasRaw) > 0) {
+                $zonasStr = implode(',', array_map('trim', $zonasRaw));
+            }
+
+            if (!array_key_exists($columnaPrecio, $tarifasDisponibles)) {
+                $columnaPrecio = 'precio_x_unid';
+            }
+            if (!array_key_exists($tipoCliente, $tiposCliente)) {
+                $tipoCliente = 'minorista';
+            }
+
+            $reservasRepo->upsertClienteConfig(
+                $clientUserId,
+                $zonasStr,
+                $columnaPrecio,
+                $puedeReservar,
+                $clientNotas !== '' ? $clientNotas : null,
+                $tipoCliente
+            );
+            $clearModal();
+            $setFlash('success', 'Cliente configurado correctamente.');
+            header('Location: usuarios.php#clientes');
+            exit;
+        } elseif ($action === 'edit_client') {
+            $clientUserId = trim((string)($_POST['client_user_id'] ?? ''));
+            $tipoCliente = trim((string)($_POST['tipo_cliente'] ?? 'minorista'));
+            $zonasRaw = $_POST['zonas'] ?? [];
+            $columnaPrecio = trim((string)($_POST['columna_precio'] ?? 'precio_x_unid'));
+            $puedeReservar = isset($_POST['puede_reservar']);
+            $clientNotas = trim((string)($_POST['client_notas'] ?? ''));
+
+            if ($clientUserId === '') {
+                $setFlash('error', 'No se recibio el cliente a actualizar.');
+                header('Location: usuarios.php#clientes');
+                exit;
+            }
+
+            $zonasStr = 'TODAS';
+            if (is_array($zonasRaw) && count($zonasRaw) > 0) {
+                $zonasStr = implode(',', array_map('trim', $zonasRaw));
+            }
+
+            if (!array_key_exists($columnaPrecio, $tarifasDisponibles)) {
+                $columnaPrecio = 'precio_x_unid';
+            }
+            if (!array_key_exists($tipoCliente, $tiposCliente)) {
+                $tipoCliente = 'minorista';
+            }
+
+            $reservasRepo->upsertClienteConfig(
+                $clientUserId,
+                $zonasStr,
+                $columnaPrecio,
+                $puedeReservar,
+                $clientNotas !== '' ? $clientNotas : null,
+                $tipoCliente
+            );
+            $clearModal();
+            $setFlash('success', 'Cliente actualizado correctamente.');
+            header('Location: usuarios.php#clientes');
+            exit;
+        } elseif ($action === 'delete_client') {
+            $clientUserId = trim((string)($_POST['client_user_id'] ?? ''));
+            if ($clientUserId === '') {
+                $setFlash('error', 'No se recibio el cliente a eliminar.');
+                header('Location: usuarios.php#clientes');
+                exit;
+            }
+
+            $reservasRepo->deleteClienteConfig($clientUserId);
+            $clearModal();
+            $setFlash('success', 'Cliente eliminado correctamente.');
+            header('Location: usuarios.php#clientes');
+            exit;
         } else {
             $setFlash('error', 'Accion no valida.');
         }
@@ -330,6 +479,52 @@ try {
 } catch (\Throwable $e) {
     $usersError = 'No se pudieron cargar los usuarios: ' . $e->getMessage();
 }
+
+// ── Datos de clientes ────────────────────────────────────────────────────────
+$clients = [];
+$clientsError = null;
+try {
+    $clients = $reservasRepo->listClienteConfigs();
+} catch (\Throwable $e) {
+    $clientsError = 'No se pudieron cargar los clientes: ' . $e->getMessage();
+}
+
+// IDs de usuarios que ya tienen config de cliente
+$clientUserIds = [];
+foreach ($clients as $c) {
+    $clientUserIds[] = (string)($c['user_id'] ?? '');
+}
+
+// Usuarios disponibles para asignar como cliente (los que aún no tienen config)
+$availableForClient = [];
+foreach ($users as $u) {
+    if (!in_array((string)$u['id'], $clientUserIds, true)) {
+        $availableForClient[] = $u;
+    }
+}
+
+$isCreateClientOpen = $openModal === 'create_client';
+$isEditClientOpen = $openModal === 'edit_client';
+$isDeleteClientOpen = $openModal === 'delete_client';
+
+$clientFormValues = [
+    'client_user_id' => '',
+    'tipo_cliente' => 'minorista',
+    'zonas' => [],
+    'columna_precio' => 'precio_x_unid',
+    'puede_reservar' => true,
+    'client_notas' => '',
+];
+if ($isCreateClientOpen || $isEditClientOpen) {
+    $clientFormValues['client_user_id'] = trim((string)($modalData['client_user_id'] ?? ''));
+    $clientFormValues['tipo_cliente'] = trim((string)($modalData['tipo_cliente'] ?? 'minorista'));
+    $clientFormValues['zonas'] = is_array($modalData['zonas'] ?? null) ? $modalData['zonas'] : [];
+    $clientFormValues['columna_precio'] = trim((string)($modalData['columna_precio'] ?? 'precio_x_unid'));
+    $clientFormValues['puede_reservar'] = (bool)($modalData['puede_reservar'] ?? true);
+    $clientFormValues['client_notas'] = trim((string)($modalData['client_notas'] ?? ''));
+}
+
+$deleteClientUserId = $isDeleteClientOpen ? trim((string)($modalData['client_user_id'] ?? '')) : '';
 
 $createValues = [
     'email' => '',
@@ -437,8 +632,29 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
             font-weight: 600;
         }
         .user-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
             font-size: 0.85rem;
-            text-align: right;
+        }
+        .user-top {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .user-avatar {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.78rem;
+            flex-shrink: 0;
+        }
+        .user-name {
+            font-weight: 600; color: #e5e7eb; font-size: 0.85rem;
+        }
+        .user-meta {
+            display: flex; align-items: center; gap: 8px; justify-content: center;
         }
         .pill {
             display: inline-block;
@@ -446,9 +662,17 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
             border-radius: 9999px;
             background-color: #1e293b;
             color: #a5b4fc;
-            font-size: 0.75rem;
-            margin-top: 2px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
         }
+        .logout-link {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+        .logout-link:hover { color: #f87171; }
         main {
             max-width: 1120px;
             margin: 24px auto;
@@ -712,6 +936,98 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
             font-size: 0.9rem;
             padding: 10px 12px;
         }
+        .section-divider {
+            margin: 28px 0 0;
+        }
+        .client-tipo {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 9999px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 3px 10px;
+            text-transform: uppercase;
+            letter-spacing: 0.03em;
+        }
+        .tipo-mayorista    { background: rgba(59,130,246,0.14); color: #1d4ed8; border: 1px solid rgba(59,130,246,0.35); }
+        .tipo-minorista    { background: rgba(16,185,129,0.14); color: #047857; border: 1px solid rgba(16,185,129,0.35); }
+        .tipo-garden       { background: rgba(142,139,48,0.14); color: #5c5a1e; border: 1px solid rgba(142,139,48,0.35); }
+        .tipo-florista     { background: rgba(217,70,239,0.14); color: #a21caf; border: 1px solid rgba(217,70,239,0.35); }
+        .tipo-distribuidor { background: rgba(245,158,11,0.14); color: #b45309; border: 1px solid rgba(245,158,11,0.35); }
+        .tipo-online       { background: rgba(99,102,241,0.14); color: #4338ca; border: 1px solid rgba(99,102,241,0.35); }
+        .tipo-otro         { background: rgba(107,114,128,0.14); color: #374151; border: 1px solid rgba(107,114,128,0.35); }
+        .zona-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+        .zona-tag {
+            display: inline-block;
+            border-radius: 6px;
+            background: rgba(142,139,48,0.1);
+            border: 1px solid rgba(142,139,48,0.3);
+            color: #5c5a1e;
+            font-size: 0.7rem;
+            font-weight: 600;
+            padding: 2px 7px;
+        }
+        .tarifa-label {
+            font-size: 0.78rem;
+            color: var(--vz-marron1);
+            font-weight: 600;
+        }
+        .puede-badge {
+            display: inline-flex;
+            align-items: center;
+            border-radius: 9999px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            padding: 2px 8px;
+        }
+        .puede-si { background: #f0fdf4; color: #166534; border: 1px solid #86efac; }
+        .puede-no { background: #fef2f2; color: #991b1b; border: 1px solid #fecaca; }
+        .field-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+        }
+        .zonas-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+            gap: 6px;
+        }
+        .zonas-grid label {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 0.88rem !important;
+            font-weight: 500 !important;
+            cursor: pointer;
+            padding: 4px 6px;
+            border-radius: 6px;
+            border: 1px solid rgba(133,114,94,0.25);
+            background: #fafaf6;
+        }
+        .zonas-grid label:hover {
+            background: rgba(142,139,48,0.08);
+            border-color: rgba(142,139,48,0.4);
+        }
+        .zonas-grid input[type="checkbox"] {
+            width: 16px !important;
+            height: 16px !important;
+            accent-color: var(--vz-verde);
+        }
+        .zonas-toggle-all {
+            font-size: 0.78rem;
+            color: var(--vz-verde);
+            cursor: pointer;
+            border: none;
+            background: transparent;
+            font-weight: 600;
+            text-decoration: underline;
+            padding: 0;
+            margin-bottom: 4px;
+        }
         @media (max-width: 940px) {
             .actions-wrap {
                 flex-wrap: wrap;
@@ -719,6 +1035,9 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
             }
             .role-select {
                 min-width: 170px;
+            }
+            .field-row {
+                grid-template-columns: 1fr;
             }
         }
         @media (max-width: 768px) {
@@ -745,27 +1064,28 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
 </head>
 <body>
     <div class="layout">
-        <aside class="sidebar">
-            <div class="sidebar-logo">Licitaciones</div>
-            <nav class="sidebar-nav">
-                <a href="dashboard.php" class="nav-link">Dashboard</a>
-                <a href="licitaciones.php" class="nav-link">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador hist&oacute;rico</a>
-                <a href="analytics.php" class="nav-link">Anal&iacute;tica</a>
-                <a href="disponible.php" class="nav-link">Disponible</a>
-                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
-                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
-                <a href="usuarios.php" class="nav-link active">Usuarios</a>
-            </nav>
-        </aside>
+        <?php $activePage = 'usuarios'; include __DIR__ . '/partials/sidebar.php'; ?>
 
         <div class="main">
             <header>
                 <h1>Usuarios</h1>
                 <div class="user-info">
-                    <div><?php echo $h($actorFullName !== '' ? $actorFullName : $actorEmail); ?></div>
-                    <div class="pill"><?php echo $h($roles[$actorRole] ?? $actorRole); ?></div>
-                    <div><a href="logout.php">Cerrar sesi&oacute;n</a></div>
+                    <?php
+                        $displayName = $actorFullName !== '' ? $actorFullName : $actorEmail;
+                        $initials = '';
+                        $parts = explode(' ', trim($displayName));
+                        foreach (array_slice($parts, 0, 2) as $p) {
+                            if ($p !== '') $initials .= mb_strtoupper(mb_substr($p, 0, 1));
+                        }
+                    ?>
+                    <div class="user-top">
+                        <div class="user-avatar"><?php echo $initials; ?></div>
+                        <span class="user-name"><?php echo $h($displayName); ?></span>
+                    </div>
+                    <div class="user-meta">
+                        <span class="pill"><?php echo $h($roles[$actorRole] ?? $actorRole); ?></span>
+                        <a href="logout.php" class="logout-link">Cerrar sesi&oacute;n</a>
+                    </div>
                 </div>
             </header>
 
@@ -845,6 +1165,104 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
                                                     class="btn btn-danger-outline js-open-delete"
                                                     data-user-id="<?php echo $h($id); ?>"
                                                     <?php echo ($actorId !== '' && $actorId === $id) ? 'disabled' : ''; ?>
+                                                >
+                                                    Eliminar
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    <?php endif; ?>
+                </section>
+
+                <section id="clientes" class="card section-divider">
+                    <div class="toolbar">
+                        <div>
+                            <h2>Gesti&oacute;n de clientes</h2>
+                            <p>Configura perfiles de cliente: tipo, zonas de compra y tarifas asignadas.</p>
+                        </div>
+                        <button type="button" class="btn" data-open-modal="create_client">Crear cliente</button>
+                    </div>
+
+                    <?php if ($clientsError !== null): ?>
+                        <div class="alert error"><?php echo $h($clientsError); ?></div>
+                    <?php elseif ($clients === []): ?>
+                        <p class="hint">No hay clientes configurados a&uacute;n.</p>
+                    <?php else: ?>
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Usuario</th>
+                                    <th>Tipo</th>
+                                    <th>Zonas</th>
+                                    <th>Tarifa</th>
+                                    <th>Reservar</th>
+                                    <th class="actions-cell">Acciones</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($clients as $client): ?>
+                                    <?php
+                                        $cUserId = (string)($client['user_id'] ?? '');
+                                        $cName   = trim((string)($client['full_name'] ?? ''));
+                                        $cEmail  = trim((string)($client['email'] ?? ''));
+                                        $cLabel  = $cName !== '' ? $cName : ($cEmail !== '' ? $cEmail : $cUserId);
+                                        $cTipo   = trim((string)($client['tipo_cliente'] ?? 'minorista'));
+                                        $cZonas  = trim((string)($client['zonas'] ?? 'TODAS'));
+                                        $cTarifa = trim((string)($client['columna_precio'] ?? 'precio_x_unid'));
+                                        $cReserv = (bool)($client['puede_reservar'] ?? true);
+                                        $cNotas  = trim((string)($client['notas'] ?? ''));
+                                        $zonasArr = $cZonas === 'TODAS' ? ['TODAS'] : array_map('trim', explode(',', $cZonas));
+                                    ?>
+                                    <tr>
+                                        <td>
+                                            <div style="font-weight:600"><?php echo $h($cLabel); ?></div>
+                                            <?php if ($cName !== '' && $cEmail !== ''): ?>
+                                                <div style="font-size:0.78rem;opacity:0.7"><?php echo $h($cEmail); ?></div>
+                                            <?php endif; ?>
+                                        </td>
+                                        <td>
+                                            <span class="client-tipo tipo-<?php echo $h($cTipo); ?>">
+                                                <?php echo $h($tiposCliente[$cTipo] ?? $cTipo); ?>
+                                            </span>
+                                        </td>
+                                        <td>
+                                            <div class="zona-tags">
+                                                <?php foreach ($zonasArr as $z): ?>
+                                                    <span class="zona-tag"><?php echo $h($z); ?></span>
+                                                <?php endforeach; ?>
+                                            </div>
+                                        </td>
+                                        <td>
+                                            <span class="tarifa-label"><?php echo $h($tarifasDisponibles[$cTarifa] ?? $cTarifa); ?></span>
+                                        </td>
+                                        <td>
+                                            <span class="puede-badge <?php echo $cReserv ? 'puede-si' : 'puede-no'; ?>">
+                                                <?php echo $cReserv ? 'S&iacute;' : 'No'; ?>
+                                            </span>
+                                        </td>
+                                        <td class="actions-cell">
+                                            <div class="actions-wrap">
+                                                <button
+                                                    type="button"
+                                                    class="btn js-open-edit-client"
+                                                    data-user-id="<?php echo $h($cUserId); ?>"
+                                                    data-tipo="<?php echo $h($cTipo); ?>"
+                                                    data-zonas="<?php echo $h($cZonas); ?>"
+                                                    data-tarifa="<?php echo $h($cTarifa); ?>"
+                                                    data-reservar="<?php echo $cReserv ? '1' : '0'; ?>"
+                                                    data-notas="<?php echo $h($cNotas); ?>"
+                                                    data-label="<?php echo $h($cLabel); ?>"
+                                                >
+                                                    Editar
+                                                </button>
+                                                <button
+                                                    type="button"
+                                                    class="btn btn-danger-outline js-open-delete-client"
+                                                    data-user-id="<?php echo $h($cUserId); ?>"
+                                                    data-label="<?php echo $h($cLabel); ?>"
                                                 >
                                                     Eliminar
                                                 </button>
@@ -1022,6 +1440,201 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
         </div>
     </div>
 
+    <?php
+        // ── Helper: genera el bloque de campos del formulario de cliente ──────
+        // Se reutiliza para crear y editar.
+        $renderClientFields = function (string $prefix, array $vals, bool $isEdit) use ($h, $tiposCliente, $tarifasDisponibles, $zonasDisponibles): void {
+            $selectedZonas = $vals['zonas'];
+            if (!is_array($selectedZonas)) {
+                $raw = trim((string)$selectedZonas);
+                $selectedZonas = ($raw === '' || $raw === 'TODAS') ? [] : array_map('trim', explode(',', $raw));
+            }
+    ?>
+        <div class="field-row">
+            <div class="field">
+                <label for="<?php echo $prefix; ?>-tipo">Tipo de cliente</label>
+                <select id="<?php echo $prefix; ?>-tipo" name="tipo_cliente" required>
+                    <?php foreach ($tiposCliente as $tk => $tl): ?>
+                        <option value="<?php echo $h($tk); ?>" <?php echo $vals['tipo_cliente'] === $tk ? 'selected' : ''; ?>>
+                            <?php echo $h($tl); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="field">
+                <label for="<?php echo $prefix; ?>-tarifa">Tarifa asignada</label>
+                <select id="<?php echo $prefix; ?>-tarifa" name="columna_precio" required>
+                    <?php foreach ($tarifasDisponibles as $tk => $tl): ?>
+                        <option value="<?php echo $h($tk); ?>" <?php echo $vals['columna_precio'] === $tk ? 'selected' : ''; ?>>
+                            <?php echo $h($tl); ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+        </div>
+
+        <div class="field">
+            <label>Zonas donde puede comprar</label>
+            <button type="button" class="zonas-toggle-all" onclick="toggleAllZonas(this)">Seleccionar todas</button>
+            <div class="zonas-grid">
+                <?php if ($zonasDisponibles === []): ?>
+                    <span style="font-size:0.82rem;color:var(--vz-marron2)">No hay zonas disponibles en el cat&aacute;logo.</span>
+                <?php else: ?>
+                    <?php foreach ($zonasDisponibles as $zona): ?>
+                        <label>
+                            <input
+                                type="checkbox"
+                                name="zonas[]"
+                                value="<?php echo $h($zona); ?>"
+                                <?php echo in_array($zona, $selectedZonas, true) ? 'checked' : ''; ?>
+                            >
+                            <?php echo $h($zona); ?>
+                        </label>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </div>
+            <span style="font-size:0.74rem;color:var(--vz-marron2);margin-top:2px">
+                Si no seleccionas ninguna, el cliente ver&aacute; todas las zonas.
+            </span>
+        </div>
+
+        <div class="field-row">
+            <div class="field">
+                <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+                    <input
+                        type="checkbox"
+                        name="puede_reservar"
+                        value="1"
+                        style="width:18px !important;height:18px !important;accent-color:var(--vz-verde)"
+                        <?php echo $vals['puede_reservar'] ? 'checked' : ''; ?>
+                    >
+                    Puede hacer reservas
+                </label>
+            </div>
+        </div>
+
+        <div class="field">
+            <label for="<?php echo $prefix; ?>-notas">Notas (opcional)</label>
+            <input id="<?php echo $prefix; ?>-notas" type="text" name="client_notas" value="<?php echo $h($vals['client_notas']); ?>" placeholder="Observaciones internas sobre el cliente">
+        </div>
+    <?php
+        };
+    ?>
+
+    <div
+        id="modal-create-client"
+        class="modal-overlay <?php echo $isCreateClientOpen ? 'is-open' : ''; ?>"
+        data-modal-type="create_client"
+        <?php echo $isCreateClientOpen ? '' : 'hidden'; ?>
+    >
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-cc-title">
+            <div class="modal-head">
+                <h3 id="modal-cc-title">Crear perfil de cliente</h3>
+                <button type="button" class="modal-close" data-close-modal="create_client">&times;</button>
+            </div>
+            <p class="modal-sub">Selecciona un usuario y configura su perfil de cliente.</p>
+
+            <form method="post" class="form-stack">
+                <input type="hidden" name="action" value="create_client">
+
+                <?php if ($isCreateClientOpen && $modalError !== null): ?>
+                    <div class="inline-error"><?php echo $h($modalError); ?></div>
+                <?php endif; ?>
+
+                <div class="field">
+                    <label for="cc-user">Usuario</label>
+                    <select id="cc-user" name="client_user_id" required>
+                        <option value="">-- Seleccionar usuario --</option>
+                        <?php foreach ($availableForClient as $u): ?>
+                            <option
+                                value="<?php echo $h((string)$u['id']); ?>"
+                                <?php echo $clientFormValues['client_user_id'] === (string)$u['id'] ? 'selected' : ''; ?>
+                            >
+                                <?php
+                                    $label = (string)$u['full_name'];
+                                    if ($label === '') $label = (string)$u['email'];
+                                    echo $h($label . ' (' . $u['email'] . ')');
+                                ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <?php $renderClientFields('cc', $clientFormValues, false); ?>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn" data-close-modal="create_client">Cancelar</button>
+                    <button type="submit" class="btn">Crear cliente</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div
+        id="modal-edit-client"
+        class="modal-overlay <?php echo $isEditClientOpen ? 'is-open' : ''; ?>"
+        data-modal-type="edit_client"
+        <?php echo $isEditClientOpen ? '' : 'hidden'; ?>
+    >
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-ec-title">
+            <div class="modal-head">
+                <h3 id="modal-ec-title">Editar cliente</h3>
+                <button type="button" class="modal-close" data-close-modal="edit_client">&times;</button>
+            </div>
+            <p class="modal-sub">
+                Editando perfil de <strong id="edit-client-label">cliente</strong>.
+            </p>
+
+            <form method="post" class="form-stack">
+                <input type="hidden" name="action" value="edit_client">
+                <input type="hidden" id="edit-client-user-id" name="client_user_id" value="">
+
+                <?php if ($isEditClientOpen && $modalError !== null): ?>
+                    <div class="inline-error"><?php echo $h($modalError); ?></div>
+                <?php endif; ?>
+
+                <?php $renderClientFields('ec', $clientFormValues, true); ?>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn" data-close-modal="edit_client">Cancelar</button>
+                    <button type="submit" class="btn">Guardar cambios</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <div
+        id="modal-delete-client"
+        class="modal-overlay <?php echo $isDeleteClientOpen ? 'is-open' : ''; ?>"
+        data-modal-type="delete_client"
+        <?php echo $isDeleteClientOpen ? '' : 'hidden'; ?>
+    >
+        <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-dc-title">
+            <div class="modal-head">
+                <h3 id="modal-dc-title">Eliminar cliente</h3>
+                <button type="button" class="modal-close" data-close-modal="delete_client">&times;</button>
+            </div>
+            <p class="modal-sub">
+                Se eliminar&aacute; el perfil de cliente y todas sus reservas.
+                Cliente: <strong id="delete-client-label">cliente</strong>
+            </p>
+
+            <form method="post" class="form-stack">
+                <input type="hidden" name="action" value="delete_client">
+                <input type="hidden" id="delete-client-user-id" name="client_user_id" value="<?php echo $h($deleteClientUserId); ?>">
+
+                <?php if ($isDeleteClientOpen && $modalError !== null): ?>
+                    <div class="inline-error"><?php echo $h($modalError); ?></div>
+                <?php endif; ?>
+
+                <div class="modal-actions">
+                    <button type="button" class="btn" data-close-modal="delete_client">Cancelar</button>
+                    <button type="submit" class="btn btn-danger-outline">Eliminar cliente</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <script>
         (function () {
             const users = <?php echo json_encode($usersForJs, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?> || {};
@@ -1034,10 +1647,17 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
             const deleteUserInput = document.getElementById('delete-user-id');
             const deleteUserLabel = document.getElementById('delete-user-label');
 
+            const modalCreateClient = document.getElementById('modal-create-client');
+            const modalEditClient   = document.getElementById('modal-edit-client');
+            const modalDeleteClient = document.getElementById('modal-delete-client');
+
             const modals = {
                 create: modalCreate,
                 password: modalPassword,
-                delete: modalDelete
+                delete: modalDelete,
+                create_client: modalCreateClient,
+                edit_client: modalEditClient,
+                delete_client: modalDeleteClient
             };
 
             function userLabel(userId) {
@@ -1103,9 +1723,7 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
 
             document.addEventListener('keydown', function (event) {
                 if (event.key !== 'Escape') return;
-                closeModal('create');
-                closeModal('password');
-                closeModal('delete');
+                Object.keys(modals).forEach(t => closeModal(t));
             });
 
             document.querySelectorAll('.js-role-select').forEach((select) => {
@@ -1115,7 +1733,81 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
                     form.submit();
                 });
             });
+
+            // ── Client modals ────────────────────────────────────────────
+            document.querySelectorAll('[data-open-modal="create_client"]').forEach(btn => {
+                btn.addEventListener('click', () => openModal('create_client'));
+            });
+
+            // Edit client
+            const editClientUserIdInput = document.getElementById('edit-client-user-id');
+            const editClientLabel = document.getElementById('edit-client-label');
+            const editModal = document.getElementById('modal-edit-client');
+
+            document.querySelectorAll('.js-open-edit-client').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const userId = btn.getAttribute('data-user-id') || '';
+                    const label  = btn.getAttribute('data-label') || 'cliente';
+                    const tipo   = btn.getAttribute('data-tipo') || 'minorista';
+                    const zonas  = btn.getAttribute('data-zonas') || '';
+                    const tarifa = btn.getAttribute('data-tarifa') || 'precio_x_unid';
+                    const reserv = btn.getAttribute('data-reservar') === '1';
+                    const notas  = btn.getAttribute('data-notas') || '';
+
+                    if (editClientUserIdInput) editClientUserIdInput.value = userId;
+                    if (editClientLabel) editClientLabel.textContent = label;
+
+                    // Set form values
+                    if (editModal) {
+                        const tipoSel = editModal.querySelector('[name="tipo_cliente"]');
+                        if (tipoSel) tipoSel.value = tipo;
+
+                        const tarifaSel = editModal.querySelector('[name="columna_precio"]');
+                        if (tarifaSel) tarifaSel.value = tarifa;
+
+                        const reservCb = editModal.querySelector('[name="puede_reservar"]');
+                        if (reservCb) reservCb.checked = reserv;
+
+                        const notasInput = editModal.querySelector('[name="client_notas"]');
+                        if (notasInput) notasInput.value = notas;
+
+                        // Set zone checkboxes
+                        const zonasArr = (zonas === '' || zonas === 'TODAS') ? [] : zonas.split(',').map(z => z.trim());
+                        editModal.querySelectorAll('[name="zonas[]"]').forEach(cb => {
+                            cb.checked = zonasArr.includes(cb.value);
+                        });
+                    }
+
+                    openModal('edit_client');
+                });
+            });
+
+            // Delete client
+            const deleteClientUserIdInput = document.getElementById('delete-client-user-id');
+            const deleteClientLabel = document.getElementById('delete-client-label');
+
+            document.querySelectorAll('.js-open-delete-client').forEach(btn => {
+                btn.addEventListener('click', () => {
+                    const userId = btn.getAttribute('data-user-id') || '';
+                    const label  = btn.getAttribute('data-label') || 'cliente';
+
+                    if (deleteClientUserIdInput) deleteClientUserIdInput.value = userId;
+                    if (deleteClientLabel) deleteClientLabel.textContent = label;
+
+                    openModal('delete_client');
+                });
+            });
         })();
+
+        // Toggle all zone checkboxes (global helper)
+        function toggleAllZonas(btn) {
+            const grid = btn.nextElementSibling;
+            if (!grid) return;
+            const boxes = grid.querySelectorAll('input[type="checkbox"]');
+            const allChecked = Array.from(boxes).every(cb => cb.checked);
+            boxes.forEach(cb => cb.checked = !allChecked);
+            btn.textContent = allChecked ? 'Seleccionar todas' : 'Deseleccionar todas';
+        }
     </script>
 </body>
 </html>

@@ -214,7 +214,7 @@ final class DisponibleRepository extends BaseRepository
         'pedido_x_unid', 'pedido_x_piso', 'pedido_x_cc',
         'cod_productor', 'cod_productor_opc2', 'cod_productor_opc3',
         'nombre_productor', 'unids_disponibles', 'fecha_sem_produccion',
-        'ultimo_cambio', 'pasado_a_freshportal',
+        'ultimo_cambio',
         'total_unids_x_linea', 'incremento_precio_x_unid',
     ];
 

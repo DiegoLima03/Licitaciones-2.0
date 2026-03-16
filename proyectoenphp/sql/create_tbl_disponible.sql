@@ -67,7 +67,7 @@ CREATE TABLE IF NOT EXISTS tbl_disponible (
 
     -- Control
     ultimo_cambio               DATE            NULL,
-    pasado_a_freshportal        TINYINT(1)      NOT NULL DEFAULT 0 COMMENT 'Pasado a Freshportal (0/1)',
+
     total_unids_x_linea         INT             NULL DEFAULT 0 COMMENT 'Total unidades a pedir por línea',
     incremento_precio_x_unid    DECIMAL(10,2)   NULL COMMENT 'Incremento de precio por unidad (€)',
 

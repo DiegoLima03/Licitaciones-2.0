@@ -18,6 +18,26 @@ final class AnalyticsRepository extends BaseRepository
     // Tipos de procedimiento incluidos en el dashboard
     private const TIPOS_INCLUIDOS_DASHBOARD = ['ORDINARIO', 'CONTRATO_BASADO', 'ESPECIFICO_SDA'];
 
+    /** @var bool|null */
+    private ?bool $preciosRefExists = null;
+
+    /**
+     * Comprueba si tbl_precios_referencia existe en la BD.
+     */
+    private function hasPreciosReferencia(): bool
+    {
+        if ($this->preciosRefExists !== null) {
+            return $this->preciosRefExists;
+        }
+        try {
+            $this->pdo->query('SELECT 1 FROM ' . self::TABLE_PRECIOS_REFERENCIA . ' LIMIT 0');
+            $this->preciosRefExists = true;
+        } catch (\PDOException $e) {
+            $this->preciosRefExists = false;
+        }
+        return $this->preciosRefExists;
+    }
+
     /**
      * Devuelve KPIs de dashboard y timeline de licitaciones.
      *
@@ -209,29 +229,32 @@ final class AnalyticsRepository extends BaseRepository
             return ['pvu' => [], 'pcu' => []];
         }
 
-        // PVU/PCU desde precios_referencia
+        // PVU/PCU desde precios_referencia (si existe)
         $pvuPoints = [];
         $pcuPoints = [];
+        $refRows = [];
 
-        $placeholders = [];
-        $paramsRef = $this->getRlsParams();
-        foreach ($productIds as $idx => $pid) {
-            $ph = ':pid_' . $idx;
-            $placeholders[] = $ph;
-            $paramsRef[$ph] = $pid;
+        if ($this->hasPreciosReferencia()) {
+            $placeholders = [];
+            $paramsRef = $this->getRlsParams();
+            foreach ($productIds as $idx => $pid) {
+                $ph = ':pid_' . $idx;
+                $placeholders[] = $ph;
+                $paramsRef[$ph] = $pid;
+            }
+            $sqlRef = sprintf(
+                'SELECT pvu, pcu, fecha_presupuesto
+                 FROM %s
+                 WHERE %s AND id_producto IN (%s)
+                 ORDER BY fecha_presupuesto',
+                self::TABLE_PRECIOS_REFERENCIA,
+                $this->getRlsClause(),
+                implode(', ', $placeholders)
+            );
+            $stmtRef = $this->pdo->prepare($sqlRef);
+            $stmtRef->execute($paramsRef);
+            $refRows = $stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [];
         }
-        $sqlRef = sprintf(
-            'SELECT pvu, pcu, fecha_presupuesto
-             FROM %s
-             WHERE %s AND id_producto IN (%s)
-             ORDER BY fecha_presupuesto',
-            self::TABLE_PRECIOS_REFERENCIA,
-            $this->getRlsClause(),
-            implode(', ', $placeholders)
-        );
-        $stmtRef = $this->pdo->prepare($sqlRef);
-        $stmtRef->execute($paramsRef);
-        $refRows = $stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [];
 
         foreach ($refRows as $r) {
             $timeStr = $this->normalizeDateString($r['fecha_presupuesto'] ?? null);
@@ -510,25 +533,28 @@ final class AnalyticsRepository extends BaseRepository
 
         $productIds = array_values(array_unique(array_column($lineas, 'id_producto')));
 
-        // Medias de precio por producto desde precios_referencia
-        $placeholdersProd = [];
-        $paramsRef = $this->getRlsParams();
-        foreach ($productIds as $idx => $pid) {
-            $ph = ':pid_' . $idx;
-            $placeholdersProd[] = $ph;
-            $paramsRef[$ph] = $pid;
+        // Medias de precio por producto desde precios_referencia (si existe)
+        $refRows = [];
+        if ($this->hasPreciosReferencia()) {
+            $placeholdersProd = [];
+            $paramsRef = $this->getRlsParams();
+            foreach ($productIds as $idx => $pid) {
+                $ph = ':pid_' . $idx;
+                $placeholdersProd[] = $ph;
+                $paramsRef[$ph] = $pid;
+            }
+            $sqlRef = sprintf(
+                'SELECT id_producto, pvu
+                 FROM %s
+                 WHERE %s AND id_producto IN (%s)',
+                self::TABLE_PRECIOS_REFERENCIA,
+                $this->getRlsClause(),
+                implode(', ', $placeholdersProd)
+            );
+            $stmtRef = $this->pdo->prepare($sqlRef);
+            $stmtRef->execute($paramsRef);
+            $refRows = $stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [];
         }
-        $sqlRef = sprintf(
-            'SELECT id_producto, pvu
-             FROM %s
-             WHERE %s AND id_producto IN (%s)',
-            self::TABLE_PRECIOS_REFERENCIA,
-            $this->getRlsClause(),
-            implode(', ', $placeholdersProd)
-        );
-        $stmtRef = $this->pdo->prepare($sqlRef);
-        $stmtRef->execute($paramsRef);
-        $refRows = $stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [];
 
         $pvuPorProducto = [];
         foreach ($refRows as $ref) {
@@ -781,18 +807,21 @@ final class AnalyticsRepository extends BaseRepository
             }
         }
 
-        $sqlRef = sprintf(
-            'SELECT pvu, pcu, unidades, fecha_presupuesto
-             FROM %s
-             WHERE %s AND id_producto = :id_producto',
-            self::TABLE_PRECIOS_REFERENCIA,
-            $this->getRlsClause()
-        );
-        $paramsRef = $this->getRlsParams();
-        $paramsRef[':id_producto'] = $productId;
-        $stmtRef = $this->pdo->prepare($sqlRef);
-        $stmtRef->execute($paramsRef);
-        $refRows = $stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        $refRows = [];
+        if ($this->hasPreciosReferencia()) {
+            $sqlRef = sprintf(
+                'SELECT pvu, pcu, unidades, fecha_presupuesto
+                 FROM %s
+                 WHERE %s AND id_producto = :id_producto',
+                self::TABLE_PRECIOS_REFERENCIA,
+                $this->getRlsClause()
+            );
+            $paramsRef = $this->getRlsParams();
+            $paramsRef[':id_producto'] = $productId;
+            $stmtRef = $this->pdo->prepare($sqlRef);
+            $stmtRef->execute($paramsRef);
+            $refRows = $stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+        }
 
         $unidadesVendidasByDate = [];
         foreach ($refRows as $row) {
@@ -1087,32 +1116,34 @@ final class AnalyticsRepository extends BaseRepository
         $oneYearAgo = (new \DateTimeImmutable('now'))->sub(new \DateInterval('P365D'))->format('Y-m-d');
         $values = [];
 
-        // PVU desde precios_referencia del Ãºltimo aÃ±o
-        $placeholders = [];
-        $paramsRef = $this->getRlsParams();
-        foreach ($productIds as $idx => $pid) {
-            $ph = ':pid_' . $idx;
-            $placeholders[] = $ph;
-            $paramsRef[$ph] = $pid;
-        }
-        $sqlRef = sprintf(
-            'SELECT pvu, fecha_presupuesto
-             FROM %s
-             WHERE %s AND id_producto IN (%s)',
-            self::TABLE_PRECIOS_REFERENCIA,
-            $this->getRlsClause(),
-            implode(', ', $placeholders)
-        );
-        $stmtRef = $this->pdo->prepare($sqlRef);
-        $stmtRef->execute($paramsRef);
-        foreach ($stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
-            $pvu = $r['pvu'] ?? null;
-            if ($pvu === null) {
-                continue;
+        // PVU desde precios_referencia del ultimo anno (si existe)
+        if ($this->hasPreciosReferencia()) {
+            $placeholders = [];
+            $paramsRef = $this->getRlsParams();
+            foreach ($productIds as $idx => $pid) {
+                $ph = ':pid_' . $idx;
+                $placeholders[] = $ph;
+                $paramsRef[$ph] = $pid;
             }
-            $fecha = $this->normalizeDateString($r['fecha_presupuesto'] ?? null);
-            if ($fecha !== null && $fecha >= $oneYearAgo) {
-                $values[] = (float)$pvu;
+            $sqlRef = sprintf(
+                'SELECT pvu, fecha_presupuesto
+                 FROM %s
+                 WHERE %s AND id_producto IN (%s)',
+                self::TABLE_PRECIOS_REFERENCIA,
+                $this->getRlsClause(),
+                implode(', ', $placeholders)
+            );
+            $stmtRef = $this->pdo->prepare($sqlRef);
+            $stmtRef->execute($paramsRef);
+            foreach ($stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+                $pvu = $r['pvu'] ?? null;
+                if ($pvu === null) {
+                    continue;
+                }
+                $fecha = $this->normalizeDateString($r['fecha_presupuesto'] ?? null);
+                if ($fecha !== null && $fecha >= $oneYearAgo) {
+                    $values[] = (float)$pvu;
+                }
             }
         }
 

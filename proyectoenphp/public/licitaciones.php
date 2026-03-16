@@ -493,8 +493,29 @@ foreach ($licitacionesBase as $lic) {
             font-weight: 600;
         }
         .user-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
             font-size: 0.85rem;
-            text-align: right;
+        }
+        .user-top {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .user-avatar {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.78rem;
+            flex-shrink: 0;
+        }
+        .user-name {
+            font-weight: 600; color: #e5e7eb; font-size: 0.85rem;
+        }
+        .user-meta {
+            display: flex; align-items: center; gap: 8px; justify-content: center;
         }
         .pill {
             display: inline-block;
@@ -502,9 +523,17 @@ foreach ($licitacionesBase as $lic) {
             border-radius: 9999px;
             background-color: #1e293b;
             color: #a5b4fc;
-            font-size: 0.75rem;
-            margin-top: 2px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
         }
+        .logout-link {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+        .logout-link:hover { color: #f87171; }
         main {
             width: 100%;
             max-width: none;
@@ -865,33 +894,28 @@ foreach ($licitacionesBase as $lic) {
 </head>
 <body>
     <div class="layout">
-        <aside class="sidebar">
-            <div class="sidebar-logo">
-                Licitaciones
-            </div>
-            <nav class="sidebar-nav">
-                <a href="dashboard.php" class="nav-link">Dashboard</a>
-                <a href="licitaciones.php" class="nav-link active">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador historico</a>
-                <a href="analytics.php" class="nav-link">Analitica</a>
-                <a href="disponible.php" class="nav-link">Disponible</a>
-                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
-                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
-                <a href="usuarios.php" class="nav-link">Usuarios</a>
-            </nav>
-            <div class="sidebar-footer">
-                            </div>
-        </aside>
+        <?php $activePage = 'licitaciones'; include __DIR__ . '/partials/sidebar.php'; ?>
         <div class="main">
             <header>
                 <h1>Mis licitaciones</h1>
                 <div class="user-info">
-                    <div><?php echo htmlspecialchars($fullName !== '' ? $fullName : $email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
-                    <?php if ($role !== ''): ?>
-                        <div class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></div>
-                    <?php endif; ?>
-                    <div>
-                        <a href="logout.php">Cerrar sesion</a>
+                    <?php
+                        $displayName = $fullName !== '' ? $fullName : $email;
+                        $initials = '';
+                        $parts = explode(' ', trim($displayName));
+                        foreach (array_slice($parts, 0, 2) as $p) {
+                            if ($p !== '') $initials .= mb_strtoupper(mb_substr($p, 0, 1));
+                        }
+                    ?>
+                    <div class="user-top">
+                        <div class="user-avatar"><?php echo $initials; ?></div>
+                        <span class="user-name"><?php echo htmlspecialchars($displayName, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
+                    </div>
+                    <div class="user-meta">
+                        <?php if ($role !== ''): ?>
+                            <span class="pill"><?php echo htmlspecialchars($role, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
+                        <?php endif; ?>
+                        <a href="logout.php" class="logout-link">Cerrar sesi&oacute;n</a>
                     </div>
                 </div>
             </header>
@@ -967,7 +991,7 @@ foreach ($licitacionesBase as $lic) {
                                     <th style="text-align:center;">Procedimiento</th>
                                     <th style="text-align:center;">F. Presentacion</th>
                                     <th style="text-align:center;">Estado</th>
-                                    <th style="text-align:right;">Presupuesto (EUR)</th>
+                                    <th style="text-align:right;">Presupuesto (€)</th>
                                 </tr>
                             </thead>
                             <tbody>
@@ -1055,7 +1079,7 @@ foreach ($licitacionesBase as $lic) {
                                                 <span class="<?php echo $claseEstado; ?>"><?php echo htmlspecialchars($estadoNombre, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></span>
                                             </td>
                                             <td style="text-align:right;">
-                                                <?php echo number_format((float)($lic['pres_maximo'] ?? 0), 0, ',', '.'); ?> EUR
+                                                <?php echo number_format((float)($lic['pres_maximo'] ?? 0), 0, ',', '.'); ?> €
                                             </td>
                                         </tr>
                                     <?php endforeach; ?>
@@ -1103,7 +1127,7 @@ foreach ($licitacionesBase as $lic) {
                             <input id="modal-enlace_sharepoint" name="enlace_sharepoint" type="url" placeholder="https://... (carpeta o sitio con documentacion)" />
                         </div>
                         <div class="field half">
-                            <label for="modal-pres_maximo">Presupuesto max. (EUR)</label>
+                            <label for="modal-pres_maximo">Presupuesto max. (€)</label>
                             <input id="modal-pres_maximo" name="pres_maximo" type="number" step="0.01" min="0" placeholder="0,00" required />
                         </div>
                         <div class="field half">

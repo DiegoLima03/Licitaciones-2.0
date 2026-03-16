@@ -38,7 +38,9 @@ $features = [
     'dashboard' => 'Dashboard',
     'licitaciones' => 'Mis licitaciones',
     'buscador' => 'Buscador historico',
-    'lineas' => 'Anadir lineas',
+    'disponible' => 'Disponible',
+    'vista_cliente' => 'Vista Cliente',
+    'pedidos' => 'Pedidos',
     'analytics' => 'Analitica',
     'usuarios' => 'Gestion de usuarios',
 ];
@@ -79,7 +81,9 @@ $buildDefaultMatrix = static function () use ($features): array {
             'dashboard' => true,
             'licitaciones' => true,
             'buscador' => true,
-            'lineas' => true,
+            'disponible' => true,
+            'vista_cliente' => true,
+            'pedidos' => true,
             'analytics' => true,
             'usuarios' => true,
         ]),
@@ -87,7 +91,9 @@ $buildDefaultMatrix = static function () use ($features): array {
             'dashboard' => true,
             'licitaciones' => true,
             'buscador' => true,
-            'lineas' => true,
+            'disponible' => true,
+            'vista_cliente' => true,
+            'pedidos' => true,
             'analytics' => true,
             'usuarios' => false,
         ]),
@@ -95,23 +101,29 @@ $buildDefaultMatrix = static function () use ($features): array {
             'dashboard' => true,
             'licitaciones' => true,
             'buscador' => true,
-            'lineas' => true,
+            'disponible' => true,
+            'vista_cliente' => true,
+            'pedidos' => true,
             'analytics' => false,
             'usuarios' => false,
         ]),
         'admin_planta' => array_merge($baseFalse, [
             'dashboard' => false,
-            'licitaciones' => true,
+            'licitaciones' => false,
             'buscador' => true,
-            'lineas' => true,
+            'disponible' => true,
+            'vista_cliente' => true,
+            'pedidos' => true,
             'analytics' => false,
             'usuarios' => false,
         ]),
         'member_planta' => array_merge($baseFalse, [
             'dashboard' => false,
-            'licitaciones' => true,
+            'licitaciones' => false,
             'buscador' => true,
-            'lineas' => false,
+            'disponible' => true,
+            'vista_cliente' => true,
+            'pedidos' => false,
             'analytics' => false,
             'usuarios' => false,
         ]),
@@ -261,8 +273,29 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
             font-weight: 600;
         }
         .user-info {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 4px;
             font-size: 0.85rem;
-            text-align: right;
+        }
+        .user-top {
+            display: flex; align-items: center; gap: 8px;
+        }
+        .user-avatar {
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #2563eb, #3b82f6);
+            color: #fff;
+            display: flex; align-items: center; justify-content: center;
+            font-weight: 700; font-size: 0.78rem;
+            flex-shrink: 0;
+        }
+        .user-name {
+            font-weight: 600; color: #e5e7eb; font-size: 0.85rem;
+        }
+        .user-meta {
+            display: flex; align-items: center; gap: 8px; justify-content: center;
         }
         .pill {
             display: inline-block;
@@ -270,9 +303,17 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
             border-radius: 9999px;
             background-color: #1e293b;
             color: #a5b4fc;
-            font-size: 0.75rem;
-            margin-top: 2px;
+            font-size: 0.7rem;
+            font-weight: 600;
+            letter-spacing: 0.02em;
         }
+        .logout-link {
+            color: #94a3b8;
+            font-size: 0.75rem;
+            text-decoration: none;
+            transition: color 0.15s;
+        }
+        .logout-link:hover { color: #f87171; }
         main {
             width: 100%;
             max-width: 1250px;
@@ -421,30 +462,30 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
 </head>
 <body>
     <div class="layout">
-        <aside class="sidebar">
-            <div class="sidebar-logo">Licitaciones</div>
-            <nav class="sidebar-nav">
-                <a href="dashboard.php" class="nav-link">Dashboard</a>
-                <a href="licitaciones.php" class="nav-link">Licitaciones</a>
-                <a href="buscador.php" class="nav-link">Buscador historico</a>
-                <a href="analytics.php" class="nav-link">Analitica</a>
-                <a href="disponible.php" class="nav-link">Disponible</a>
-                <a href="disponible-cliente.php" class="nav-link">Vista Cliente</a>
-                <a href="pedidos-disponible.php" class="nav-link">Pedidos</a>
-                <a href="usuarios.php" class="nav-link">Usuarios</a>
-                <a href="roles.php" class="nav-link active">Roles</a>
-            </nav>
-        </aside>
+        <?php $activePage = 'usuarios'; include __DIR__ . '/partials/sidebar.php'; ?>
 
         <div class="main">
             <header>
                 <h1>Roles y permisos</h1>
                 <div class="user-info">
-                    <div><?php echo $h($fullName !== '' ? $fullName : $email); ?></div>
-                    <?php if ($actorRole !== ''): ?>
-                        <div class="pill"><?php echo $h($actorRole); ?></div>
-                    <?php endif; ?>
-                    <div><a href="logout.php">Cerrar sesion</a></div>
+                    <?php
+                        $displayName = $fullName !== '' ? $fullName : $email;
+                        $initials = '';
+                        $parts = explode(' ', trim($displayName));
+                        foreach (array_slice($parts, 0, 2) as $p) {
+                            if ($p !== '') $initials .= mb_strtoupper(mb_substr($p, 0, 1));
+                        }
+                    ?>
+                    <div class="user-top">
+                        <div class="user-avatar"><?php echo $initials; ?></div>
+                        <span class="user-name"><?php echo $h($displayName); ?></span>
+                    </div>
+                    <div class="user-meta">
+                        <?php if ($actorRole !== ''): ?>
+                            <span class="pill"><?php echo $h($actorRole); ?></span>
+                        <?php endif; ?>
+                        <a href="logout.php" class="logout-link">Cerrar sesi&oacute;n</a>
+                    </div>
                 </div>
             </header>
 

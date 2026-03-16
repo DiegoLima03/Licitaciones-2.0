@@ -34,12 +34,14 @@ final class ReservasDisponibleRepository extends BaseRepository
         string $zonas,
         string $columnaPrecio,
         bool $puedeReservar = true,
-        ?string $notas = null
+        ?string $notas = null,
+        string $tipoCliente = 'minorista'
     ): void {
         $sql = 'INSERT INTO ' . self::TABLE_CONFIG . '
-                    (user_id, zonas, columna_precio, puede_reservar, notas)
-                VALUES (:uid, :zonas, :cp, :pr, :notas)
+                    (user_id, tipo_cliente, zonas, columna_precio, puede_reservar, notas)
+                VALUES (:uid, :tipo, :zonas, :cp, :pr, :notas)
                 ON DUPLICATE KEY UPDATE
+                    tipo_cliente   = VALUES(tipo_cliente),
                     zonas          = VALUES(zonas),
                     columna_precio = VALUES(columna_precio),
                     puede_reservar = VALUES(puede_reservar),
@@ -48,11 +50,30 @@ final class ReservasDisponibleRepository extends BaseRepository
         $stmt = $this->pdo->prepare($sql);
         $stmt->execute([
             ':uid'   => $userId,
+            ':tipo'  => $tipoCliente,
             ':zonas' => $zonas,
             ':cp'    => $columnaPrecio,
             ':pr'    => $puedeReservar ? 1 : 0,
             ':notas' => $notas,
         ]);
+    }
+
+    /**
+     * Elimina la configuración de un cliente.
+     */
+    public function deleteClienteConfig(string $userId): void
+    {
+        // Primero borrar sus reservas
+        $stmt = $this->pdo->prepare(
+            'DELETE FROM ' . self::TABLE_RESERVAS . ' WHERE user_id = :uid'
+        );
+        $stmt->execute([':uid' => $userId]);
+
+        // Luego borrar la config
+        $stmt = $this->pdo->prepare(
+            'DELETE FROM ' . self::TABLE_CONFIG . ' WHERE user_id = :uid'
+        );
+        $stmt->execute([':uid' => $userId]);
     }
 
     /**
