@@ -8,6 +8,7 @@
 *.log
 .idea/
 .vscode/
+.claude/
 
 # ── Proyecto antiguo (ignorado por completo) ──────────
 proyecto-antiguo/
