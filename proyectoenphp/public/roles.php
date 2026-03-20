@@ -462,7 +462,7 @@ $h = static fn (string $v): string => htmlspecialchars($v, ENT_QUOTES | ENT_SUBS
 </head>
 <body>
     <div class="layout">
-        <?php $activePage = 'usuarios'; include __DIR__ . '/partials/sidebar.php'; ?>
+        <?php $activePage = 'usuarios'; $role = $roleRaw; include __DIR__ . '/partials/sidebar.php'; ?>
 
         <div class="main">
             <header>

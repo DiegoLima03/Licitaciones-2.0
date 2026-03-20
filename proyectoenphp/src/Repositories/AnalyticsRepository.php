@@ -12,6 +12,8 @@ final class AnalyticsRepository extends BaseRepository
     private const TABLE_PRECIOS_REFERENCIA = 'tbl_precios_referencia';
     private const TABLE_PRODUCTOS = 'tbl_productos';
     private const TABLE_ENTREGAS = 'tbl_entregas';
+    private const TABLE_ALBARANES = 'tbl_albaranes';
+    private const TABLE_ALBARANES_LINEAS = 'tbl_albaranes_lineas';
     private const TABLE_GASTOS_PROYECTO = 'tbl_gastos_proyecto';
     private const TABLE_ESTADOS = 'tbl_estados';
 
@@ -441,6 +443,70 @@ final class AnalyticsRepository extends BaseRepository
                 $pcuPoints[] = [
                     'time' => $timeStr,
                     'value' => round((float)$pcu, 2),
+                ];
+            }
+        }
+
+        // PVU desde albaranes de VENTA
+        $placeholdersAlb = [];
+        $paramsAlbV = $this->getRlsParams();
+        foreach ($productIds as $idx => $pid) {
+            $ph = ':albv_' . $idx;
+            $placeholdersAlb[] = $ph;
+            $paramsAlbV[$ph] = $pid;
+        }
+        $sqlAlbV = sprintf(
+            'SELECT al.pvu, a.fecha_albaran
+             FROM %s al
+             INNER JOIN %s a ON a.id_albaran = al.id_albaran
+             WHERE a.tipo_albaran = \'VENTA\'
+               AND al.id_producto IN (%s)
+               AND al.pvu IS NOT NULL
+               AND al.cantidad > 0',
+            self::TABLE_ALBARANES_LINEAS,
+            self::TABLE_ALBARANES,
+            implode(', ', $placeholdersAlb)
+        );
+        $stmtAlbV = $this->pdo->prepare($sqlAlbV);
+        $stmtAlbV->execute($paramsAlbV);
+        foreach ($stmtAlbV->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+            $timeStr = $this->normalizeDateString($r['fecha_albaran'] ?? null);
+            if ($timeStr !== null) {
+                $pvuPoints[] = [
+                    'time' => $timeStr,
+                    'value' => round((float)$r['pvu'], 2),
+                ];
+            }
+        }
+
+        // PCU desde albaranes de COMPRA
+        $placeholdersAlbC = [];
+        $paramsAlbC = $this->getRlsParams();
+        foreach ($productIds as $idx => $pid) {
+            $ph = ':albc_' . $idx;
+            $placeholdersAlbC[] = $ph;
+            $paramsAlbC[$ph] = $pid;
+        }
+        $sqlAlbC = sprintf(
+            'SELECT al.pcu, a.fecha_albaran
+             FROM %s al
+             INNER JOIN %s a ON a.id_albaran = al.id_albaran
+             WHERE a.tipo_albaran = \'COMPRA\'
+               AND al.id_producto IN (%s)
+               AND al.pcu IS NOT NULL
+               AND al.cantidad > 0',
+            self::TABLE_ALBARANES_LINEAS,
+            self::TABLE_ALBARANES,
+            implode(', ', $placeholdersAlbC)
+        );
+        $stmtAlbC = $this->pdo->prepare($sqlAlbC);
+        $stmtAlbC->execute($paramsAlbC);
+        foreach ($stmtAlbC->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+            $timeStr = $this->normalizeDateString($r['fecha_albaran'] ?? null);
+            if ($timeStr !== null) {
+                $pcuPoints[] = [
+                    'time' => $timeStr,
+                    'value' => round((float)$r['pcu'], 2),
                 ];
             }
         }
@@ -1109,7 +1175,7 @@ final class AnalyticsRepository extends BaseRepository
                 'is_deviated' => true,
                 'deviation_percentage' => 0.0,
                 'historical_avg' => 0.0,
-                'recommendation' => 'No hay histÃ³rico para este material. Revisar precio manualmente.',
+                'recommendation' => 'No hay histórico para este material. Revisar precio manualmente.',
             ];
         }
 
@@ -1173,13 +1239,44 @@ final class AnalyticsRepository extends BaseRepository
             $values[] = (float)$pvu;
         }
 
+        // PVU desde albaranes de VENTA (ultimo anno)
+        $placeholdersAlb = [];
+        $paramsAlb = $this->getRlsParams();
+        foreach ($productIds as $idx => $pid) {
+            $ph = ':albdev_' . $idx;
+            $placeholdersAlb[] = $ph;
+            $paramsAlb[$ph] = $pid;
+        }
+        $paramsAlb[':oneYearAgo'] = $oneYearAgo;
+        $sqlAlbDev = sprintf(
+            'SELECT al.pvu
+             FROM %s al
+             INNER JOIN %s a ON a.id_albaran = al.id_albaran
+             WHERE a.tipo_albaran = \'VENTA\'
+               AND al.id_producto IN (%s)
+               AND al.pvu IS NOT NULL
+               AND al.cantidad > 0
+               AND a.fecha_albaran >= :oneYearAgo',
+            self::TABLE_ALBARANES_LINEAS,
+            self::TABLE_ALBARANES,
+            implode(', ', $placeholdersAlb)
+        );
+        $stmtAlbDev = $this->pdo->prepare($sqlAlbDev);
+        $stmtAlbDev->execute($paramsAlb);
+        foreach ($stmtAlbDev->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+            $pvu = $r['pvu'] ?? null;
+            if ($pvu !== null) {
+                $values[] = (float)$pvu;
+            }
+        }
+
         $historicalAvg = $values !== [] ? array_sum($values) / count($values) : 0.0;
         if ($historicalAvg <= 0.0) {
             return [
                 'is_deviated' => true,
                 'deviation_percentage' => 0.0,
                 'historical_avg' => 0.0,
-                'recommendation' => 'Sin histÃ³rico reciente. Verificar precio con el mercado.',
+                'recommendation' => 'Sin histórico reciente. Verificar precio con el mercado.',
             ];
         }
 
@@ -1189,19 +1286,19 @@ final class AnalyticsRepository extends BaseRepository
 
         if ($isDeviated && $deviationPct > 0) {
             $recommendation = sprintf(
-                'Precio %.1f%% por encima de la media del Ãºltimo aÃ±o (â‚¬%.2f). Revisar si el coste actual estÃ¡ justificado.',
+                'Precio %.1f%% por encima de la media del último año (€%.2f). Revisar si el coste actual está justificado.',
                 $deviationPct,
                 $historicalAvg
             );
         } elseif ($isDeviated && $deviationPct < 0) {
             $recommendation = sprintf(
-                'Precio %.1f%% por debajo de la media del Ãºltimo aÃ±o (â‚¬%.2f). Confirmar que el proveedor y la calidad son correctos.',
+                'Precio %.1f%% por debajo de la media del último año (€%.2f). Confirmar que el proveedor y la calidad son correctos.',
                 abs($deviationPct),
                 $historicalAvg
             );
         } else {
             $recommendation = sprintf(
-                'Precio alineado con la media histÃ³rica (â‚¬%.2f).',
+                'Precio alineado con la media histórica (€%.2f).',
                 $historicalAvg
             );
         }

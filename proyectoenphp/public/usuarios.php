@@ -1064,7 +1064,7 @@ $h = static fn (string $value): string => htmlspecialchars($value, ENT_QUOTES | 
 </head>
 <body>
     <div class="layout">
-        <?php $activePage = 'usuarios'; include __DIR__ . '/partials/sidebar.php'; ?>
+        <?php $activePage = 'usuarios'; $role = $actorRoleRaw; include __DIR__ . '/partials/sidebar.php'; ?>
 
         <div class="main">
             <header>

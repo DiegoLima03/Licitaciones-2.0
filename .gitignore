@@ -9,21 +9,8 @@
 .idea/
 .vscode/
 
-# ── Proyecto antiguo (Next.js + FastAPI) ──────────────
-# Python
-__pycache__/
-*.py[cod]
-*.pyo
-.venv/
-venv/
-*.egg-info/
-.eggs/
-
-# Next.js / Node
-proyecto-antiguo/frontend/node_modules/
-proyecto-antiguo/frontend/.next/
-proyecto-antiguo/frontend/out/
-proyecto-antiguo/frontend/build/
+# ── Proyecto antiguo (ignorado por completo) ──────────
+proyecto-antiguo/
 
 # ── Proyecto PHP activo ───────────────────────────────
-# Nada que ignorar de momento (sin dependencias externas)
+proyectoenphp/sql/

@@ -1,196 +1,759 @@
 <?php
-
+// login.php — versión UI corporativa con redirección por dispositivo (solo móviles a versión móvil)
 declare(strict_types=1);
-
-session_start();
+ini_set('display_errors','1'); error_reporting(E_ALL);
 
 require_once __DIR__ . '/../config/database.php';
+require_once __DIR__ . '/auth.php';
+
+$pdo = null;
+try {
+  $pdo = Database::getConnection();
+} catch (Throwable $e) {
+  $pdo = null;
+}
+
+// (tabla profiles: id, email, password_hash, role, full_name)
+
+// ====== LOG A CSV (nuevo destino: ../private/logs_veratrack.log) ======
+// 3. Ruta base real
+// Apunta a c:/wamp64/www/private/
+$baseDir = realpath(__DIR__ . '/../private');
+if ($baseDir === false) {
+  $baseDir = __DIR__ . '/../private';
+}
+$LOGIN_TXT_PATH = rtrim($baseDir, "/\\") . DIRECTORY_SEPARATOR . 'logs_veratrack.log';
+
+// Asegura que la carpeta exista
+$logDir = dirname($LOGIN_TXT_PATH);
+if (!is_dir($logDir)) {
+  @mkdir($logDir, 0755, true);
+}
+
+function getClientIp(): string {
+  $candidates = [
+    'HTTP_CF_CONNECTING_IP',   // Cloudflare
+    'HTTP_X_FORWARDED_FOR',    // proxy
+    'HTTP_X_REAL_IP',
+    'REMOTE_ADDR'
+  ];
+
+  foreach ($candidates as $key) {
+    if (empty($_SERVER[$key])) continue;
+
+    if ($key === 'HTTP_X_FORWARDED_FOR') {
+      $parts = array_map('trim', explode(',', (string)$_SERVER[$key]));
+      foreach ($parts as $ip) {
+        if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
+      }
+    } else {
+      $ip = trim((string)$_SERVER[$key]);
+      if (filter_var($ip, FILTER_VALIDATE_IP)) return $ip;
+    }
+  }
+  return '0.0.0.0';
+}
+
+function geo_country_from_ip(string $ip): array {
+  // Localhost / loopback no tiene pais real
+  if ($ip === '::1' || $ip === '127.0.0.1') {
+    return ['Local', 'LOCAL'];
+  }
+
+  $url = 'https://free.freeipapi.com/api/json/' . rawurlencode($ip);
+  $ctx = stream_context_create([
+    'http' => [
+      'method'  => 'GET',
+      'timeout' => 2,
+      'header'  => "Accept: application/json\r\n",
+    ],
+  ]);
+
+  $raw = @file_get_contents($url, false, $ctx);
+  if ($raw === false) return ['', ''];
+
+  $data = json_decode($raw, true);
+  if (!is_array($data)) return ['', ''];
+
+  $countryName = (string)($data['countryName'] ?? '');
+  $countryCode = (string)($data['countryCode'] ?? '');
+
+  return [$countryName, $countryCode];
+}
+
+function append_login_txt(string $file, string $username, int $userId, bool $success, string $tipo = 'user'): void {
+  $date = date('Y-m-d H:i:s');
+  $ip   = getClientIp();
+  $ua   = $_SERVER['HTTP_USER_AGENT'] ?? '';
+  [$countryName, $countryCode] = geo_country_from_ip($ip);
+
+  // limpiar para que no rompa el CSV
+  $username = str_replace(["\r","\n","\t"], ' ', $username);
+  $ua       = str_replace(["\r","\n","\t"], ' ', $ua);
+
+  $isNew = (!file_exists($file) || @filesize($file) === 0);
+
+  $fh = @fopen($file, 'ab');
+  if ($fh === false) return;
+  if (@flock($fh, LOCK_EX)) {
+    if ($isNew) {
+      @fputcsv($fh, ['date','tipo','user_id','user','success','ip','ua','country','country_code'], ';');
+    }
+    @fputcsv($fh, [
+      $date,
+      $tipo,
+      $userId,
+      $username,
+      $success ? 1 : 0,
+      $ip,
+      $ua,
+      $countryName,
+      $countryCode
+    ], ';');
+    @flock($fh, LOCK_UN);
+  }
+  @fclose($fh);
+}
+
+// === NAVIDAD: activar/desactivar nieve ===
+// Opción A (recomendado): por rango de fechas (01/12 a 07/01)
+$SNOW_ENABLED = (date('n') == 12) || (date('n') == 1 && date('j') <= 7);
+
+// Opción B (manual): fuerza ON/OFF comentando lo anterior
+// $SNOW_ENABLED = true;  // ON
+// $SNOW_ENABLED = false; // OFF
+
+
+// === Control de login ===
+if (!defined('MAX_FAILED_LOGINS')) {
+  define('MAX_FAILED_LOGINS', 5);
+}
+
+/**
+ * Devuelve true SOLO para teléfonos.
+ *
+ * Reglas:
+ *  - iPhone / iPod → móvil
+ *  - Android con "Mobile" → móvil (teléfono)
+ *  - Windows Phone / IEMobile / Opera Mini / BlackBerry → móvil
+ *  - iPad, tablets Android (Android sin "Mobile"), y cualquier desktop → NO móvil
+ */
+function is_phone_device(): bool {
+  $ua = strtolower($_SERVER['HTTP_USER_AGENT'] ?? '');
+  if ($ua === '') return false;
+
+  // pistas de escritorio para evitar falsos positivos
+  $isDesktopHints = (
+      strpos($ua, 'windows nt') !== false
+      || strpos($ua, 'macintosh') !== false
+      || strpos($ua, 'x11') !== false
+  ) && strpos($ua, 'mobile') === false;
+
+  if ($isDesktopHints) return false;
+
+  // Teléfonos comunes
+  if (preg_match('/iphone|ipod|windows phone|iemobile|opera mini|blackberry|bb10/i', $ua)) {
+    return true;
+  }
+
+  // Android: solo si lleva "mobile" (tablets Android suelen ir sin "mobile")
+  if (strpos($ua, 'android') !== false && strpos($ua, 'mobile') !== false) {
+    return true;
+  }
+
+  // iPad/tablet NO son móviles aquí (queremos vista escritorio)
+  return false;
+}
+
+$requestedNext = sanitize_internal_path(
+  (string)($_POST['next'] ?? ($_GET['next'] ?? ($_SESSION['post_login_redirect'] ?? 'dashboard.php'))),
+  'dashboard.php'
+);
+if ($_SERVER['REQUEST_METHOD'] !== 'POST' && isset($_GET['next'])) {
+  $_SESSION['post_login_redirect'] = $requestedNext;
+}
+$postLoginTarget = sanitize_internal_path(
+  (string)($_SESSION['post_login_redirect'] ?? $requestedNext),
+  'dashboard.php'
+);
+
+$login_success = !empty($_SESSION['login_success']);
+$login_redirect_target = sanitize_internal_path(
+  (string)($_SESSION['login_redirect'] ?? $postLoginTarget),
+  'dashboard.php'
+);
+unset($_SESSION['login_success']);
+if ($login_success) {
+  unset($_SESSION['login_redirect'], $_SESSION['post_login_redirect']);
+}
+
+if (is_logged_in() && !$login_success) {
+  header('Location: ' . $postLoginTarget);
+  exit;
+}
 
 $error = null;
-
-// Si ya hay sesión iniciada, ir al dashboard.
-if (isset($_SESSION['user'])) {
-    header('Location: dashboard.php');
-    exit;
-}
+$usernameInput = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    $email = isset($_POST['email']) ? trim((string)$_POST['email']) : '';
-    $password = $_POST['password'] ?? '';
+  $usernameInput = trim((string)($_POST['username'] ?? ''));
+  $username = $usernameInput;
+  $password = (string)($_POST['password'] ?? '');
 
-    if ($email === '' || $password === '') {
-        $error = 'Email y contraseña son obligatorios.';
-    } else {
-        try {
-            $pdo = Database::getConnection();
-            $stmt = $pdo->prepare(
-                'SELECT id, email, password_hash, role, full_name
-                 FROM profiles
-                 WHERE email = :email
-                 LIMIT 1'
-            );
-            $stmt->execute([':email' => $email]);
-            $user = $stmt->fetch(\PDO::FETCH_ASSOC);
+  if (!($pdo instanceof PDO)) {
+    $error = 'No se pudo conectar a la base de datos.';
+  } elseif ($username === '' || $password === '') {
+    $error = 'Usuario y contraseña son obligatorios.';
+  } else {
+    try {
+      $stmt = $pdo->prepare("
+        SELECT id, email, password_hash, role, full_name,
+               COALESCE(intentos, 0) AS intentos,
+               COALESCE(bloqueado, 0) AS bloqueado
+        FROM profiles
+        WHERE email = ?
+        LIMIT 1
+      ");
+      $stmt->execute([$username]);
+      $user = $stmt->fetch(PDO::FETCH_ASSOC);
 
-            if ($user && isset($user['password_hash']) && password_verify($password, (string)$user['password_hash'])) {
-                unset($user['password_hash']);
-                $_SESSION['user'] = $user;
-                header('Location: dashboard.php');
-                exit;
-            }
+      if (!$user) {
+        usleep(200000);
+        append_login_txt($LOGIN_TXT_PATH, $username, 0, false, 'unknown');
+        $error = 'Usuario o contraseña incorrectos.';
+      } elseif ((int)$user['bloqueado'] === 1) {
+        append_login_txt($LOGIN_TXT_PATH, $username, 0, false, 'user_locked');
+        $error = 'Tu usuario está bloqueado por intentos fallidos. Contacta con un administrador.';
+      } elseif (verify_password_compat($password, (string)$user['password_hash'])) {
+        // Login OK — resetear intentos
+        $ok = $pdo->prepare("UPDATE profiles SET intentos = 0 WHERE id = :id");
+        $ok->execute([':id' => $user['id']]);
 
-            $error = 'Credenciales inválidas. Revisa tu email y contraseña.';
-        } catch (\Throwable $e) {
-            $error = 'Error al conectar con la base de datos: ' . $e->getMessage();
+        login_user([
+          'id'        => $user['id'],
+          'email'     => (string)$user['email'],
+          'full_name' => (string)($user['full_name'] ?? ''),
+          'role'      => (string)($user['role'] ?? ''),
+        ]);
+
+        $_SESSION['login_success'] = true;
+        $_SESSION['login_redirect'] = $postLoginTarget;
+
+        append_login_txt($LOGIN_TXT_PATH, (string)$user['email'], 0, true, 'user');
+
+        header('Location: login.php');
+        exit;
+      } else {
+        // Password incorrecto — incrementar intentos
+        $userId = $user['id'];
+        $intentosActuales = (int)($user['intentos'] ?? 0);
+        $nuevosIntentos = $intentosActuales + 1;
+        $seBloquea = ($nuevosIntentos >= MAX_FAILED_LOGINS) ? 1 : (int)$user['bloqueado'];
+
+        $upd = $pdo->prepare("
+          UPDATE profiles SET intentos = :intentos, bloqueado = :bloqueado WHERE id = :id
+        ");
+        $upd->execute([
+          ':intentos'  => $nuevosIntentos,
+          ':bloqueado' => $seBloquea,
+          ':id'        => $userId,
+        ]);
+
+        append_login_txt($LOGIN_TXT_PATH, (string)$user['email'], 0, false, 'user');
+
+        if ($seBloquea === 1 && (int)$user['bloqueado'] === 0) {
+          $error = 'Has alcanzado 5 intentos fallidos. Tu usuario ha sido bloqueado.';
+        } else {
+          $restantes = MAX_FAILED_LOGINS - $nuevosIntentos;
+          if ($restantes < 0) $restantes = 0;
+          $error = "Usuario o contraseña incorrectos. Intentos restantes: {$restantes}";
         }
+      }
+    } catch (Throwable $e) {
+      @file_put_contents(
+        __DIR__ . '/api_error.log',
+        date('c') . " [login] " . $e->getMessage() . "\n",
+        FILE_APPEND
+      );
+      $error = 'Error interno al validar credenciales.';
     }
+  }
 }
-
 ?>
-<!DOCTYPE html>
+
+<!doctype html>
 <html lang="es">
 <head>
-    <meta charset="UTF-8">
-    <title>Iniciar sesión</title>
-    <meta name="viewport" content="width=device-width, initial-scale=1">
-    <style>
-        * { box-sizing: border-box; }
-        body {
-            margin: 0;
-            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-            background: linear-gradient(135deg, #0f172a, #1e293b);
-            color: #0f172a;
-            display: flex;
-            min-height: 100vh;
-            align-items: center;
-            justify-content: center;
-        }
-        .card {
-            background: #f9fafb;
-            border-radius: 12px;
-            box-shadow: 0 20px 40px rgba(15, 23, 42, 0.35);
-            max-width: 420px;
-            width: 100%;
-            padding: 24px 28px 28px;
-        }
-        .card h1 {
-            margin: 0 0 4px;
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #0f172a;
-        }
-        .card p {
-            margin: 0 0 20px;
-            font-size: 0.9rem;
-            color: #6b7280;
-        }
-        label {
-            display: block;
-            margin-bottom: 6px;
-            font-size: 0.85rem;
-            font-weight: 500;
-            color: #374151;
-        }
-        input[type="email"],
-        input[type="password"] {
-            width: 100%;
-            padding: 9px 11px;
-            font-size: 0.95rem;
-            border-radius: 8px;
-            border: 1px solid #d1d5db;
-            background-color: #ffffff;
-            transition: border-color 0.15s, box-shadow 0.15s, background-color 0.15s;
-        }
-        input[type="email"]:focus,
-        input[type="password"]:focus {
-            outline: none;
-            border-color: #10b981;
-            box-shadow: 0 0 0 1px #10b98133;
-            background-color: #ffffff;
-        }
-        .field {
-            margin-bottom: 14px;
-        }
-        .btn {
-            width: 100%;
-            padding: 10px 14px;
-            border-radius: 9999px;
-            border: none;
-            cursor: pointer;
-            font-size: 0.95rem;
-            font-weight: 600;
-            background: linear-gradient(135deg, #10b981, #0ea5e9);
-            color: #f9fafb;
-            transition: transform 0.1s ease, box-shadow 0.1s ease, filter 0.1s ease;
-            box-shadow: 0 10px 25px rgba(16, 185, 129, 0.35);
-        }
-        .btn:hover {
-            filter: brightness(1.05);
-            box-shadow: 0 14px 30px rgba(16, 185, 129, 0.4);
-        }
-        .btn:active {
-            transform: translateY(1px);
-            box-shadow: 0 8px 20px rgba(15, 23, 42, 0.35);
-        }
-        .error {
-            margin-bottom: 14px;
-            padding: 8px 10px;
-            border-radius: 8px;
-            font-size: 0.85rem;
-            color: #b91c1c;
-            background-color: #fee2e2;
-            border: 1px solid #fecaca;
-        }
-        .footer-text {
-            margin-top: 14px;
-            text-align: center;
-            font-size: 0.8rem;
-            color: #9ca3af;
-        }
-    </style>
-    <link rel="stylesheet" href="assets/css/master-detail-theme.css">
+  <meta charset="utf-8">
+  <title>Acceso · Veraleza</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+
+  <!-- Bootstrap + Poppins -->
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;600&display=swap" rel="stylesheet">
+ <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+	    <link rel="icon" type="image/png" href="img/logo.png">
+	<link rel="manifest" href="/manifest.webmanifest?v=1">
+	<meta name="theme-color" content="#8E8B30">
+
+	<!-- Recomendado para iPhone/iPad -->
+	<link rel="apple-touch-icon" href="/img/pwa/apple-touch-icon.png?v=1">
+
+<meta name="theme-color" content="#7a7617">
+
+  <style>
+    /* Paleta Veraleza */
+    :root{
+      --vz-negro:#10180E;
+      --vz-marron1:#46331F;
+      --vz-marron2:#85725E;
+      --vz-crema:#E5E2DC;
+      --vz-verde:#8E8B30;
+    }
+    html,body{height:100%}
+    body{
+      font-family:'Poppins',sans-serif;
+      background: var(--vz-crema);
+      color: var(--vz-negro);
+		margin:0;
+		overflow:hidden;
+    }
+
+    /* Layout responsivo: columna única en móvil, split en >= md */
+    .login-wrap{
+      min-height:100%;
+      display:grid;
+      grid-template-columns: 1fr;
+    }
+    @media (min-width: 768px){
+      .login-wrap{
+        grid-template-columns: 1.1fr 1fr; /* imagen / formulario */
+      }
+    }
+
+    /* Panel imagen (oculto en xs si no cabe bien) */
+	.login-hero{
+	  position:relative;
+	  display:none;
+	  background: var(--vz-marron2);
+	  opacity:0;
+	}
+
+    @media (min-width:768px){
+		.login-hero{
+		  display:block;
+		  background: url('img/login-hero.jpg') center/cover no-repeat, var(--vz-marron2);
+		  animation: heroFadeIn .8s ease 0.15s forwards;
+		}
+
+      .login-hero::after{
+        content:"";
+        position:absolute; inset:0;
+        background: linear-gradient(135deg, rgba(16,24,14,.55), rgba(142,139,48,.35));
+      }
+      .brand-watermark{
+        position:absolute; left:2rem; bottom:2rem;
+        color:#fff; font-weight:600; letter-spacing:.5px;
+        text-shadow:0 1px 3px rgba(0,0,0,.4);
+      }
+    }
+
+    /* Panel formulario */
+    .login-card{
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding: clamp(1.25rem, 3vw, 2.5rem);
+    }
+	.card-ui{
+	  width:min(440px, 100%);
+	  background:#fff;
+	  border:0;
+	  border-radius:1rem;
+	  box-shadow:0 12px 28px rgba(16,24,14,.15);
+	  overflow:hidden;
+
+	  opacity:0;
+	  transform: scale(.96);
+	  animation: cardIn 0.7s cubic-bezier(.18,.89,.32,1.28) 0.2s forwards;
+	}
+
+    .card-ui .header{
+      display:flex; align-items:center; gap:.75rem;
+      padding:1rem 1.25rem;
+      background: linear-gradient(180deg, #fff, #f9f7f2);
+      border-bottom:1px solid #ece8df;
+    }
+    .brand-logo{
+      height:40px; width:auto;
+    }
+    .brand-title{
+      margin:0; font-weight:600; font-size:1.1rem; color:var(--vz-marron1);
+      line-height:1.1;
+    }
+
+    .card-ui .body{ padding:1.25rem; }
+    .form-label{ font-weight:600; color:var(--vz-marron1); }
+    .form-control{
+      border-radius:.75rem;
+      border-color:#e2ded6;
+      padding:.65rem .9rem;
+    }
+    .form-control:focus{
+      border-color: var(--vz-verde);
+      box-shadow: 0 0 0 .2rem rgba(142,139,48,.15);
+    }
+
+    /* Botón corporativo */
+    .btn-vz{
+      --bs-btn-bg: var(--vz-verde);
+      --bs-btn-border-color: var(--vz-verde);
+      --bs-btn-color:#fff;
+      --bs-btn-hover-bg:#7c7a2a;
+      --bs-btn-hover-border-color:#7c7a2a;
+      --bs-btn-focus-shadow-rgb:142,139,48;
+      border-radius:.75rem;
+      font-weight:600;
+      padding:.7rem 1rem;
+    }
+
+    /* Aviso/Error */
+    .alert-vz{
+      background:#fff7f7; border-color:#ffd3d3; color:#7a2a2a;
+      border-radius:.75rem;
+      padding:.5rem .75rem;
+    }
+
+    /* Pie */
+    .foot{
+      color:#6b665e; font-size:.85rem; text-align:center; padding:.75rem 1.25rem 1.25rem;
+    }
+    .foot a{ color:var(--vz-marron2); text-decoration:none }
+    .foot a:hover{ text-decoration:underline }
+  </style>
+  <style>
+ .btn-success{
+  background-color: var(--vz-verde) !important;
+  border-color: var(--vz-verde) !important;
+  color:#fff;
+  font-weight:600;
+  border-radius:.75rem;
+  padding:.7rem 1rem;
+  transition: background-color 120ms ease-in-out;
+}
+.btn-success:hover,
+.btn-success:focus{
+  background-color:#146c43 !important;
+  border-color:#146c43 !important;
+  box-shadow:none !important;
+}
+.btn-success:active{
+  background-color: var(--vz-verde) !important;
+  border-color: var(--vz-verde) !important;
+  transition: background-color 50ms ease-in-out;
+}
+
+/* ESTADO "LOGGING IN" */
+body.logging-in .card-ui{ animation: cardOut 0.45s ease-in forwards; }
+body.logging-in .login-hero{ animation: heroOut 0.5s ease-in forwards; }
+
+/* Overlay */
+.logging-overlay{
+  pointer-events:none;
+  position:fixed;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  z-index:10;
+  opacity:0;
+  transition: opacity .25s ease-in;
+}
+body.logging-in .logging-overlay{ opacity:1; }
+
+.logging-overlay-inner{
+  background:rgba(16,24,14,.25);
+  backdrop-filter:blur(3px);
+  border-radius:999px;
+  padding:.6rem 1.3rem;
+  display:flex;
+  align-items:center;
+  gap:.5rem;
+  color:#fff;
+  font-weight:600;
+  font-size:.9rem;
+  box-shadow:0 8px 24px rgba(0,0,0,.25);
+}
+
+.logging-logo{
+  width: 64px;
+  opacity: .95;
+  animation: veralezaRotate 1.6s ease-in-out infinite;
+  transform-origin:center;
+}
+
+/* KEYFRAMES */
+@keyframes cardIn{
+  0%{ opacity:0; transform: scale(.92); }
+  60%{ opacity:1; transform: scale(1.02); }
+  100%{ opacity:1; transform: scale(1); }
+}
+@keyframes heroFadeIn{
+  0%{ opacity:0; }
+  100%{ opacity:1; }
+}
+@keyframes cardOut{
+  0%{ opacity:1; transform: scale(1); }
+  100%{ opacity:0; transform: scale(.96); }
+}
+@keyframes heroOut{
+  0%{ opacity:1; }
+  100%{ opacity:0; }
+}
+@keyframes veralezaRotate{
+  0%{ transform: rotate(0deg) scale(1); }
+  40%{ transform: rotate(180deg) scale(1.03); }
+  60%{ transform: rotate(180deg) scale(1.03); }
+  100%{ transform: rotate(360deg) scale(1); }
+}
+
+	  /* =========================
+   COPOS DE NIEVE (NAVIDAD)
+   ========================= */
+.snow-layer{
+  position: fixed;
+  inset: 0;
+  z-index: 2;            /* por encima del fondo, por debajo del card */
+  pointer-events: none;  /* no bloquea clicks */
+  overflow: hidden;
+}
+
+/* Asegura que el formulario queda encima */
+.login-card{ position: relative; z-index: 3; }
+.login-hero{ position: relative; z-index: 1; }
+
+/* Copo individual */
+.snowflake{
+  position: absolute;
+  top: -10vh;
+  left: 0;
+  color: #ffffff;
+  opacity: 1;
+  will-change: transform;
+
+  /* SOMBRA AVANZADA */
+  text-shadow:
+    0 1px 2px rgba(0,0,0,.35),
+    0 3px 6px rgba(0,0,0,.25);
+
+  filter:
+    drop-shadow(0 3px 4px rgba(0,0,0,.35))
+    drop-shadow(0 6px 10px rgba(0,0,0,.20));
+
+  animation-name: snowFall, snowSway;
+  animation-timing-function: linear, ease-in-out;
+  animation-iteration-count: infinite, infinite;
+}
+
+
+
+/* Caída vertical */
+@keyframes snowFall{
+  0%   { transform: translate3d(0,-12vh,0); }
+  100% { transform: translate3d(0,112vh,0); }
+}
+
+/* Balanceo lateral */
+@keyframes snowSway{
+  0%,100% { margin-left: 0; }
+  50%     { margin-left: 28px; }
+}
+
+/* Reduce animaciones si el usuario lo pide */
+@media (prefers-reduced-motion: reduce){
+  .snowflake{ animation: none !important; }
+}
+	  
+  </style>
+  
 </head>
 <body>
-    <div class="card">
-        <h1>Iniciar sesión</h1>
-        <p>Introduce tu email y contraseña para acceder al panel de licitaciones.</p>
+<?php if (!empty($SNOW_ENABLED)): ?>
+  <div class="snow-layer" id="snowLayer" aria-hidden="true"></div>
+<?php endif; ?>
+	
+  <div class="login-wrap">
+    <!-- Lado imagen -->
+    <aside class="login-hero">
+      <div class="brand-watermark">
+        Gestión de licitaciones y precio · Veraleza
+      </div>
+    </aside>
 
-        <?php if ($error !== null): ?>
-            <div class="error" role="alert">
-                <?php echo htmlspecialchars($error, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>
-            </div>
-        <?php endif; ?>
+    <!-- Lado formulario -->
+    <main class="login-card">
+      <div class="card-ui">
+        <div class="header" style="display:flex; justify-content:center; align-items:center;">
+  <img src="img/logo_login.png" alt="Veraleza" class="brand-logo">
+</div>
 
-        <form method="post" action="login.php" autocomplete="on">
-            <div class="field">
-                <label for="email">Email</label>
-                <input
-                    type="email"
-                    id="email"
-                    name="email"
-                    required
-                    value="<?php echo isset($email) ? htmlspecialchars($email, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>"
-                >
-            </div>
 
-            <div class="field">
-                <label for="password">Contraseña</label>
-                <input
-                    type="password"
-                    id="password"
-                    name="password"
-                    required
-                >
-            </div>
+        <div class="body">
+			<?php if (!empty($_GET['error']) && $_GET['error'] === 'bloqueado'): ?>
+			  <div class="alert alert-vz mb-3">Tu usuario está bloqueado por intentos fallidos. Contacta con un administrador.</div>
+			<?php endif; ?>
+          <?php if (!empty($_GET['logout']) && $_GET['logout'] === '1'): ?>
+            <div class="alert alert-success mb-3">Sesión cerrada correctamente.</div>
+          <?php endif; ?>
 
-            <button type="submit" class="btn">Entrar</button>
-        </form>
+          <?php if ($error): ?>
+            <div class="alert alert-vz mb-3"><?=htmlspecialchars($error)?></div>
+          <?php endif; ?>
 
-        <div class="footer-text">
-            Proyecto licitaciones · PHP 8 &amp; MySQL
+          <form method="post" autocomplete="off" novalidate>
+            <input type="hidden" name="next" value="<?= htmlspecialchars($postLoginTarget, ENT_QUOTES, 'UTF-8') ?>">
+                      <div class="mb-3">
+  <label for="user" class="form-label">Email</label>
+  <div class="input-group">
+    <input id="user" name="username" type="email" class="form-control" placeholder="tu@email.com" value="<?= htmlspecialchars($usernameInput, ENT_QUOTES, 'UTF-8') ?>" required autofocus>
+	      <span class="input-group-text">
+      <i class="bi bi-person"></i>
+    </span>
+  </div>
+</div>
+
+<div class="mb-3">
+  <label for="pass" class="form-label">Contraseña</label>
+  <div class="input-group">
+    <input id="pass" type="password" name="password" class="form-control" required>
+    <button type="button" class="btn btn-outline-secondary" onclick="togglePass()" aria-label="Mostrar/Ocultar contraseña">
+      <i class="bi bi-eye-slash" id="togglePassIcon"></i>
+    </button>
+  </div>
+</div>
+
+            <button class="btn btn-success w-100 mb-2">Entrar</button>
+
+          </form>
         </div>
-    </div>
+
+        <div class="foot">
+          © <?=date('Y')?> Veraleza
+        </div>
+      </div>
+    </main>
+  </div>
+<div class="logging-overlay">
+  <div class="logging-overlay-inner">
+    <img src="img/logo.png" alt="Veraleza" class="logging-logo">
+    <span>Iniciando sesión...</span>
+  </div>
+</div>
+
+  <script>
+  function togglePass(){
+    const input = document.getElementById('pass');
+    const icon  = document.getElementById('togglePassIcon');
+    const isPwd = input.type === 'password';
+    input.type  = isPwd ? 'text' : 'password';
+    icon.classList.toggle('bi-eye-slash', !isPwd);
+    icon.classList.toggle('bi-eye', isPwd);
+  }
+  if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js');
+}
+
+  </script>
+	
+	<?php if (!empty($SNOW_ENABLED)): ?>
+<script>
+(function(){
+  const layer = document.getElementById('snowLayer');
+  if (!layer) return;
+
+	const COUNT = 18;
+	const MIN_SIZE = 12;
+	const MAX_SIZE = 26;
+	const MIN_DURATION = 9;
+	const MAX_DURATION = 18;
+
+
+  layer.innerHTML = '';
+
+  const rand = (min, max) => Math.random() * (max - min) + min;
+
+  for (let i = 0; i < COUNT; i++){
+    const flake = document.createElement('div');
+    flake.className = 'snowflake';
+    flake.textContent = '❄';
+
+    const size = rand(MIN_SIZE, MAX_SIZE);
+    const left = rand(0, 100);
+    const fallDuration = rand(MIN_DURATION, MAX_DURATION);
+    const swayDuration = rand(2.5, 5.5);
+    const delay = rand(-MAX_DURATION, 0);
+
+    flake.style.left = left + 'vw';
+    flake.style.fontSize = size + 'px';
+    flake.style.opacity = rand(0.35, 0.95).toFixed(2);
+    flake.style.animationDuration = fallDuration + 's, ' + swayDuration + 's';
+    flake.style.animationDelay = delay + 's, ' + rand(-5, 0) + 's';
+
+    layer.appendChild(flake);
+  }
+})();
+</script>
+<?php endif; ?>
+	
+	<?php if (!empty($login_success)): ?>
+<script>
+  document.addEventListener('DOMContentLoaded', function(){
+    document.body.classList.add('logging-in');
+    setTimeout(function(){
+      window.location.href = <?= json_encode($login_redirect_target) ?>;
+    }, 650);
+  });
+</script>
+<?php endif; ?>
+
+    <!-- Boton volver arriba -->
+    <button type="button" id="backToTopBtn" class="back-to-top" aria-label="Volver arriba">
+        <span aria-hidden="true" style="font-size:20px;line-height:1;">&#8593;</span>
+    </button>
+    <script>
+        (function () {
+            var btn = document.getElementById('backToTopBtn');
+            if (!btn) return;
+
+            var styleId = 'back-to-top-style';
+            if (!document.getElementById(styleId)) {
+                var style = document.createElement('style');
+                style.id = styleId;
+                style.textContent = '.back-to-top{position:fixed;right:18px;bottom:24px;width:44px;height:44px;border:none;border-radius:999px;background:#8E8B30;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 20px rgba(0,0,0,.25);opacity:0;visibility:hidden;transform:translateY(8px);transition:opacity .2s ease,transform .2s ease,visibility .2s ease;z-index:2200}.back-to-top.show{opacity:1;visibility:visible;transform:translateY(0)}.back-to-top:hover{background:#7c7a2a}.back-to-top:focus{outline:2px solid #fff;outline-offset:2px}@media (max-width:576px){.back-to-top{right:14px;bottom:120px}}';
+                document.head.appendChild(style);
+            }
+
+            function hasScrollableContent() {
+                var doc = document.documentElement;
+                var body = document.body;
+                var scrollHeight = Math.max(doc.scrollHeight, body.scrollHeight);
+                return scrollHeight > (window.innerHeight + 20);
+            }
+
+            function toggleBackToTop() {
+                var y = window.pageYOffset || document.documentElement.scrollTop;
+                btn.classList.toggle('show', y > 220 && hasScrollableContent());
+            }
+
+            btn.addEventListener('click', function () {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            });
+
+            window.addEventListener('scroll', toggleBackToTop, { passive: true });
+            window.addEventListener('resize', toggleBackToTop);
+            window.addEventListener('load', toggleBackToTop);
+            toggleBackToTop();
+        })();
+    </script>
 </body>
 </html>
-
-

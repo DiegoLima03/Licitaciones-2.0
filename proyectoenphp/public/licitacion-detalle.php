@@ -1089,13 +1089,8 @@ try {
                 $loadError = 'Licitacion no encontrada.';
             } else {
                 $tipoProcCfg = mb_strtoupper(trim((string)($licitacionActual['tipo_procedimiento'] ?? '')), 'UTF-8');
-                $isContratoDerivadoCfg = !empty($licitacionActual['id_licitacion_padre'])
-                    || $tipoProcCfg === 'CONTRATO_BASADO'
-                    || $tipoProcCfg === 'ESPECIFICO_SDA';
                 $estadoActualCfg = (int)($licitacionActual['id_estado'] ?? 0);
-                if ($isContratoDerivadoCfg) {
-                    $loadError = 'En contratos basados/especificos no se usan lotes.';
-                } elseif ($estadoActualCfg !== 3) {
+                if ($estadoActualCfg !== 3) {
                     $loadError = 'Solo puedes generar lotes en estado En analisis.';
                 }
                 $numLotes = isset($_POST['num_lotes']) ? (int)$_POST['num_lotes'] : 0;
@@ -1150,12 +1145,6 @@ try {
                 $loadError = 'Licitacion no encontrada.';
             } else {
                 $tipoProcCfg = mb_strtoupper(trim((string)($licitacionActual['tipo_procedimiento'] ?? '')), 'UTF-8');
-                $isContratoDerivadoCfg = !empty($licitacionActual['id_licitacion_padre'])
-                    || $tipoProcCfg === 'CONTRATO_BASADO'
-                    || $tipoProcCfg === 'ESPECIFICO_SDA';
-                if ($isContratoDerivadoCfg) {
-                    $loadError = 'En contratos basados/especificos no se usan lotes.';
-                }
                 $estadoActual = (int)($licitacionActual['id_estado'] ?? 0);
                 if ($loadError !== null) {
                     // Mensaje definido arriba.
@@ -1477,9 +1466,7 @@ try {
                         $isContratoDerivadoEstado = !empty($actual['id_licitacion_padre'])
                             || $tipoProcEstado === 'CONTRATO_BASADO'
                             || $tipoProcEstado === 'ESPECIFICO_SDA';
-                        $lotesEstadoItems = $isContratoDerivadoEstado
-                            ? []
-                            : decodeLotesConfig($actual['lotes_config'] ?? null);
+                        $lotesEstadoItems = decodeLotesConfig($actual['lotes_config'] ?? null);
                         $lotesPerdidosEstado = extractLostLotesFromItems($lotesEstadoItems);
                         $motivoPerdidaEstado = $postedMotivoPerdida;
 
@@ -1839,10 +1826,6 @@ if ($licitacion !== null) {
     $isContratoDerivadoTmp = !empty($licitacion['id_licitacion_padre'])
         || $tipoProcTmp === 'CONTRATO_BASADO'
         || $tipoProcTmp === 'ESPECIFICO_SDA';
-    if ($isContratoDerivadoTmp) {
-        $tieneLotesConfigTmp = false;
-        $lotesGanadosTmp = [];
-    }
     /** @var array<int, int> $idsProductoPartidasActivas */
     $idsProductoPartidasActivas = [];
     foreach ($partidasTmp as $p) {
@@ -2441,14 +2424,33 @@ if ($pendingPartidasSinProducto === []) {
             border: 1px solid rgba(133, 114, 94, 0.35);
             border-radius: 12px;
             background: #f8f6ef;
-            padding: 12px;
             margin-bottom: 14px;
         }
-        .derived-create-title {
-            margin: 0 0 8px;
+        .derived-create-toggle {
+            padding: 12px;
             font-size: 0.9rem;
             font-weight: 700;
             color: var(--vz-negro);
+            cursor: pointer;
+            list-style: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .derived-create-toggle::-webkit-details-marker {
+            display: none;
+        }
+        .derived-create-toggle::before {
+            content: '\25B6';
+            font-size: 0.65rem;
+            transition: transform 0.2s;
+            color: #85725e;
+        }
+        .derived-create-panel[open] > .derived-create-toggle::before {
+            transform: rotate(90deg);
+        }
+        .derived-create-panel > form {
+            padding: 0 12px 12px;
         }
         .derived-form-grid {
             display: grid;
@@ -2708,9 +2710,7 @@ if ($pendingPartidasSinProducto === []) {
                         $isContratoDerivado = !empty($licitacion['id_licitacion_padre'])
                             || $tipoProcedimientoUpper === 'CONTRATO_BASADO'
                             || $tipoProcedimientoUpper === 'ESPECIFICO_SDA';
-                        $estadoModalLotesItems = $isContratoDerivado
-                            ? []
-                            : decodeLotesConfig($licitacion['lotes_config'] ?? null);
+                        $estadoModalLotesItems = decodeLotesConfig($licitacion['lotes_config'] ?? null);
                         $estadoModalLotesPerdidos = extractLostLotesFromItems($estadoModalLotesItems);
                         $estadoModalTodosLotesPerdidos = $estadoModalLotesItems !== []
                             && count($estadoModalLotesPerdidos) === count($estadoModalLotesItems);
@@ -3179,10 +3179,6 @@ if ($pendingPartidasSinProducto === []) {
                         }
                         $lotesConfigItems = decodeLotesConfig($licitacion['lotes_config'] ?? null);
                         $lotesConfigurados = extractConfiguredLotes($licitacion['lotes_config'] ?? null);
-                        if ($isContratoDerivado) {
-                            $lotesConfigItems = [];
-                            $lotesConfigurados = [];
-                        }
                         $usaLotesPresupuesto = count($lotesConfigurados) > 0;
                         $puedeMarcarLotesGanados = $idEstado === 4;
                         /** @var array<string, bool> $lotesGanadosSet */
@@ -3598,10 +3594,10 @@ if ($pendingPartidasSinProducto === []) {
                                             Esta licitacion actua como carpeta. Gestiona aqui sus contratos derivados.
                                         </p>
                                     </div>
-                                    <div class="derived-create-panel">
-                                        <h3 class="derived-create-title">
+                                    <details class="derived-create-panel" <?php echo $derivedCreated ? '' : ''; ?>>
+                                        <summary class="derived-create-toggle">
                                             Nuevo <?php echo $tipoProcedimientoUpper === 'SDA' ? 'Especifico SDA' : 'Contrato Basado'; ?>
-                                        </h3>
+                                        </summary>
                                         <form method="post" action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id . '&tab=contratos-derivados', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>">
                                             <input type="hidden" name="form_tipo" value="crear_contrato_derivado">
                                             <div class="derived-form-grid">
@@ -3612,6 +3608,7 @@ if ($pendingPartidasSinProducto === []) {
                                                         name="nuevo_nombre"
                                                         type="text"
                                                         required
+                                                        placeholder="Ej: Servicio de limpieza centros educativos"
                                                         value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['nombre'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                     />
                                                 </div>
@@ -3629,6 +3626,7 @@ if ($pendingPartidasSinProducto === []) {
                                                         name="nuevo_numero_expediente"
                                                         type="text"
                                                         required
+                                                        placeholder="EXP-24-001"
                                                         value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['numero_expediente'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                     />
                                                 </div>
@@ -3641,6 +3639,7 @@ if ($pendingPartidasSinProducto === []) {
                                                         min="0"
                                                         step="0.01"
                                                         required
+                                                        placeholder="0,00"
                                                         value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['pres_maximo'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                     />
                                                 </div>
@@ -3705,6 +3704,7 @@ if ($pendingPartidasSinProducto === []) {
                                                         id="nuevo-gober"
                                                         name="nuevo_enlace_gober"
                                                         type="url"
+                                                        placeholder="https://gober.es/..."
                                                         value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['enlace_gober'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                     />
                                                 </div>
@@ -3714,12 +3714,13 @@ if ($pendingPartidasSinProducto === []) {
                                                         id="nuevo-sharepoint"
                                                         name="nuevo_enlace_sharepoint"
                                                         type="url"
+                                                        placeholder="https://... (carpeta o sitio con documentacion)"
                                                         value="<?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['enlace_sharepoint'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
                                                     />
                                                 </div>
                                                 <div class="derived-form-field full">
                                                     <label for="nuevo-descripcion">Notas / Descripcion</label>
-                                                    <textarea id="nuevo-descripcion" name="nuevo_descripcion" rows="3"><?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['descripcion'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></textarea>
+                                                    <textarea id="nuevo-descripcion" name="nuevo_descripcion" rows="2" placeholder="Notas internas, matices del pliego, alcance, etc."><?php echo htmlspecialchars((string)$nuevoDerivadoFormValues['descripcion'], ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?></textarea>
                                                 </div>
                                             </div>
                                             <div class="derived-form-actions">
@@ -3728,7 +3729,7 @@ if ($pendingPartidasSinProducto === []) {
                                                 </button>
                                             </div>
                                         </form>
-                                    </div>
+                                    </details>
                                     <?php if ($contratosDerivados === []): ?>
                                         <p class="derived-empty">
                                             Aun no hay contratos derivados para este expediente.
@@ -3788,32 +3789,26 @@ if ($pendingPartidasSinProducto === []) {
                                         Productos vinculados correctamente.
                                     </div>
                                 <?php endif; ?>
-                                <?php if ($isContratoDerivado || ($lotesConfigItems === [] && $idEstado === 3)): ?>
+                                <?php if ($lotesConfigItems === [] && $idEstado === 3): ?>
                                     <div class="lotes-config-panel">
-                                        <?php if ($isContratoDerivado): ?>
-                                            <div class="lotes-config-empty">
-                                                <span>En contratos basados o especificos no se usa configuracion de lotes.</span>
-                                            </div>
-                                        <?php else: ?>
-                                            <div class="lotes-config-empty">
-                                                <form
-                                                    method="post"
-                                                    action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id . '&tab=presupuesto', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
-                                                    class="lotes-config-form"
+                                        <div class="lotes-config-empty">
+                                            <form
+                                                method="post"
+                                                action="<?php echo htmlspecialchars($selfUrl . '?id=' . $id . '&tab=presupuesto', ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8'); ?>"
+                                                class="lotes-config-form"
+                                            >
+                                                <input type="hidden" name="form_tipo" value="guardar_lotes_config">
+                                                <input type="hidden" name="num_lotes" value="2" class="js-generate-lotes-count">
+                                                <button
+                                                    type="button"
+                                                    class="js-generate-lotes-flow"
+                                                    data-min="1"
+                                                    data-max="20"
                                                 >
-                                                    <input type="hidden" name="form_tipo" value="guardar_lotes_config">
-                                                    <input type="hidden" name="num_lotes" value="2" class="js-generate-lotes-count">
-                                                    <button
-                                                        type="button"
-                                                        class="js-generate-lotes-flow"
-                                                        data-min="1"
-                                                        data-max="20"
-                                                    >
-                                                        Generar lotes
-                                                    </button>
-                                                </form>
-                                            </div>
-                                        <?php endif; ?>
+                                                    Generar lotes
+                                                </button>
+                                            </form>
+                                        </div>
                                     </div>
                                 <?php endif; ?>
                                 <?php
@@ -3829,7 +3824,7 @@ if ($pendingPartidasSinProducto === []) {
                                     }
                                     $partidasActivas[] = $pActiva;
                                 }
-                                $splitByLotesCards = !$isContratoDerivado && count($lotesConfigurados) > 0;
+                                $splitByLotesCards = count($lotesConfigurados) > 0;
                                 $showLoteColumnPresupuesto = $usaLotesPresupuesto && !$splitByLotesCards;
                                 $budgetSaveLabel = $splitByLotesCards ? 'Guardar presupuesto' : 'Guardar toda la tabla';
                                 /** @var array<string, string> $lotesConfiguradosMap */
@@ -6012,6 +6007,42 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         });
         observer.observe(tbody, { childList: true });
+    });
+});
+
+// Validacion formulario contrato derivado: enlace Gober obligatorio si fecha presentacion es futura
+document.addEventListener('DOMContentLoaded', function () {
+    var form = document.querySelector('.derived-create-panel form');
+    if (!form) return;
+
+    var fechaPres = form.querySelector('[name="nuevo_fecha_presentacion"]');
+    var enlaceGober = form.querySelector('[name="nuevo_enlace_gober"]');
+
+    if (!fechaPres || !enlaceGober) return;
+
+    function clearValidity() {
+        enlaceGober.setCustomValidity('');
+    }
+
+    fechaPres.addEventListener('input', clearValidity);
+    fechaPres.addEventListener('change', clearValidity);
+    enlaceGober.addEventListener('input', clearValidity);
+    enlaceGober.addEventListener('change', clearValidity);
+
+    form.addEventListener('submit', function (e) {
+        clearValidity();
+
+        if (fechaPres.value) {
+            var today = new Date();
+            today.setHours(0, 0, 0, 0);
+            var fechaPresDate = new Date(fechaPres.value + 'T00:00:00');
+            if (!Number.isNaN(fechaPresDate.getTime()) && fechaPresDate > today && enlaceGober.value.trim() === '') {
+                e.preventDefault();
+                enlaceGober.setCustomValidity('El enlace Gober es obligatorio cuando la fecha de presentacion es futura.');
+                enlaceGober.reportValidity();
+                return;
+            }
+        }
     });
 });
 </script>

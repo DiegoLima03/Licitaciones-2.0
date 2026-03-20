@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find /c/wamp64/www/licitaciones -type f \\\\\\(-name *.sql -o -name *.dump -o -name *.bak \\\\\\))",
+      "Bash(grep -r tbl_albaranes_lineas /c/wamp64/www/licitaciones/proyectoenphp --include=*.sql --include=*.php)",
+      "Read(//c/wamp64/**)",
+      "Bash(python -c \":*)",
+      "Bash(grep -r tbl_albaranes_lineas /c/wamp64/www/licitaciones/proyectoenphp --include=*.php)",
+      "Bash(find /c/wamp64/www/licitaciones/proyectoenphp -type f \\\\\\(-name *.sql -o -name *schema* -o -name *migration* \\\\\\))",
+      "Bash(ls c:/wamp64/www/licitaciones/proyectoenphp/public/*.php)",
+      "Bash(php -r \":*)",
+      "Bash(c:/wamp64/bin/php/php8.2.26/php.exe -r \":*)"
+    ]
+  }
+}
