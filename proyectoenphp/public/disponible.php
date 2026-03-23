@@ -328,14 +328,15 @@ function fmtN($v): string
             overflow: auto;
             border-radius: 8px;
             flex: 1; min-height: 0;
+            transform: translateZ(0);
         }
-        table { width: max-content; min-width: 100%; border-collapse: collapse; font-size: 0.82rem; background: #0a1020; }
-        thead tr { background: #8e8b30; }
-        thead { position: sticky; top: 0; z-index: 2; }
+        table { width: max-content; min-width: 100%; border-collapse: separate; border-spacing: 0; font-size: 0.82rem; background: #0a1020; }
         th {
+            position: sticky; top: 0; z-index: 4;
             padding: 9px 10px; font-size: 0.72rem; text-transform: uppercase;
             letter-spacing: .04em; color: #10180e; font-weight: 700;
             white-space: nowrap; text-align: left; background: #8e8b30;
+            border-bottom: 2px solid #6b6824;
         }
         td { padding: 8px 10px; border-bottom: 1px solid #1f2937; color: #cbd5e1; vertical-align: middle; white-space: nowrap; }
         tbody tr { cursor: pointer; }
@@ -431,6 +432,63 @@ function fmtN($v): string
             .fg-3, .fg-4 { grid-template-columns: 1fr; }
             .fg-col2, .fg-col3, .fg-col4 { grid-column: span 1; }
         }
+        /* ── Columna sticky ── */
+        .col-sticky {
+            position: sticky !important;
+            left: 0 !important;
+            z-index: 3;
+            min-width: 200px;
+            max-width: 260px;
+        }
+        thead .col-sticky { z-index: 6 !important; background: var(--vz-verde) !important; }
+        tbody .col-sticky { background: var(--vz-blanco) !important; }
+        tbody tr:hover .col-sticky,
+        tbody tr.row-active .col-sticky { background: #f0efdf !important; }
+        .col-sticky::after {
+            content: '';
+            position: absolute;
+            top: 0; bottom: 0; right: -6px;
+            width: 6px;
+            background: linear-gradient(90deg, rgba(70,51,31,.12), transparent);
+            pointer-events: none;
+        }
+        /* ── Toggle de columnas ── */
+        .col-toggles {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            margin-bottom: 12px;
+            align-items: center;
+        }
+        .col-toggles-label {
+            font-size: 0.72rem;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            color: #94a3b8;
+            margin-right: 4px;
+        }
+        .col-toggle-btn {
+            border: 1px solid #334155;
+            border-radius: 9999px;
+            background: #1e293b;
+            color: #cbd5e1;
+            font-size: 0.72rem;
+            font-weight: 600;
+            padding: 4px 11px;
+            cursor: pointer;
+            transition: background 120ms ease, border-color 120ms ease, color 120ms ease;
+            white-space: nowrap;
+            user-select: none;
+        }
+        .col-toggle-btn:hover { background: #334155; }
+        .col-toggle-btn.is-active {
+            background: #8e8b30;
+            border-color: #8e8b30;
+            color: #e5e2dc;
+        }
+        table [data-group].col-hidden { display: none; }
+
         @media (max-width: 768px) {
             .layout { flex-direction: column; }
             .sidebar { width: 100%; flex-direction: row; align-items: center; }
@@ -530,31 +588,42 @@ function fmtN($v): string
                     <span class="count-badge"><?php echo count($rows); ?> producto<?php echo count($rows) !== 1 ? 's' : ''; ?></span>
                 </form>
 
+                <!-- Toggle de columnas -->
+                <div class="col-toggles" id="colToggles">
+                    <span class="col-toggles-label">Columnas:</span>
+                    <button type="button" class="col-toggle-btn is-active" data-target="ident">Identificaci&oacute;n</button>
+                    <button type="button" class="col-toggle-btn is-active" data-target="precios">Precios</button>
+                    <button type="button" class="col-toggle-btn is-active" data-target="tarifas">Tarifas</button>
+                    <button type="button" class="col-toggle-btn is-active" data-target="logistica">Log&iacute;stica</button>
+                    <button type="button" class="col-toggle-btn is-active" data-target="produccion">Producci&oacute;n</button>
+                    <button type="button" class="col-toggle-btn is-active" data-target="pedidos">Pedidos</button>
+                </div>
+
                 <!-- Tabla -->
                 <div class="table-wrap">
                     <table>
                         <thead>
                             <tr>
-                                <th>Producto / Descripci&oacute;n</th>
-                                <th>C&oacute;d. RACH</th>
-                                <th>Formato</th>
-                                <th class="td-right">P. Coste</th>
-                                <th class="td-right">Dto %</th>
-                                <th class="td-right">P. Coste Final</th>
-                                <th class="td-right">P. x Unid</th>
-                                <th class="td-right">T5% Dir.</th>
-                                <th class="td-right">T10%</th>
-                                <th class="td-right">T15%</th>
-                                <th class="td-right">T25%</th>
-                                <th class="td-center">Zona</th>
-                                <th class="td-center">Disp.</th>
-                                <th class="td-right">Ud. Prod.</th>
-                                <th>Productor</th>
-                                <th>Sem. Prod.</th>
-                                <th class="td-right">Ud/Piso</th>
-                                <th class="td-right">Ud/CC</th>
-                                <th class="td-right">Pedido Ud</th>
-                                <th class="td-right">Total Ud</th>
+                                <th class="col-sticky">Producto / Descripci&oacute;n</th>
+                                <th data-group="ident">C&oacute;d. RACH</th>
+                                <th data-group="ident">Formato</th>
+                                <th data-group="precios" class="td-right">P. Coste</th>
+                                <th data-group="precios" class="td-right">Dto %</th>
+                                <th data-group="precios" class="td-right">P. Coste Final</th>
+                                <th data-group="precios" class="td-right">P. x Unid</th>
+                                <th data-group="tarifas" class="td-right">T5% Dir.</th>
+                                <th data-group="tarifas" class="td-right">T10%</th>
+                                <th data-group="tarifas" class="td-right">T15%</th>
+                                <th data-group="tarifas" class="td-right">T25%</th>
+                                <th data-group="logistica" class="td-center">Zona</th>
+                                <th data-group="logistica" class="td-center">Disp.</th>
+                                <th data-group="logistica" class="td-right">Ud. Prod.</th>
+                                <th data-group="produccion">Productor</th>
+                                <th data-group="produccion">Sem. Prod.</th>
+                                <th data-group="logistica" class="td-right">Ud/Piso</th>
+                                <th data-group="logistica" class="td-right">Ud/CC</th>
+                                <th data-group="pedidos" class="td-right">Pedido Ud</th>
+                                <th data-group="pedidos" class="td-right">Total Ud</th>
                                 <th class="td-right">Acciones</th>
                             </tr>
                         </thead>
@@ -570,36 +639,36 @@ function fmtN($v): string
 
                         ?>
                             <tr onclick="openModal(<?php echo $rowId; ?>)">
-                                <td style="max-width:240px;overflow:hidden;text-overflow:ellipsis;font-weight:600;color:#e2e8f0;">
+                                <td class="col-sticky" style="max-width:240px;overflow:hidden;text-overflow:ellipsis;font-weight:600;">
                                     <?php echo $h($row['descripcion_rach'] ?: ($row['descripcion'] ?: '—')); ?>
                                 </td>
-                                <td style="color:#94a3b8;"><?php echo $h($row['codigo_rach'] ?? ''); ?></td>
-                                <td><?php echo $h($row['formato'] ?? ''); ?></td>
-                                <td class="td-right"><?php echo fmtEur(isset($row['precio_coste_productor']) ? (float)$row['precio_coste_productor'] : null); ?></td>
-                                <td class="td-right" style="color:#94a3b8;"><?php echo $row['descuento_productor'] !== null ? $h($row['descuento_productor']) . '%' : '&mdash;'; ?></td>
-                                <td class="td-right"><?php echo fmtEur(isset($row['precio_coste_final']) ? (float)$row['precio_coste_final'] : null); ?></td>
-                                <td class="td-right" style="font-weight:700;color:#e2e8f0;"><?php echo fmtEur(isset($row['precio_x_unid']) ? (float)$row['precio_x_unid'] : null); ?></td>
-                                <td class="td-right"><?php echo fmtEur(isset($row['precio_t5_directo']) ? (float)$row['precio_t5_directo'] : null); ?></td>
-                                <td class="td-right"><?php echo fmtEur(isset($row['precio_t10']) ? (float)$row['precio_t10'] : null); ?></td>
-                                <td class="td-right"><?php echo fmtEur(isset($row['precio_t15']) ? (float)$row['precio_t15'] : null); ?></td>
-                                <td class="td-right"><?php echo fmtEur(isset($row['precio_t25']) ? (float)$row['precio_t25'] : null); ?></td>
-                                <td class="td-center">
+                                <td data-group="ident" style="color:#94a3b8;"><?php echo $h($row['codigo_rach'] ?? ''); ?></td>
+                                <td data-group="ident"><?php echo $h($row['formato'] ?? ''); ?></td>
+                                <td data-group="precios" class="td-right"><?php echo fmtEur(isset($row['precio_coste_productor']) ? (float)$row['precio_coste_productor'] : null); ?></td>
+                                <td data-group="precios" class="td-right" style="color:#94a3b8;"><?php echo $row['descuento_productor'] !== null ? $h($row['descuento_productor']) . '%' : '&mdash;'; ?></td>
+                                <td data-group="precios" class="td-right"><?php echo fmtEur(isset($row['precio_coste_final']) ? (float)$row['precio_coste_final'] : null); ?></td>
+                                <td data-group="precios" class="td-right" style="font-weight:700;color:#e2e8f0;"><?php echo fmtEur(isset($row['precio_x_unid']) ? (float)$row['precio_x_unid'] : null); ?></td>
+                                <td data-group="tarifas" class="td-right"><?php echo fmtEur(isset($row['precio_t5_directo']) ? (float)$row['precio_t5_directo'] : null); ?></td>
+                                <td data-group="tarifas" class="td-right"><?php echo fmtEur(isset($row['precio_t10']) ? (float)$row['precio_t10'] : null); ?></td>
+                                <td data-group="tarifas" class="td-right"><?php echo fmtEur(isset($row['precio_t15']) ? (float)$row['precio_t15'] : null); ?></td>
+                                <td data-group="tarifas" class="td-right"><?php echo fmtEur(isset($row['precio_t25']) ? (float)$row['precio_t25'] : null); ?></td>
+                                <td data-group="logistica" class="td-center">
                                     <?php if (!empty($row['zona'])): ?>
                                     <span class="badge badge-zona"><?php echo $h($row['zona']); ?></span>
                                     <?php else: echo '&mdash;'; endif; ?>
                                 </td>
-                                <td class="td-center">
+                                <td data-group="logistica" class="td-center">
                                     <span class="badge <?php echo $disp ? 'badge-si' : 'badge-no'; ?>">
                                         <?php echo $disp ? 'S&Iacute;' : 'NO'; ?>
                                     </span>
                                 </td>
-                                <td class="td-right" style="font-weight:700;"><?php echo fmtN($row['unids_disponibles'] ?? null); ?></td>
-                                <td><?php echo $h($row['nombre_productor'] ?? ''); ?></td>
-                                <td style="color:#94a3b8;"><?php echo $h($row['fecha_sem_produccion'] ?? ''); ?></td>
-                                <td class="td-right"><?php echo fmtN($row['unids_x_piso'] ?? null); ?></td>
-                                <td class="td-right"><?php echo fmtN($row['unids_x_cc'] ?? null); ?></td>
-                                <td class="td-right" style="font-weight:700;color:#7dd3fc;"><?php echo fmtN($row['pedido_x_unid'] ?? null); ?></td>
-                                <td class="td-right" style="font-weight:700;"><?php echo fmtN($row['total_unids_x_linea'] ?? null); ?></td>
+                                <td data-group="logistica" class="td-right" style="font-weight:700;"><?php echo fmtN($row['unids_disponibles'] ?? null); ?></td>
+                                <td data-group="produccion"><?php echo $h($row['nombre_productor'] ?? ''); ?></td>
+                                <td data-group="produccion" style="color:#94a3b8;"><?php echo $h($row['fecha_sem_produccion'] ?? ''); ?></td>
+                                <td data-group="logistica" class="td-right"><?php echo fmtN($row['unids_x_piso'] ?? null); ?></td>
+                                <td data-group="logistica" class="td-right"><?php echo fmtN($row['unids_x_cc'] ?? null); ?></td>
+                                <td data-group="pedidos" class="td-right" style="font-weight:700;color:#7dd3fc;"><?php echo fmtN($row['pedido_x_unid'] ?? null); ?></td>
+                                <td data-group="pedidos" class="td-right" style="font-weight:700;"><?php echo fmtN($row['total_unids_x_linea'] ?? null); ?></td>
                                 <td class="td-right" onclick="event.stopPropagation()">
                                     <button class="btn btn-edit" onclick="openModal(<?php echo $rowId; ?>)">Editar</button>
                                     <button class="btn btn-danger" style="margin-left:4px;"
@@ -1017,6 +1086,55 @@ function confirmDelete(id, nombre) {
     document.getElementById('delete-id').value = id;
     document.getElementById('delete-form').submit();
 }
+
+// ── Toggle de grupos de columnas ──
+(function () {
+    var container = document.getElementById('colToggles');
+    if (!container) return;
+
+    var STORAGE_KEY = 'disponible_col_groups';
+    var buttons = container.querySelectorAll('.col-toggle-btn');
+
+    var saved = null;
+    try { saved = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch (e) {}
+
+    function applyGroup(group, visible) {
+        var cells = document.querySelectorAll('[data-group="' + group + '"]');
+        for (var i = 0; i < cells.length; i++) {
+            if (visible) {
+                cells[i].classList.remove('col-hidden');
+            } else {
+                cells[i].classList.add('col-hidden');
+            }
+        }
+    }
+
+    function saveState() {
+        var state = {};
+        for (var i = 0; i < buttons.length; i++) {
+            state[buttons[i].getAttribute('data-target')] = buttons[i].classList.contains('is-active');
+        }
+        try { localStorage.setItem(STORAGE_KEY, JSON.stringify(state)); } catch (e) {}
+    }
+
+    if (saved && typeof saved === 'object') {
+        for (var i = 0; i < buttons.length; i++) {
+            var group = buttons[i].getAttribute('data-target');
+            var isVisible = saved[group] !== false;
+            buttons[i].classList.toggle('is-active', isVisible);
+            applyGroup(group, isVisible);
+        }
+    }
+
+    for (var i = 0; i < buttons.length; i++) {
+        buttons[i].addEventListener('click', function () {
+            var group = this.getAttribute('data-target');
+            var isActive = this.classList.toggle('is-active');
+            applyGroup(group, isActive);
+            saveState();
+        });
+    }
+})();
 </script>
 
 </body>

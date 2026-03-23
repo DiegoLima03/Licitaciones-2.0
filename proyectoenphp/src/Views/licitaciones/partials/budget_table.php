@@ -30,6 +30,16 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
 
 ?>
 
+<style>
+  /* Desviación de precios – colores del programa antiguo */
+  .dev-ok   { background: rgba(142,139,48,.12) !important; }
+  .dev-ok .dev-input   { color: #5a7a10 !important; font-weight: 700; }
+  .dev-down { background: rgba(212,168,48,.12) !important; }
+  .dev-down .dev-input { color: #92700c !important; font-weight: 700; }
+  .dev-up   { background: rgba(200,60,50,.12) !important; }
+  .dev-up .dev-input   { color: #b91c1c !important; font-weight: 700; }
+</style>
+
 <form
   action="/licitaciones/<?php echo $idLicitacion; ?>/presupuesto"
   method="POST"
@@ -64,6 +74,16 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
               $pvu    = (float)($producto['pvu'] ?? 0);
               $pcu    = (float)($producto['pcu'] ?? 0);
               $beneficio = $pvu - $pcu;
+            ?>
+            <?php
+              // ── Desviación PVU vs PMAXU (lógica programa antiguo, umbral 10%) ──
+              $devCls = '';
+              if ($showPmaxu && $pmaxu > 0 && $pvu > 0) {
+                  $devPct = (($pvu - $pmaxu) / $pmaxu) * 100;
+                  if ($devPct > 10)       { $devCls = 'dev-up'; }    // rojo  – PVU >10% por encima de PMAXU
+                  elseif ($devPct < -10)   { $devCls = 'dev-down'; }  // ámbar – PVU >10% por debajo de PMAXU
+                  else                     { $devCls = 'dev-ok'; }    // verde – dentro del ±10%
+              }
             ?>
             <tr class="hover:bg-slate-50">
               <td class="min-w-[280px] py-2 pl-4 pr-2 align-middle">
@@ -105,19 +125,21 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
                     value="<?php echo $pmaxu > 0 ? htmlspecialchars((string)$pmaxu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>"
                     class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"
                     placeholder="0"
+                    data-role="pmaxu"
                   />
                 </td>
               <?php endif; ?>
 
-              <td class="py-2 pr-2 text-right align-middle">
+              <td class="py-2 pr-2 text-right align-middle <?php echo $devCls; ?>">
                 <input
                   type="number"
                   step="any"
                   min="0"
                   name="productos[<?php echo $index; ?>][pvu]"
                   value="<?php echo $pvu > 0 ? htmlspecialchars((string)$pvu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>"
-                  class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"
+                  class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded dev-input"
                   placeholder="0"
+                  data-role="pvu"
                 />
               </td>
 
@@ -130,11 +152,12 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
                   value="<?php echo $pcu > 0 ? htmlspecialchars((string)$pcu, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') : ''; ?>"
                   class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"
                   placeholder="0"
+                  data-role="pcu"
                 />
               </td>
 
               <td class="py-2 pr-2 text-right align-middle">
-                <span class="<?php
+                <span data-role="beneficio" class="<?php
                   echo $beneficio > 0
                     ? 'font-medium text-emerald-600'
                     : ($beneficio < 0 ? 'font-medium text-red-600' : 'text-slate-500');
@@ -249,6 +272,22 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
   // Índice incremental para nuevas filas
   var newIndex = 1;
 
+  function updateDeviation(row) {
+    var pvuInput = row.querySelector('input[data-role="pvu"]');
+    var pmaxuInput = row.querySelector('input[data-role="pmaxu"]');
+    if (!pvuInput) return;
+    var td = pvuInput.closest('td');
+    td.classList.remove('dev-ok', 'dev-down', 'dev-up');
+    if (!pmaxuInput) return;
+    var pvu = parseFloat(pvuInput.value.replace(',', '.')) || 0;
+    var pmaxu = parseFloat(pmaxuInput.value.replace(',', '.')) || 0;
+    if (pmaxu <= 0 || pvu <= 0) return;
+    var devPct = ((pvu - pmaxu) / pmaxu) * 100;
+    if (devPct > 10)       { td.classList.add('dev-up'); }
+    else if (devPct < -10) { td.classList.add('dev-down'); }
+    else                   { td.classList.add('dev-ok'); }
+  }
+
   function attachBenefitListeners(row) {
     var pvuInput = row.querySelector('input[data-role="pvu"]');
     var pcuInput = row.querySelector('input[data-role="pcu"]');
@@ -260,10 +299,16 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
       var pcu = parseFloat(pcuInput.value.replace(',', '.')) || 0;
       var benef = pvu - pcu;
       beneficioSpan.textContent = benef.toFixed(2).replace('.', ',') + ' €';
+      updateDeviation(row);
     }
 
     pvuInput.addEventListener('input', recalc);
     pcuInput.addEventListener('input', recalc);
+
+    var pmaxuInput = row.querySelector('input[data-role="pmaxu"]');
+    if (pmaxuInput) {
+      pmaxuInput.addEventListener('input', function () { updateDeviation(row); });
+    }
   }
 
   // Añadir listeners a filas existentes
@@ -297,7 +342,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
     // PMAXU
     if (showPmaxu) {
       cells += '<td class="py-2 pr-2 text-right align-middle">';
-      cells += '<input type="number" step="any" min="0" name="productos[' + key + '][pmaxu]"';
+      cells += '<input type="number" step="any" min="0" name="productos[' + key + '][pmaxu]" data-role="pmaxu"';
       cells += ' class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"';
       cells += ' placeholder="0">';
       cells += '</td>';
@@ -306,7 +351,7 @@ $showUnidades = !in_array($idTipo, [2, 4], true);
     // PVU
     cells += '<td class="py-2 pr-2 text-right align-middle">';
     cells += '<input type="number" step="any" min="0" name="productos[' + key + '][pvu]" data-role="pvu"';
-    cells += ' class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-slate-900 text-right focus:bg-slate-50 focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded"';
+    cells += ' class="w-full min-w-0 border-0 bg-transparent px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-emerald-500 rounded dev-input"';
     cells += ' placeholder="0">';
     cells += '</td>';
 

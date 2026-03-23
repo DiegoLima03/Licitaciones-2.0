@@ -1312,6 +1312,139 @@ final class AnalyticsRepository extends BaseRepository
     }
 
     /**
+     * Media ponderada con decaimiento exponencial.
+     *
+     * Fuentes: albaranes VENTA (2 años), precios referencia (2 años),
+     *          detalle licitaciones activas.
+     *
+     * Peso = cantidad × 2^(-días / halfLifeDays)
+     *   - halfLife 90 días: un dato de hace 3 meses pesa la mitad que uno de hoy.
+     *   - Las fuentes sin cantidad usan cantidad = 1.
+     *
+     * @return array{weighted_avg: float, sample_count: int, sources: int, oldest_days: int, newest_days: int}|null
+     */
+    public function getWeightedHistoricalPrice(int $idProducto, float $halfLifeDays = 90.0): ?array
+    {
+        $twoYearsAgo = (new \DateTimeImmutable('now'))->sub(new \DateInterval('P730D'))->format('Y-m-d');
+        $today = (new \DateTimeImmutable('now'))->format('Y-m-d');
+
+        /** @var list<array{pvu: float, qty: float, days: int, source: string}> */
+        $points = [];
+
+        // ── 1. Albaranes VENTA (últimos 2 años) ──
+        $sqlAlb = sprintf(
+            'SELECT al.pvu, al.cantidad, a.fecha_albaran
+             FROM %s al
+             INNER JOIN %s a ON a.id_albaran = al.id_albaran
+             WHERE a.tipo_albaran = \'VENTA\'
+               AND al.id_producto = :pid
+               AND al.pvu IS NOT NULL
+               AND al.cantidad > 0
+               AND a.fecha_albaran >= :since',
+            self::TABLE_ALBARANES_LINEAS,
+            self::TABLE_ALBARANES
+        );
+        $stmtAlb = $this->pdo->prepare($sqlAlb);
+        $stmtAlb->execute([':pid' => $idProducto, ':since' => $twoYearsAgo]);
+        foreach ($stmtAlb->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+            $fecha = $this->normalizeDateString($r['fecha_albaran'] ?? null);
+            $days = $fecha !== null
+                ? max(0, (int)((strtotime($today) - strtotime($fecha)) / 86400))
+                : 365;
+            $points[] = [
+                'pvu'    => (float)$r['pvu'],
+                'qty'    => max(1.0, (float)$r['cantidad']),
+                'days'   => $days,
+                'source' => 'albaran',
+            ];
+        }
+
+        // ── 2. Precios referencia (últimos 2 años) ──
+        if ($this->hasPreciosReferencia()) {
+            $sqlRef = sprintf(
+                'SELECT pvu, fecha_presupuesto
+                 FROM %s
+                 WHERE %s AND id_producto = :pid AND pvu IS NOT NULL',
+                self::TABLE_PRECIOS_REFERENCIA,
+                $this->getRlsClause()
+            );
+            $paramsRef = $this->getRlsParams();
+            $paramsRef[':pid'] = $idProducto;
+            $stmtRef = $this->pdo->prepare($sqlRef);
+            $stmtRef->execute($paramsRef);
+            foreach ($stmtRef->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+                $fecha = $this->normalizeDateString($r['fecha_presupuesto'] ?? null);
+                if ($fecha !== null && $fecha < $twoYearsAgo) {
+                    continue;
+                }
+                $days = $fecha !== null
+                    ? max(0, (int)((strtotime($today) - strtotime($fecha)) / 86400))
+                    : 365;
+                $points[] = [
+                    'pvu'    => (float)$r['pvu'],
+                    'qty'    => 1.0,
+                    'days'   => $days,
+                    'source' => 'referencia',
+                ];
+            }
+        }
+
+        // ── 3. Detalle licitaciones activas (peso menor, sin fecha → 180 días) ──
+        $sqlDet = sprintf(
+            'SELECT d.pvu
+             FROM %s d
+             WHERE %s AND d.id_producto = :pid AND d.activo = 1 AND d.pvu IS NOT NULL AND d.pvu > 0',
+            self::TABLE_DETALLE,
+            $this->getRlsClause()
+        );
+        $paramsDet = $this->getRlsParams();
+        $paramsDet[':pid'] = $idProducto;
+        $stmtDet = $this->pdo->prepare($sqlDet);
+        $stmtDet->execute($paramsDet);
+        foreach ($stmtDet->fetchAll(\PDO::FETCH_ASSOC) ?: [] as $r) {
+            $points[] = [
+                'pvu'    => (float)$r['pvu'],
+                'qty'    => 1.0,
+                'days'   => 180, // sin fecha concreta → peso intermedio
+                'source' => 'licitacion',
+            ];
+        }
+
+        if ($points === []) {
+            return null;
+        }
+
+        // ── Cálculo media ponderada con decaimiento exponencial ──
+        $lambda = log(2) / $halfLifeDays; // factor de decaimiento
+        $sumWeightedPrice = 0.0;
+        $sumWeights = 0.0;
+        $sources = [];
+        $oldestDays = 0;
+        $newestDays = PHP_INT_MAX;
+
+        foreach ($points as $pt) {
+            $weight = $pt['qty'] * exp(-$lambda * $pt['days']);
+            $sumWeightedPrice += $pt['pvu'] * $weight;
+            $sumWeights += $weight;
+            $sources[$pt['source']] = true;
+            if ($pt['days'] > $oldestDays) { $oldestDays = $pt['days']; }
+            if ($pt['days'] < $newestDays) { $newestDays = $pt['days']; }
+        }
+
+        if ($sumWeights <= 0.0) {
+            return null;
+        }
+
+        return [
+            'weighted_avg'  => round($sumWeightedPrice / $sumWeights, 4),
+            'sample_count'  => count($points),
+            'sources'       => count($sources),
+            'oldest_days'   => $oldestDays,
+            'newest_days'   => $newestDays === PHP_INT_MAX ? 0 : $newestDays,
+        ];
+    }
+
+    /**
      * Devuelve mapa id_estado -> nombre_estado.
      *
      * @return array<int|string, string>

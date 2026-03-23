@@ -4794,6 +4794,7 @@ if ($pendingPartidasSinProducto === []) {
 </body>
 <script>
 const PRODUCTOS_SEARCH_URL = <?php echo json_encode($productosSearchUrl, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
+const PRICE_CHECK_URL = <?php echo json_encode($scriptBasePath . '/price-check.php', JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES); ?>;
 
 // Tabs simples en cliente para navegar entre Presupuesto / Ejecucion / Remaining
 document.addEventListener('DOMContentLoaded', function () {
@@ -4942,6 +4943,52 @@ document.addEventListener('DOMContentLoaded', function () {
         return Math.round(base * factor * 100) / 100;
     }
 
+    function updateDeviation(row) {
+        if (!row) return;
+        var pvuEl = row.querySelector('input[name*="[pvu]"]');
+        if (!pvuEl) return;
+        var td = pvuEl.closest('td');
+        td.classList.remove('dev-ok', 'dev-down', 'dev-up');
+        // Eliminar tooltip anterior
+        var oldTip = td.querySelector('.dev-tooltip');
+        if (oldTip) oldTip.remove();
+
+        var pvu = parseNumber(pvuEl.value);
+        var avg = parseFloat(row.getAttribute('data-weighted-avg') || '0');
+        if (avg <= 0 || pvu <= 0) return;
+
+        var devPct = ((pvu - avg) / avg) * 100;
+        var cls, label;
+        if (devPct > 10)       { cls = 'dev-up';   label = '+' + devPct.toFixed(1) + '% vs media ' + avg.toFixed(2) + '€'; }
+        else if (devPct < -10) { cls = 'dev-down'; label = devPct.toFixed(1) + '% vs media ' + avg.toFixed(2) + '€'; }
+        else                   { cls = 'dev-ok';   label = 'OK (' + devPct.toFixed(1) + '%) media ' + avg.toFixed(2) + '€'; }
+        td.classList.add(cls);
+
+        // Tooltip visual con la info
+        var tip = document.createElement('span');
+        tip.className = 'dev-tooltip';
+        tip.textContent = label;
+        td.appendChild(tip);
+    }
+
+    function fetchWeightedAvg(row, idProducto) {
+        if (!idProducto || idProducto <= 0) return;
+        var xhr = new XMLHttpRequest();
+        xhr.open('GET', PRICE_CHECK_URL + '?id_producto=' + encodeURIComponent(idProducto), true);
+        xhr.onreadystatechange = function () {
+            if (xhr.readyState !== 4 || xhr.status !== 200) return;
+            try {
+                var data = JSON.parse(xhr.responseText);
+                if (data.has_data && data.weighted_avg > 0) {
+                    row.setAttribute('data-weighted-avg', String(data.weighted_avg));
+                    row.setAttribute('data-sample-count', String(data.sample_count || 0));
+                    updateDeviation(row);
+                }
+            } catch (e) { /* silencioso */ }
+        };
+        xhr.send();
+    }
+
     function recalcRowDiscountPvu(row) {
         if (!isTipoDescuento || !row) return;
         var rowTable = row.closest('.budget-lines-table-editable');
@@ -4961,6 +5008,7 @@ document.addEventListener('DOMContentLoaded', function () {
             rows.forEach(function (row) {
                 recalcRowDiscountPvu(row);
                 updateNewRowImporte(row);
+                updateDeviation(row);
             });
         });
     }
@@ -5030,11 +5078,13 @@ document.addEventListener('DOMContentLoaded', function () {
             field.addEventListener('input', function () {
                 recalcRowDiscountPvu(row);
                 updateNewRowImporte(row);
+                updateDeviation(row);
                 ensureTrailingEmptyRows();
             });
             field.addEventListener('change', function () {
                 recalcRowDiscountPvu(row);
                 updateNewRowImporte(row);
+                updateDeviation(row);
                 ensureTrailingEmptyRows();
             });
         });
@@ -5179,6 +5229,18 @@ document.addEventListener('DOMContentLoaded', function () {
 
     tables.forEach(function (table) {
         var tbody = table.querySelector('tbody');
+        // Filas existentes: listeners + fetch precio histórico
+        var existingRows = Array.prototype.slice.call(tbody.querySelectorAll('tr:not(.js-budget-new-row)'));
+        existingRows.forEach(function (row) {
+            var pvuEl = row.querySelector('input[name*="[pvu]"]');
+            function onchange() { updateDeviation(row); }
+            if (pvuEl) { pvuEl.addEventListener('input', onchange); pvuEl.addEventListener('change', onchange); }
+            // Consultar media ponderada histórica
+            var hiddenId = row.querySelector('input[name*="[id_producto]"]');
+            var idProd = hiddenId ? parseInt(hiddenId.value, 10) : 0;
+            if (idProd > 0) { fetchWeightedAvg(row, idProd); }
+        });
+        // Filas nuevas
         getNewRowsInTbody(tbody).forEach(function (row) {
             bindNewRow(row);
             recalcRowDiscountPvu(row);
@@ -5864,6 +5926,10 @@ document.addEventListener('DOMContentLoaded', function () {
             hiddenId.value = String(it.id_producto || '');
             clearBox();
             input.dispatchEvent(new Event('change', { bubbles: true }));
+            // Consultar precio histórico ponderado
+            if (it.id_producto && typeof fetchWeightedAvg === 'function') {
+                fetchWeightedAvg(row, it.id_producto);
+            }
         }
 
         function renderSuggestions(items) {

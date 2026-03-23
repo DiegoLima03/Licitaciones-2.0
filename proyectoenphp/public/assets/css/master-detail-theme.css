@@ -1242,6 +1242,23 @@ body > .card {
     padding: 14px 10px !important;
 }
 
+/* ── Desviación de precios PVU vs PMAXU (colores programa antiguo) ── */
+.budget-cell-num.dev-ok .budget-input   { border-color: var(--vz-verde) !important; background: #f7f8eb !important; color: #4a5a10 !important; font-weight: 700; }
+.budget-cell-num.dev-down .budget-input { border-color: #d4a830 !important; background: #fff9ea !important; color: #7a5d08 !important; font-weight: 700; }
+.budget-cell-num.dev-up .budget-input   { border-color: #c83c32 !important; background: #fff4f2 !important; color: #8d2b23 !important; font-weight: 700; }
+.dev-tooltip {
+    display: block;
+    font-size: 0.65rem;
+    font-weight: 600;
+    line-height: 1;
+    padding: 2px 0;
+    white-space: nowrap;
+    text-align: right;
+}
+.dev-ok .dev-tooltip   { color: #4a5a10; }
+.dev-down .dev-tooltip { color: #7a5d08; }
+.dev-up .dev-tooltip   { color: #8d2b23; }
+
 .btn-row-save,
 .btn-row-delete,
 .btn-save-budget-table {
